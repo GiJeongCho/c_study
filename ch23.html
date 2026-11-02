@@ -1,0 +1,1584 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ch23 실전 자료구조 · C언어 금융 IT 마스터</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+KR:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-ch="ch23">
+<header class="topbar">
+  <button class="menu-btn" type="button" aria-expanded="false" aria-controls="sidebar">목차</button>
+  <a class="brand" href="index.html"><b>C</b>금융 IT 마스터</a>
+  <span class="where"></span>
+  <span class="progress"></span>
+</header>
+<div class="layout">
+<nav id="sidebar" class="sidebar" aria-label="과정 목차"></nav>
+<div class="page">
+<main class="content">
+
+<header class="ch-head">
+  <p class="eyebrow">PART 2 · 금융 IT 베테랑 트랙 · CHAPTER</p>
+  <div class="bignum">23</div>
+  <h1>실전 자료구조</h1>
+  <p class="lede">C에는 리스트도, 맵도, 정렬된 컨테이너도 내장되어 있지 않습니다. 그래서 금융 C 개발자는 거래 대기열, 전문 수신 버퍼, 계좌 캐시, 주문 호가창을 직접 만들거나 사내 공통 라이브러리를 이해하고 써야 합니다. 이 장에서는 면접 단골인 기본 자료구조를 "교과서 예제"가 아니라 금융 시스템의 실제 쓰임새에 맞춰 구현하고, 각 선택이 성능과 정확성에 어떤 영향을 주는지 따져 봅니다.</p>
+  <div class="goals"><p class="goals-title">이 장에서 배울 것</p><ul>
+    <li>배열과 연결 리스트의 메모리 구조 차이와 장단점을 설명합니다.</li>
+    <li>단일 연결 리스트의 삽입·삭제를 포인터의 포인터 기법으로 깔끔하게 구현합니다.</li>
+    <li>더미 노드를 둔 이중 연결 리스트로 O(1) 삭제(주문 취소)를 구현합니다.</li>
+    <li>스택으로 괄호 짝 검사를, 원형 큐로 TCP 전문 수신 버퍼와 메시지 경계 처리를 구현합니다.</li>
+    <li>계좌번호 → 계좌 정보 해시 테이블을 체이닝·리사이즈까지 구현하고, 해시 함수와 로드 팩터를 이해합니다.</li>
+    <li>이진 탐색, <code>qsort</code>/<code>bsearch</code>, 퀵 정렬과 병합 정렬을 구현·비교하고 비교 함수의 함정을 피합니다.</li>
+    <li>안정 정렬이 거래 정렬에서 왜 중요한지 실험으로 확인합니다.</li>
+    <li>이진 힙 우선순위 큐로 가격-시간 우선 원칙의 주문 체결을 구현합니다.</li>
+  </ul></div>
+</header>
+
+<h2 id="s23-1"><span class="num">23-1</span>연결 리스트, 스택, 큐</h2>
+
+<p>자료구조를 고를 때 던져야 할 질문은 항상 같습니다. "어떤 연산이 가장 자주 일어나는가? 데이터는 몇 개이고, 개수가 얼마나 변하는가? 순서가 중요한가?" 이 절에서는 순서가 있는 데이터를 담는 세 가지 기본 구조를 금융 업무에 대입해 봅니다.</p>
+
+<h3 id="s23-1-1">배열과 연결 리스트</h3>
+
+<p>배열은 원소를 <strong>메모리에 연속으로</strong> 놓습니다. 그래서 i번째 원소의 주소를 <code>시작 주소 + i × 원소 크기</code>로 바로 계산할 수 있고(임의 접근 O(1)), CPU 캐시가 연속된 메모리를 미리 읽어 오므로 순회도 매우 빠릅니다. 대신 중간에 끼워 넣거나 빼려면 뒤의 원소를 모두 밀거나 당겨야 하고(O(n)), 크기를 늘리려면 새 공간을 잡아 통째로 복사해야 합니다.</p>
+
+<p>연결 리스트는 각 원소(노드)가 <strong>다음 노드의 주소</strong>를 품고 있어 메모리 여기저기에 흩어져 있어도 순서를 유지합니다. 삽입·삭제 위치의 노드 포인터를 알고 있으면 포인터 몇 개만 바꾸면 되므로 O(1)입니다. 대신 i번째 원소를 찾으려면 처음부터 따라가야 하고(O(n)), 노드마다 포인터 공간이 추가로 들며, 메모리가 흩어져 캐시 효율이 나쁩니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 250" width="700" role="img" aria-label="배열은 연속 메모리, 연결 리스트는 흩어진 노드를 포인터로 연결">
+  <text x="20" y="26" class="small bold">배열: 연속된 메모리</text>
+  <rect class="hl" x="20" y="38" width="90" height="40"/><text x="65" y="63" text-anchor="middle" class="small mono">tx[0]</text>
+  <rect class="hl" x="110" y="38" width="90" height="40"/><text x="155" y="63" text-anchor="middle" class="small mono">tx[1]</text>
+  <rect class="hl" x="200" y="38" width="90" height="40"/><text x="245" y="63" text-anchor="middle" class="small mono">tx[2]</text>
+  <rect class="hl" x="290" y="38" width="90" height="40"/><text x="335" y="63" text-anchor="middle" class="small mono">tx[3]</text>
+  <text x="65" y="94" text-anchor="middle" class="small mono mute">0x1000</text>
+  <text x="155" y="94" text-anchor="middle" class="small mono mute">0x1020</text>
+  <text x="245" y="94" text-anchor="middle" class="small mono mute">0x1040</text>
+  <text x="335" y="94" text-anchor="middle" class="small mono mute">0x1060</text>
+  <text x="400" y="63" class="small">주소 = 시작 + i × 32 → 임의 접근 O(1)</text>
+  <text x="20" y="136" class="small bold">연결 리스트: 흩어진 노드 + 다음 주소</text>
+  <rect class="box" x="20" y="150" width="70" height="40"/><text x="55" y="175" text-anchor="middle" class="small">tx A</text>
+  <rect class="hl2" x="90" y="150" width="50" height="40"/><text x="115" y="175" text-anchor="middle" class="small mono">next</text>
+  <rect class="box" x="230" y="190" width="70" height="40"/><text x="265" y="215" text-anchor="middle" class="small">tx B</text>
+  <rect class="hl2" x="300" y="190" width="50" height="40"/><text x="325" y="215" text-anchor="middle" class="small mono">next</text>
+  <rect class="box" x="440" y="150" width="70" height="40"/><text x="475" y="175" text-anchor="middle" class="small">tx C</text>
+  <rect class="hl2" x="510" y="150" width="50" height="40"/><text x="535" y="175" text-anchor="middle" class="small mono">NULL</text>
+  <path class="arrow" d="M140 170 C 180 170, 190 210, 228 210"/>
+  <path class="arrow" d="M350 210 C 390 210, 400 170, 438 170"/>
+  <text x="115" y="142" text-anchor="middle" class="small mono mute">0x7f20</text>
+  <text x="265" y="246" text-anchor="middle" class="small mono mute">0x5a10</text>
+  <text x="475" y="142" text-anchor="middle" class="small mono mute">0x9c80</text>
+  <text x="590" y="175" class="small">i번째 접근 O(n)</text>
+  <text x="590" y="195" class="small">삽입·삭제 O(1)</text>
+</svg>
+<figcaption>그림 23-1 배열과 연결 리스트의 메모리 배치 — 연속성이 주는 속도와 포인터가 주는 유연성</figcaption>
+</figure>
+
+<div class="tbl"><table>
+<thead><tr><th>연산</th><th>배열(동적 배열 포함)</th><th>단일 연결 리스트</th><th>이중 연결 리스트</th></tr></thead>
+<tbody>
+<tr><td>i번째 접근</td><td>O(1)</td><td>O(n)</td><td>O(n)</td></tr>
+<tr><td>맨 앞 삽입/삭제</td><td>O(n)</td><td>O(1)</td><td>O(1)</td></tr>
+<tr><td>맨 뒤 삽입</td><td>분할 상환 O(1)</td><td>O(1) (tail 포인터 유지 시)</td><td>O(1)</td></tr>
+<tr><td>노드 포인터를 알 때 그 노드 삭제</td><td>O(n)</td><td>O(n) (이전 노드를 찾아야 함)</td><td><strong>O(1)</strong></td></tr>
+<tr><td>값으로 검색</td><td>O(n), 정렬 시 O(log n)</td><td>O(n)</td><td>O(n)</td></tr>
+<tr><td>메모리 오버헤드</td><td>거의 없음</td><td>노드당 포인터 1개 + malloc 헤더</td><td>노드당 포인터 2개 + malloc 헤더</td></tr>
+<tr><td>캐시 효율</td><td>매우 좋음</td><td>나쁨</td><td>나쁨</td></tr>
+</tbody></table></div>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 실무에서는 생각보다 배열이 자주 이길까?</p>
+<p>현대 CPU에서 메인 메모리 접근은 L1 캐시 접근보다 수십~수백 배 느립니다. 배열은 한 번 메모리를 읽을 때 캐시 라인(보통 64바이트)에 이웃 원소가 함께 올라오고, 하드웨어 프리페처가 다음 영역을 미리 가져옵니다. 연결 리스트는 다음 노드의 주소를 읽어야 다음 위치를 알 수 있어(pointer chasing) 매 노드마다 캐시 미스가 날 수 있습니다. 그래서 원소가 수천 개 이하라면 "중간 삽입을 위해 배열을 밀어내는 비용"이 "리스트를 따라가는 비용"보다 싼 경우가 많습니다. 연결 리스트는 <strong>노드 포인터를 이미 들고 있어서 O(1) 삭제가 필요한 경우</strong>(주문 취소, LRU 캐시)나, 노드가 다른 구조(해시 테이블 체인)에 함께 소속되는 경우에 진가를 발휘합니다.</p>
+</div>
+
+<h3 id="s23-1-2">단일 연결 리스트의 삽입과 삭제</h3>
+
+<p>당일 거래 내역을 시간순으로 유지하는 리스트를 만들어 보겠습니다. 거래가 늦게 도착할 수도 있으므로(재전송, 대외기관 지연) 맨 뒤에 붙이는 것이 아니라 <strong>시간순 위치에 삽입</strong>합니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 220" width="700" role="img" aria-label="단일 연결 리스트에 새 노드를 삽입하는 두 단계">
+  <rect class="box" x="20" y="40" width="110" height="40" rx="4"/><text x="75" y="65" text-anchor="middle" class="small mono">09:05 #1</text>
+  <rect class="box" x="250" y="40" width="110" height="40" rx="4"/><text x="305" y="65" text-anchor="middle" class="small mono">09:30 #3</text>
+  <rect class="box" x="480" y="40" width="110" height="40" rx="4"/><text x="535" y="65" text-anchor="middle" class="small mono">10:15 #4</text>
+  <path class="dash" d="M130 60 H 248"/>
+  <path class="arrow-m" d="M360 60 H 478"/>
+  <text x="190" y="52" text-anchor="middle" class="small warn-t">③ 끊김</text>
+  <rect class="hl" x="135" y="140" width="110" height="40" rx="4"/><text x="190" y="165" text-anchor="middle" class="small mono">09:12 #2 (새)</text>
+  <path class="arrow" d="M245 160 C 280 160, 300 120, 300 82"/>
+  <text x="330" y="130" class="small acc">① n-&gt;next = *pp</text>
+  <path class="arrow" d="M75 80 C 75 120, 110 160, 133 160"/>
+  <text x="20" y="130" class="small acc">② *pp = n</text>
+  <text x="350" y="206" text-anchor="middle" class="small mute">순서가 중요: ①을 먼저 하지 않으면 #3 이후 노드를 잃어버린다</text>
+</svg>
+<figcaption>그림 23-2 연결 리스트 삽입 — 새 노드가 다음 노드를 먼저 가리키고, 그다음 이전 링크를 새 노드로 바꾼다</figcaption>
+</figure>
+
+<p>연결 리스트 코드에서 가장 지저분한 부분은 "맨 앞에 삽입/삭제하는 경우"를 따로 처리하는 것입니다. <strong>포인터의 포인터</strong>(<code>tx_node **pp</code>)를 쓰면 "head 변수"와 "이전 노드의 next 필드"를 똑같이 "다음을 가리키는 칸"으로 다룰 수 있어 특수 경우가 사라집니다.</p>
+
+<figure class="code"><figcaption>txlist.c — 시간순 거래 리스트</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;stdint.h&gt;
+#include &lt;stdbool.h&gt;
+
+typedef struct tx_node {
+    int     id;                 /* 거래 일련번호 */
+    int     hhmmss;             /* 거래 시각 */
+    int64_t amount;             /* 원 (음수: 출금) */
+    struct tx_node *next;
+} tx_node;
+
+static tx_node *node_new(int id, int hhmmss, int64_t amount)
+{
+    tx_node *n = malloc(sizeof *n);
+    if (!n) return NULL;
+    n-&gt;id = id; n-&gt;hhmmss = hhmmss; n-&gt;amount = amount; n-&gt;next = NULL;
+    return n;
+}
+
+/* 시간순 삽입. pp는 "다음 노드를 가리키는 칸"의 주소 (처음엔 head 변수의 주소) */
+static void insert_sorted(tx_node **head, tx_node *n)
+{
+    tx_node **pp = head;
+    while (*pp &amp;&amp; (*pp)-&gt;hhmmss &lt;= n-&gt;hhmmss)   /* 같은 시각이면 뒤로 → 도착 순서 보존 */
+        pp = &amp;(*pp)-&gt;next;
+    n-&gt;next = *pp;                               /* ① 새 노드가 뒤를 먼저 잡고 */
+    *pp = n;                                     /* ② 앞의 링크를 새 노드로 */
+}
+
+static bool remove_by_id(tx_node **head, int id)
+{
+    for (tx_node **pp = head; *pp; pp = &amp;(*pp)-&gt;next) {
+        if ((*pp)-&gt;id == id) {
+            tx_node *victim = *pp;
+            *pp = victim-&gt;next;                  /* 앞 링크가 다음 노드를 가리키게 */
+            free(victim);                        /* 링크를 끊은 뒤 해제 */
+            return true;
+        }
+    }
+    return false;
+}
+
+static void print_list(const tx_node *h)
+{
+    puts("[전체]");
+    for (; h; h = h-&gt;next)
+        printf("  %06d #%d %10lld\n", h-&gt;hhmmss, h-&gt;id, (long long)h-&gt;amount);
+}
+
+static void free_all(tx_node **head)
+{
+    tx_node *p = *head;
+    while (p) {
+        tx_node *next = p-&gt;next;                 /* 해제 전에 다음을 저장 (UAF 방지) */
+        free(p);
+        p = next;
+    }
+    *head = NULL;
+}
+
+int main(void)
+{
+    tx_node *head = NULL;
+    const struct { int id, t; int64_t amt; } in[] = {
+        { 3, 93000, 50000 }, { 1, 90500, 10000 }, { 2, 91200, -3000 }, { 4, 101500, 200000 }
+    };
+    for (size_t i = 0; i &lt; 4; i++) {
+        tx_node *n = node_new(in[i].id, in[i].t, in[i].amt);
+        if (!n) { free_all(&amp;head); return 1; }
+        insert_sorted(&amp;head, n);
+    }
+    print_list(head);
+    printf("#2 삭제: %s\n", remove_by_id(&amp;head, 2) ? "성공" : "실패(없음)");
+    printf("#9 삭제: %s\n", remove_by_id(&amp;head, 9) ? "성공" : "실패(없음)");
+    print_list(head);
+    free_all(&amp;head);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>[전체]
+  090500 #1      10000
+  091200 #2      -3000
+  093000 #3      50000
+  101500 #4     200000
+#2 삭제: 성공
+#9 삭제: 실패(없음)
+[전체]
+  090500 #1      10000
+  093000 #3      50000
+  101500 #4     200000</pre></figure>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 170" width="700" role="img" aria-label="연결 리스트에서 노드 삭제: 앞 링크를 다음 노드로 바꾸고 해제">
+  <rect class="box" x="20" y="50" width="110" height="40" rx="4"/><text x="75" y="75" text-anchor="middle" class="small mono">#1</text>
+  <rect class="bad" x="250" y="50" width="110" height="40" rx="4"/><text x="305" y="75" text-anchor="middle" class="small mono">#2 (victim)</text>
+  <rect class="box" x="480" y="50" width="110" height="40" rx="4"/><text x="535" y="75" text-anchor="middle" class="small mono">#3</text>
+  <path class="dash" d="M130 70 H 248"/>
+  <path class="dash" d="M360 70 H 478"/>
+  <path class="arrow" d="M75 50 C 75 10, 535 10, 535 48"/>
+  <text x="305" y="22" text-anchor="middle" class="small acc">① *pp = victim-&gt;next</text>
+  <text x="305" y="118" text-anchor="middle" class="small warn-t">② free(victim)</text>
+  <text x="350" y="152" text-anchor="middle" class="small mute">①보다 ②를 먼저 하면 victim-&gt;next를 해제된 메모리에서 읽는 use-after-free</text>
+</svg>
+<figcaption>그림 23-3 연결 리스트 삭제 — 링크를 먼저 우회시키고, 그다음 해제한다</figcaption>
+</figure>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 — 해제하면서 순회</p>
+<p><code>for (p = head; p; p = p-&gt;next) free(p);</code>는 <code>free(p)</code> 뒤에 증감식에서 <code>p-&gt;next</code>를 읽으므로 use-after-free입니다. 대부분의 환경에서 "우연히" 동작하기 때문에 오래 숨어 있다가 할당기가 바뀌거나 ASan을 켰을 때 드러납니다. 위 <code>free_all</code>처럼 <strong>다음 포인터를 먼저 저장</strong>한 뒤 해제합니다.</p>
+</div>
+
+<div class="ex"><p class="ex-title">예제 23-1 <span class="lv">난이도 ★★☆</span></p>
+<p>단일 연결 리스트를 뒤집는 함수 <code>void reverse(tx_node **head)</code>를 추가 메모리 없이 작성하십시오(면접 단골).</p>
+<details><summary>정답과 해설 보기</summary>
+<p>세 개의 포인터(이전, 현재, 다음)를 두고, 현재 노드의 next를 이전 노드로 돌려 놓으며 한 칸씩 전진합니다. 다음 노드를 먼저 저장하지 않으면 링크를 돌리는 순간 나머지 리스트를 잃어버립니다.</p>
+<figure class="code good"><figcaption>정답 코드</figcaption>
+<pre><code class="language-c">void reverse(tx_node **head)
+{
+    tx_node *prev = NULL, *cur = *head;
+    while (cur) {
+        tx_node *next = cur-&gt;next;   /* 1. 다음을 저장 */
+        cur-&gt;next = prev;            /* 2. 방향을 뒤집고 */
+        prev = cur;                  /* 3. 한 칸 전진 */
+        cur = next;
+    }
+    *head = prev;                    /* 마지막 노드가 새 head */
+}</code></pre></figure>
+<p>시간 O(n), 추가 공간 O(1)입니다.</p>
+</details></div>
+
+<h3 id="s23-1-3">이중 연결 리스트와 더미 노드</h3>
+
+<p>증권 시스템의 호가창에서 같은 가격의 주문들은 <strong>도착 순서대로</strong> 줄을 섭니다(시간 우선). 고객이 주문을 취소하면 줄 중간에서 그 주문을 빼야 합니다. 주문 번호 → 노드 포인터를 해시 테이블로 바로 찾을 수 있다면, 이중 연결 리스트는 이전 노드도 알고 있으므로 <strong>O(1)에 삭제</strong>할 수 있습니다.</p>
+
+<p>이중 연결 리스트 구현을 단순하게 만드는 기법이 <strong>더미(센티널) 노드</strong>입니다. 데이터가 없는 노드 하나를 원형으로 두면, 리스트가 비어 있어도 "앞·뒤 노드가 항상 존재"하므로 NULL 검사와 맨 앞/맨 뒤 특수 처리가 모두 사라집니다. 리눅스 커널의 <code>list_head</code>가 바로 이 구조입니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 230" width="700" role="img" aria-label="더미 노드를 둔 원형 이중 연결 리스트">
+  <rect class="hl2" x="20" y="80" width="110" height="50" rx="6"/>
+  <text x="75" y="102" text-anchor="middle" class="small bold">더미(head)</text>
+  <text x="75" y="120" text-anchor="middle" class="small mute">데이터 없음</text>
+  <rect class="box" x="190" y="80" width="110" height="50" rx="6"/><text x="245" y="110" text-anchor="middle" class="small mono">O1</text>
+  <rect class="box" x="360" y="80" width="110" height="50" rx="6"/><text x="415" y="110" text-anchor="middle" class="small mono">O2</text>
+  <rect class="box" x="530" y="80" width="110" height="50" rx="6"/><text x="585" y="110" text-anchor="middle" class="small mono">O3</text>
+  <path class="arrow" d="M130 95 H 188"/><path class="arrow-m" d="M188 115 H 132"/>
+  <path class="arrow" d="M300 95 H 358"/><path class="arrow-m" d="M358 115 H 302"/>
+  <path class="arrow" d="M470 95 H 528"/><path class="arrow-m" d="M528 115 H 472"/>
+  <path class="arrow" d="M640 100 C 690 100, 690 30, 380 30 C 70 30, 75 50, 75 78"/>
+  <path class="arrow-m" d="M75 130 C 75 200, 585 200, 585 132"/>
+  <text x="380" y="22" text-anchor="middle" class="small acc">마지막.next = 더미</text>
+  <text x="330" y="218" text-anchor="middle" class="small mute">더미.prev = 마지막 (빈 리스트면 더미.next = 더미.prev = 더미)</text>
+</svg>
+<figcaption>그림 23-4 더미 노드를 둔 원형 이중 연결 리스트 — 모든 노드에 앞뒤가 항상 존재한다</figcaption>
+</figure>
+
+<figure class="code"><figcaption>dlist.c — 가격대별 주문 대기열 (O(1) 취소)</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stdbool.h&gt;
+
+typedef struct dnode {
+    struct dnode *prev, *next;
+} dnode;
+
+typedef struct {
+    dnode link;                 /* 첫 멤버로 둔 링크 (컨테이너 패턴) */
+    char  id[8];
+    int   qty;
+} order_t;
+
+static void dl_init(dnode *head)          { head-&gt;prev = head-&gt;next = head; }
+static bool dl_empty(const dnode *head)   { return head-&gt;next == head; }
+
+static void dl_insert_tail(dnode *head, dnode *n)   /* 더미 바로 앞 = 맨 뒤 */
+{
+    n-&gt;prev = head-&gt;prev;
+    n-&gt;next = head;
+    head-&gt;prev-&gt;next = n;
+    head-&gt;prev = n;
+}
+
+static void dl_unlink(dnode *n)                     /* O(1): 이웃끼리 직접 연결 */
+{
+    n-&gt;prev-&gt;next = n-&gt;next;
+    n-&gt;next-&gt;prev = n-&gt;prev;
+    n-&gt;prev = n-&gt;next = n;                          /* 떼어 낸 노드는 자기 자신을 가리키게 */
+}
+
+static void print_queue(const char *title, const dnode *head)
+{
+    printf("%s:", title);
+    for (const dnode *p = head-&gt;next; p != head; p = p-&gt;next) {
+        const order_t *o = (const order_t *)p;      /* link가 첫 멤버라 안전한 변환 */
+        printf(" %s(%d)", o-&gt;id, o-&gt;qty);
+    }
+    printf("%s\n", dl_empty(head) ? " (비어 있음)" : "");
+}
+
+int main(void)
+{
+    dnode q70500;                                   /* 70,500원 매수 대기열 */
+    dl_init(&amp;q70500);
+    order_t o[4] = { {.id = "O1", .qty = 10}, {.id = "O2", .qty = 5},
+                     {.id = "O3", .qty = 7},  {.id = "O4", .qty = 3} };
+    for (int i = 0; i &lt; 4; i++) dl_insert_tail(&amp;q70500, &amp;o[i].link);
+    print_queue("접수 순", &amp;q70500);
+
+    dl_unlink(&amp;o[1].link);                          /* O2 취소: 탐색 없이 바로 */
+    print_queue("O2 취소", &amp;q70500);
+
+    dnode *first = q70500.next;                     /* 체결: 맨 앞(가장 먼저 온 주문) */
+    dl_unlink(first);
+    printf("체결 대상: %s\n", ((order_t *)first)-&gt;id);
+    print_queue("체결 후", &amp;q70500);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>접수 순: O1(10) O2(5) O3(7) O4(3)
+O2 취소: O1(10) O3(7) O4(3)
+체결 대상: O1
+체결 후: O3(7) O4(3)</pre></figure>
+
+<div class="box tip"><p class="box-title" data-tag="잠깐">침입형(intrusive) 리스트</p>
+<p>위 코드처럼 링크(<code>dnode</code>)를 데이터 구조체 안에 넣는 방식을 <strong>침입형 리스트</strong>라고 합니다. 노드를 따로 malloc하지 않아도 되고, 한 주문 객체가 여러 리스트(가격대 대기열, 고객별 주문 목록)에 동시에 소속될 수 있습니다. 링크가 첫 멤버가 아니면 <code>offsetof</code>를 이용한 <code>container_of</code> 매크로로 바깥 구조체 주소를 구합니다. 금융 매칭 엔진과 커널 코드에서 널리 쓰는 패턴입니다.</p>
+</div>
+
+<h3 id="s23-1-4">스택과 괄호 검사</h3>
+
+<p><strong>스택(stack)</strong>은 마지막에 넣은 것을 먼저 꺼내는(LIFO) 구조입니다. 연산은 넣기(push), 꺼내기(pop), 맨 위 보기(peek) 세 가지뿐이고 모두 O(1)입니다. 함수 호출 스택, 실행 취소(undo), 수식 계산, 그리고 <strong>중첩 구조 검사</strong>에 쓰입니다.</p>
+
+<p>금융 시스템에서도 중첩 구조는 흔합니다. 수수료·우대 조건을 표현하는 규칙식(<code>IF((AMT&gt;100000)AND[GRADE=1])</code>), 반복부가 중첩된 전문 레이아웃 정의, JSON/XML 메시지 등입니다. 이런 입력을 파싱하기 전에 괄호 짝부터 검사하면 잘못된 규칙이 운영에 반영되는 것을 막을 수 있습니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 200" width="700" role="img" aria-label="문자열 {[()]}를 처리할 때 스택의 변화">
+  <text x="20" y="24" class="small bold">입력 "{ [ ( ) ] }" 처리 중 스택 상태 (아래가 바닥)</text>
+  <g class="small mono">
+  <text x="60" y="186" text-anchor="middle">{ push</text>
+  <rect class="hl" x="35" y="140" width="50" height="28"/><text x="60" y="159" text-anchor="middle">{</text>
+  <text x="160" y="186" text-anchor="middle">[ push</text>
+  <rect class="box" x="135" y="140" width="50" height="28"/><text x="160" y="159" text-anchor="middle">{</text>
+  <rect class="hl" x="135" y="112" width="50" height="28"/><text x="160" y="131" text-anchor="middle">[</text>
+  <text x="260" y="186" text-anchor="middle">( push</text>
+  <rect class="box" x="235" y="140" width="50" height="28"/><text x="260" y="159" text-anchor="middle">{</text>
+  <rect class="box" x="235" y="112" width="50" height="28"/><text x="260" y="131" text-anchor="middle">[</text>
+  <rect class="hl" x="235" y="84" width="50" height="28"/><text x="260" y="103" text-anchor="middle">(</text>
+  <text x="360" y="186" text-anchor="middle">) pop</text>
+  <rect class="box" x="335" y="140" width="50" height="28"/><text x="360" y="159" text-anchor="middle">{</text>
+  <rect class="box" x="335" y="112" width="50" height="28"/><text x="360" y="131" text-anchor="middle">[</text>
+  <text x="460" y="186" text-anchor="middle">] pop</text>
+  <rect class="box" x="435" y="140" width="50" height="28"/><text x="460" y="159" text-anchor="middle">{</text>
+  <text x="560" y="186" text-anchor="middle">} pop</text>
+  <rect class="dash" x="535" y="140" width="50" height="28"/><text x="560" y="159" text-anchor="middle" class="mute">빈</text>
+  </g>
+  <text x="650" y="150" text-anchor="middle" class="small acc">OK</text>
+  <text x="350" y="56" text-anchor="middle" class="small mute">닫는 괄호가 오면 맨 위와 짝이 맞는지 확인 후 pop, 끝났을 때 스택이 비어야 성공</text>
+</svg>
+<figcaption>그림 23-5 스택을 이용한 괄호 짝 검사 — 가장 최근에 열린 괄호가 가장 먼저 닫혀야 한다</figcaption>
+</figure>
+
+<figure class="code"><figcaption>brackets.c — 오류 위치를 알려 주는 괄호 검사기</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+#define STACK_MAX 64            /* 중첩 깊이 상한: 악의적 입력의 자원 고갈 방지 */
+
+typedef struct { char ch; size_t pos; } item_t;
+
+static char closing_of(char open) { return open == '(' ? ')' : open == '[' ? ']' : '}'; }
+
+/* 성공 0, 실패 -1. msg에 사유 */
+static int check_brackets(const char *s, char *msg, size_t msz)
+{
+    item_t st[STACK_MAX];
+    size_t top = 0;                                 /* 다음에 넣을 위치 = 원소 개수 */
+    for (size_t i = 0; s[i] != '\0'; i++) {
+        char c = s[i];
+        if (c == '(' || c == '[' || c == '{') {
+            if (top == STACK_MAX) {                 /* 스택 오버플로를 오류로 */
+                snprintf(msg, msz, "위치 %zu: 중첩이 너무 깊음", i);
+                return -1;
+            }
+            st[top].ch = c; st[top].pos = i; top++;           /* push */
+        } else if (c == ')' || c == ']' || c == '}') {
+            if (top == 0) {                                   /* 빈 스택에서 pop 시도 */
+                snprintf(msg, msz, "위치 %zu: 짝 없는 '%c'", i, c);
+                return -1;
+            }
+            if (closing_of(st[top - 1].ch) != c) {
+                snprintf(msg, msz, "위치 %zu: '%c'를 기대했으나 '%c'",
+                         i, closing_of(st[top - 1].ch), c);
+                return -1;
+            }
+            top--;                                            /* pop */
+        }
+    }
+    if (top != 0) {
+        snprintf(msg, msz, "위치 %zu: 닫히지 않은 '%c'", st[top - 1].pos, st[top - 1].ch);
+        return -1;
+    }
+    snprintf(msg, msz, "OK");
+    return 0;
+}
+
+int main(void)
+{
+    const char *cases[] = { "{[()]}", "IF((AMT&gt;100000)AND[GRADE=1])", "(a+b]*c", "((x)", "a)" };
+    char msg[80];
+    for (size_t i = 0; i &lt; sizeof cases / sizeof cases[0]; i++) {
+        check_brackets(cases[i], msg, sizeof msg);
+        printf("%-30s → %s\n", cases[i], msg);
+    }
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>{[()]}                         → OK
+IF((AMT&gt;100000)AND[GRADE=1])   → OK
+(a+b]*c                        → 위치 4: ')'를 기대했으나 ']'
+((x)                           → 위치 0: 닫히지 않은 '('
+a)                             → 위치 1: 짝 없는 ')'</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 스택 깊이에 상한을 둘까?</p>
+<p>상한이 없는 스택(동적으로 늘어나는 배열)이나 재귀로 구현하면, <code>((((((…</code>를 수백만 개 넣은 입력 하나로 메모리를 고갈시키거나 콜 스택을 넘치게 할 수 있습니다. 외부 입력을 처리하는 모든 자료구조에는 업무상 의미 있는 상한(중첩 깊이, 원소 수, 길이)을 두고, 넘으면 명시적으로 거부합니다. 22장의 "모든 입력은 범위가 있다"는 원칙이 자료구조에도 그대로 적용됩니다.</p>
+</div>
+
+<h3 id="s23-1-5">원형 큐와 전문 수신 버퍼</h3>
+
+<p><strong>큐(queue)</strong>는 먼저 넣은 것을 먼저 꺼내는(FIFO) 구조입니다. 배열로 큐를 만들면서 꺼낼 때마다 원소를 앞으로 당기면 O(n)이 되므로, 배열의 끝과 처음을 이어 붙인 것처럼 쓰는 <strong>원형 큐(circular queue, ring buffer)</strong>를 씁니다. 읽기 위치(head)와 원소 수(count)만 관리하면 넣기·꺼내기 모두 O(1)이고, 메모리를 새로 할당하지 않습니다.</p>
+
+<p>원형 버퍼의 대표적인 금융 실무 쓰임새는 <strong>TCP 전문 수신 버퍼</strong>입니다. TCP는 바이트 스트림이라 메시지 경계를 보존하지 않습니다. 상대가 전문 두 개를 보내도 <code>recv</code> 한 번에 1.5개가 오거나, 한 전문이 세 번에 나눠 올 수 있습니다. 그래서 받은 바이트를 버퍼에 쌓아 두고, "길이 헤더 + 본문"이 완성된 전문만 꺼내는 <strong>프레이밍(framing)</strong> 처리가 필요합니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 250" width="700" role="img" aria-label="크기 16인 원형 버퍼에서 데이터가 끝을 넘어 처음으로 이어지는 모습">
+  <text x="350" y="22" text-anchor="middle" class="small bold">capacity = 16, head = 9, count = 13 → tail = (9 + 13) % 16 = 6</text>
+  <g class="small mono">
+  <rect class="hl" x="30" y="40" width="40" height="40"/><text x="50" y="65" text-anchor="middle">0</text>
+  <rect class="hl" x="70" y="40" width="40" height="40"/><text x="90" y="65" text-anchor="middle">0</text>
+  <rect class="hl" x="110" y="40" width="40" height="40"/><text x="130" y="65" text-anchor="middle">0</text>
+  <rect class="hl" x="150" y="40" width="40" height="40"/><text x="170" y="65" text-anchor="middle">4</text>
+  <rect class="hl" x="190" y="40" width="40" height="40"/><text x="210" y="65" text-anchor="middle">T</text>
+  <rect class="hl" x="230" y="40" width="40" height="40"/><text x="250" y="65" text-anchor="middle">E</text>
+  <rect class="box" x="270" y="40" width="40" height="40"/><text x="290" y="65" text-anchor="middle" class="mute">L</text>
+  <rect class="box" x="310" y="40" width="40" height="40"/><text x="330" y="65" text-anchor="middle" class="mute">L</text>
+  <rect class="box" x="350" y="40" width="40" height="40"/><text x="370" y="65" text-anchor="middle" class="mute">O</text>
+  <rect class="hl2" x="390" y="40" width="40" height="40"/><text x="410" y="65" text-anchor="middle">0</text>
+  <rect class="hl2" x="430" y="40" width="40" height="40"/><text x="450" y="65" text-anchor="middle">0</text>
+  <rect class="hl2" x="470" y="40" width="40" height="40"/><text x="490" y="65" text-anchor="middle">0</text>
+  <rect class="hl2" x="510" y="40" width="40" height="40"/><text x="530" y="65" text-anchor="middle">3</text>
+  <rect class="hl2" x="550" y="40" width="40" height="40"/><text x="570" y="65" text-anchor="middle">A</text>
+  <rect class="hl2" x="590" y="40" width="40" height="40"/><text x="610" y="65" text-anchor="middle">B</text>
+  <rect class="hl2" x="630" y="40" width="40" height="40"/><text x="650" y="65" text-anchor="middle">C</text>
+  </g>
+  <text x="50" y="98" text-anchor="middle" class="small mono mute">[0]</text>
+  <text x="290" y="98" text-anchor="middle" class="small mono mute">[6]</text>
+  <text x="410" y="98" text-anchor="middle" class="small mono mute">[9]</text>
+  <text x="650" y="98" text-anchor="middle" class="small mono mute">[15]</text>
+  <path class="arrow" d="M410 130 V 84"/>
+  <text x="410" y="146" text-anchor="middle" class="small acc">head (읽을 곳)</text>
+  <path class="arrow" d="M290 130 V 84"/>
+  <text x="290" y="146" text-anchor="middle" class="small">tail (쓸 곳)</text>
+  <path class="arrow-m" d="M670 60 C 700 60, 700 190, 360 190 C 20 190, 10 60, 28 60"/>
+  <text x="360" y="208" text-anchor="middle" class="small mute">끝([15]) 다음은 처음([0])으로 이어진다</text>
+  <text x="350" y="238" text-anchor="middle" class="small">논리적 순서: [9]~[15] "0003ABC" → 감겨서 [0]~[5] "0004TE" ([6]~[8]은 이미 읽은 낡은 데이터)</text>
+</svg>
+<figcaption>그림 23-6 원형 버퍼 — head부터 count바이트가 유효하며, 배열 끝을 넘으면 처음으로 감긴다</figcaption>
+</figure>
+
+<figure class="code"><figcaption>ringbuf.c — 원형 버퍼와 길이 헤더 기반 전문 추출</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+#include &lt;stdbool.h&gt;
+
+#define RB_CAP   16             /* 교육용으로 작게. 실무는 수십 KB 이상 */
+#define LEN_HDR  4              /* "0005" 같은 4자리 ASCII 길이 */
+#define BODY_MAX 12
+
+typedef struct {
+    unsigned char buf[RB_CAP];
+    size_t head;                /* 다음에 읽을 위치 */
+    size_t count;               /* 저장된 바이트 수 (full/empty 구분에 사용) */
+} ringbuf_t;
+
+static size_t rb_free(const ringbuf_t *rb) { return RB_CAP - rb-&gt;count; }
+
+/* n바이트를 통째로 쓴다. 공간이 부족하면 아무것도 쓰지 않고 false */
+static bool rb_write(ringbuf_t *rb, const void *data, size_t n)
+{
+    if (n &gt; rb_free(rb)) return false;
+    const unsigned char *p = data;
+    size_t tail = (rb-&gt;head + rb-&gt;count) % RB_CAP;
+    size_t first = RB_CAP - tail;                   /* 배열 끝까지 남은 칸 */
+    if (first &gt; n) first = n;
+    memcpy(rb-&gt;buf + tail, p, first);               /* 끝까지 */
+    memcpy(rb-&gt;buf, p + first, n - first);          /* 나머지는 처음부터 (감김) */
+    rb-&gt;count += n;
+    return true;
+}
+
+/* 소비하지 않고 off 위치부터 n바이트 복사 (off + n &lt;= count 전제) */
+static void rb_peek(const ringbuf_t *rb, size_t off, void *out, size_t n)
+{
+    unsigned char *o = out;
+    for (size_t i = 0; i &lt; n; i++)
+        o[i] = rb-&gt;buf[(rb-&gt;head + off + i) % RB_CAP];
+}
+
+static void rb_drop(ringbuf_t *rb, size_t n)
+{
+    rb-&gt;head = (rb-&gt;head + n) % RB_CAP;
+    rb-&gt;count -= n;
+}
+
+/* 완성된 전문을 모두 꺼낸다. 프레이밍 오류면 -1 (연결 재설정 대상) */
+static int extract_messages(ringbuf_t *rb)
+{
+    while (rb-&gt;count &gt;= LEN_HDR) {
+        char hdr[LEN_HDR];
+        rb_peek(rb, 0, hdr, LEN_HDR);
+        size_t len = 0;
+        for (int i = 0; i &lt; LEN_HDR; i++) {
+            if (hdr[i] &lt; '0' || hdr[i] &gt; '9') return -1;   /* 헤더가 숫자가 아님 */
+            len = len * 10 + (size_t)(hdr[i] - '0');
+        }
+        if (len &gt; BODY_MAX) return -1;                     /* 상한 초과: 버퍼로 수용 불가 */
+        if (rb-&gt;count &lt; LEN_HDR + len) break;               /* 아직 덜 왔다 → 다음 수신 대기 */
+        char body[BODY_MAX + 1];
+        rb_drop(rb, LEN_HDR);
+        rb_peek(rb, 0, body, len);
+        rb_drop(rb, len);
+        body[len] = '\0';
+        printf("  [전문] len=%zu body=%s\n", len, body);
+    }
+    if (rb-&gt;count &gt; 0)
+        printf("  [대기] 미완성 %zu바이트\n", rb-&gt;count);
+    return 0;
+}
+
+int main(void)
+{
+    ringbuf_t rb = { .head = 0, .count = 0 };
+    /* TCP가 전문 경계와 무관하게 잘라 보낸 조각들 */
+    const char *chunks[] = { "0005HELLO00", "03ABC0004TE", "ST" };
+    for (int i = 0; i &lt; 3; i++) {
+        size_t n = strlen(chunks[i]);
+        if (!rb_write(&amp;rb, chunks[i], n)) { puts("버퍼 가득 참: 흐름 제어 필요"); return 1; }
+        printf("[수신] %zu바이트 → 사용 %zu/%d (head=%zu, tail=%zu)\n", n, rb.count, RB_CAP,
+               rb.head, (rb.head + rb.count) % RB_CAP);
+        if (extract_messages(&amp;rb) &lt; 0) { puts("프레이밍 오류: 연결 종료"); return 1; }
+    }
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>[수신] 11바이트 → 사용 11/16 (head=0, tail=11)
+  [전문] len=5 body=HELLO
+  [대기] 미완성 2바이트
+[수신] 11바이트 → 사용 13/16 (head=9, tail=6)
+  [전문] len=3 body=ABC
+  [대기] 미완성 6바이트
+[수신] 2바이트 → 사용 8/16 (head=0, tail=8)
+  [전문] len=4 body=TEST</pre></figure>
+
+<p>두 번째 수신에서 tail이 6이 된 것을 보십시오. 11바이트를 쓰는 중에 배열 끝(15)을 넘어 처음으로 감겼습니다(<code>rb_write</code>의 두 번째 memcpy). 첫 조각의 끝 "00"과 두 번째 조각의 "03"이 합쳐져 길이 헤더 "0003"이 완성되었고, 세 번째 조각에서 "TEST"가 완성되었습니다. 전문 경계가 조각 경계와 전혀 맞지 않아도 정확히 복원됩니다.</p>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 head와 tail 대신 head와 count를 저장할까?</p>
+<p>head와 tail만 저장하면 버퍼가 <strong>꽉 찼을 때</strong>와 <strong>비었을 때</strong> 모두 head == tail이 되어 구분할 수 없습니다. 해결책은 세 가지입니다. ① 한 칸을 항상 비워 두고 "tail+1 == head면 가득"으로 판정(용량이 1 줄어듦), ② 별도의 count를 유지(위 코드), ③ head·tail을 모듈러 없이 계속 증가시키고 차이로 개수를 계산(용량이 2의 거듭제곱이면 <code>&amp; (CAP-1)</code>로 인덱스 계산, 단일 생산자·단일 소비자 lock-free 큐에서 선호). 면접에서 "원형 큐의 full/empty 구분 방법"으로 자주 나옵니다.</p>
+</div>
+
+<div class="box fin"><p class="box-title" data-tag="금융 실무">은행 시스템에서는 — "가끔 전문이 깨진다"의 정체</p>
+<p>대외기관과 TCP로 전문을 주고받는 한 시스템에서, 평소에는 문제가 없다가 거래량이 많은 월말·급여일에만 "전문 형식 오류"가 간헐적으로 발생했습니다. 원인은 수신 코드가 <code>recv(sock, buf, 300, 0)</code> 한 번이 전문 하나(300바이트 고정)를 돌려준다고 가정한 것이었습니다. 트래픽이 적을 때는 상대가 보낸 단위 그대로 도착했지만, 네트워크가 바쁠 때는 TCP가 여러 전문을 합치거나 쪼개 전달했고, 그때마다 전문이 밀려 엉뚱한 필드가 금액으로 해석되었습니다(다행히 형식 검증에서 대부분 걸렸습니다).</p>
+<p>해결은 위와 같은 수신 버퍼 + 프레이밍 계층을 두고, 전문 시작 문자·길이 필드·전문 종료 문자를 모두 검증하도록 바꾼 것입니다. 교훈: <strong>TCP는 메시지가 아니라 바이트 스트림</strong>입니다. 부분 수신, 합쳐진 수신, 0바이트(연결 종료) 수신을 모두 처리해야 합니다(소켓 프로그래밍은 뒤 장에서 자세히 다룹니다).</p>
+</div>
+
+<div class="ex"><p class="ex-title">예제 23-2 <span class="lv">난이도 ★★☆</span></p>
+<p>배열 기반 원형 큐(용량 5, "한 칸 비우기" 방식, head와 tail 저장)에서 다음 연산 후 head, tail, 원소 수를 쓰십시오. 초기 head = tail = 0. enqueue A, B, C, D → dequeue 2회 → enqueue E, F → enqueue G</p>
+<details><summary>정답과 해설 보기</summary>
+<p>"한 칸 비우기" 방식은 용량 5 배열에 최대 4개를 저장하며, (tail + 1) % 5 == head이면 가득입니다.</p>
+<ol>
+<li>A, B, C, D 넣기: 인덱스 0~3, tail = 4, 원소 4개(가득: (4+1)%5 = 0 == head).</li>
+<li>2회 꺼내기(A, B): head = 2, 원소 2개.</li>
+<li>E 넣기: 인덱스 4, tail = 0. F 넣기: 인덱스 0, tail = 1. 원소 4개.</li>
+<li>G 넣기: (1+1)%5 = 2 == head → <strong>가득 참, 실패</strong>.</li>
+</ol>
+<p>최종: head = 2, tail = 1, 원소 4개(C, D, E, F).</p>
+</details></div>
+
+<h2 id="s23-2"><span class="num">23-2</span>해시 테이블, 정렬, 탐색</h2>
+
+<p>계정계 온라인 거래의 첫 단계는 거의 항상 "이 계좌번호의 계좌 정보를 찾아라"입니다. 대부분은 DB가 인덱스(B-트리)로 처리하지만, 초당 수만 건을 처리하는 중계 서버, 일마감 배치, 대외기관 대사 프로그램은 수백만 건을 메모리에 올려 직접 찾고 정렬합니다. 이 절에서는 "찾기"의 두 가지 길(해시와 정렬+이진 탐색)과 정렬 알고리즘의 성질, 그리고 우선순위가 있는 데이터를 다루는 힙을 다룹니다.</p>
+
+<h3 id="s23-2-1">해시 테이블의 원리</h3>
+
+<p>해시 테이블은 키(계좌번호)를 <strong>해시 함수</strong>로 정수로 바꾼 뒤, 그 값을 배열 인덱스로 써서 데이터를 저장합니다. 해시 계산이 O(1)이고 배열 접근이 O(1)이므로, 평균적으로 삽입·검색·삭제가 모두 O(1)입니다. 문제는 서로 다른 키가 같은 인덱스로 가는 <strong>충돌(collision)</strong>인데, 버킷 수보다 키가 많으면 비둘기집 원리에 따라 충돌은 반드시 생깁니다.</p>
+
+<p>충돌 해결 방식은 크게 두 가지입니다.</p>
+<ul>
+<li><strong>체이닝(separate chaining)</strong>: 각 버킷이 연결 리스트를 가지고, 같은 버킷으로 온 원소를 리스트에 매답니다. 구현이 단순하고 삭제가 쉬우며 로드 팩터가 1을 넘어도 동작합니다.</li>
+<li><strong>개방 주소법(open addressing)</strong>: 충돌하면 배열의 다른 빈칸을 정해진 규칙(선형 탐사, 이차 탐사, 이중 해싱)으로 찾아 저장합니다. 포인터가 없어 캐시 효율이 좋지만, 삭제 시 "삭제됨" 표시(tombstone)가 필요하고 로드 팩터가 높아지면 급격히 느려집니다.</li>
+</ul>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 280" width="700" role="img" aria-label="체이닝 해시 테이블에서 계좌번호가 해시를 거쳐 버킷 리스트에 저장되는 모습">
+  <rect class="box" x="20" y="30" width="150" height="40" rx="6"/>
+  <text x="95" y="55" text-anchor="middle" class="small mono">"110123456701"</text>
+  <path class="arrow" d="M170 50 H 210"/>
+  <rect class="hl2" x="210" y="30" width="130" height="40" rx="6"/>
+  <text x="275" y="48" text-anchor="middle" class="small">FNV-1a 64</text>
+  <text x="275" y="63" text-anchor="middle" class="small mono mute">&amp; (cap-1)</text>
+  <path class="arrow" d="M340 50 C 380 50, 380 136, 408 136"/>
+  <text x="390" y="90" class="small acc">idx</text>
+  <g class="small mono">
+  <rect class="box" x="410" y="20" width="60" height="28"/><text x="440" y="39" text-anchor="middle">[0]</text>
+  <rect class="box" x="410" y="48" width="60" height="28"/><text x="440" y="67" text-anchor="middle">[1]</text>
+  <rect class="box" x="410" y="76" width="60" height="28"/><text x="440" y="95" text-anchor="middle">[2]</text>
+  <rect class="box" x="410" y="104" width="60" height="28"/><text x="440" y="123" text-anchor="middle">[3]</text>
+  <rect class="hl" x="410" y="122" width="60" height="28"/><text x="440" y="141" text-anchor="middle">[4]</text>
+  <rect class="box" x="410" y="150" width="60" height="28"/><text x="440" y="169" text-anchor="middle">[5]</text>
+  <rect class="box" x="410" y="178" width="60" height="28"/><text x="440" y="197" text-anchor="middle">…</text>
+  </g>
+  <rect class="hl" x="500" y="122" width="90" height="28" rx="4"/>
+  <text x="545" y="141" text-anchor="middle" class="small mono">…6701</text>
+  <rect class="hl" x="610" y="122" width="80" height="28" rx="4"/>
+  <text x="650" y="141" text-anchor="middle" class="small mono">…8777</text>
+  <path class="arrow" d="M470 136 H 498"/>
+  <path class="arrow" d="M590 136 H 608"/>
+  <rect class="box" x="500" y="48" width="90" height="28" rx="4"/>
+  <text x="545" y="67" text-anchor="middle" class="small mono">…0111</text>
+  <path class="arrow-m" d="M470 62 H 498"/>
+  <text x="600" y="174" class="small mute">충돌 → 체인</text>
+  <text x="350" y="250" text-anchor="middle" class="small">검색: 해시 → 버킷 선택 → 체인을 따라가며 strcmp로 정확히 비교</text>
+  <text x="350" y="272" text-anchor="middle" class="small mute">해시가 같아도 키가 같다는 보장은 없으므로 마지막 비교는 반드시 원래 키로</text>
+</svg>
+<figcaption>그림 23-7 체이닝 해시 테이블 — 같은 버킷으로 온 키들은 연결 리스트로 매달린다</figcaption>
+</figure>
+
+<h3 id="s23-2-2">해시 함수 고르기</h3>
+
+<p>좋은 해시 함수는 ① 빠르고, ② 비슷한 키도 전혀 다른 값으로 흩어 놓으며(눈사태 효과), ③ 출력이 고르게 분포해야 합니다. 계좌번호처럼 앞자리(지점·과목 코드)가 같고 뒷자리만 조금 다른 키는 나쁜 해시 함수에서 한 버킷으로 몰립니다.</p>
+
+<figure class="code"><figcaption>hashfn.c — 나쁜 해시와 FNV-1a 비교</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stdint.h&gt;
+
+/* 나쁜 예: 문자 코드의 합. 자리를 바꾼 키(애너그램)는 모두 충돌 */
+static uint64_t hash_sum(const char *s)
+{
+    uint64_t h = 0;
+    while (*s) h += (unsigned char)*s++;
+    return h;
+}
+
+/* FNV-1a 64비트: 바이트마다 XOR 후 소수 곱하기 */
+static uint64_t fnv1a64(const char *s)
+{
+    uint64_t h = UINT64_C(0xcbf29ce484222325);       /* offset basis */
+    while (*s) {
+        h ^= (unsigned char)*s++;
+        h *= UINT64_C(0x100000001b3);                /* FNV prime, unsigned라 순환 정의됨 */
+    }
+    return h;
+}
+
+int main(void)
+{
+    const char *keys[] = { "1100123", "3210011", "1100132" };
+    for (int i = 0; i &lt; 3; i++)
+        printf("%s  sum=%llu  fnv=%016llx  버킷(16)=%llu\n", keys[i],
+               (unsigned long long)hash_sum(keys[i]),
+               (unsigned long long)fnv1a64(keys[i]),
+               (unsigned long long)(fnv1a64(keys[i]) &amp; 15));
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>1100123  sum=344  fnv=3eaff0c47ddce831  버킷(16)=1
+3210011  sum=344  fnv=9c64b60852c4f7ed  버킷(16)=13
+1100132  sum=344  fnv=3eb371c47ddff93b  버킷(16)=11</pre></figure>
+
+<p>문자 합 해시는 세 키 모두 344로 같습니다. 숫자만으로 된 계좌번호는 자릿수 합이 비슷한 범위에 몰려 있어 문자 합 해시를 쓰면 수백만 계좌가 소수의 버킷에 집중됩니다. FNV-1a는 한 글자만 바뀌어도 결과가 크게 달라집니다.</p>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 버킷 수를 2의 거듭제곱으로 하고 <code>&amp; (cap-1)</code>을 쓸까?</p>
+<p><code>h % cap</code>의 나눗셈은 CPU에서 수십 사이클이 걸리지만, cap이 2의 거듭제곱이면 <code>h &amp; (cap - 1)</code>(하위 비트만 취함)로 한 사이클에 끝납니다(20장의 마스크). 대신 해시의 <strong>하위 비트가 잘 섞여 있어야</strong> 합니다. 하위 비트가 약한 해시(예: 주소값, 단순 곱셈)를 쓸 때는 소수 크기 + <code>%</code>를 쓰거나, 상위 비트를 섞어 주는 마무리(finalizer) 단계를 추가합니다.</p>
+</div>
+
+<div class="box warn"><p class="box-title" data-tag="주의">해시 충돌 공격(HashDoS)</p>
+<p>해시 함수와 버킷 수가 공개되어 있으면, 공격자가 같은 버킷으로 가는 키를 대량으로 만들어 보낼 수 있습니다. 그러면 체인이 수만 개로 길어져 O(1) 검색이 O(n)으로 무너지고 서버 CPU가 마비됩니다. 외부 입력을 키로 쓰는 해시 테이블(예: HTTP 파라미터, 전문의 임의 필드)에는 프로세스 시작 시 무작위 시드를 섞는 키 기반 해시(SipHash 등)를 쓰고, 체인 길이 상한이나 원소 수 상한을 둡니다. 계좌번호처럼 내부에서 검증된 키만 쓰는 테이블이라면 FNV 같은 빠른 해시로 충분한 경우가 많습니다.</p>
+</div>
+
+<h3 id="s23-2-3">계좌번호 → 계좌 정보 해시 테이블 구현</h3>
+
+<p>이제 일마감 대사 배치에서 쓸 법한, 계좌번호로 계좌 정보를 찾는 해시 테이블을 체이닝 방식으로 구현합니다. 로드 팩터가 0.75를 넘으려 하면 버킷 수를 두 배로 늘립니다.</p>
+
+<figure class="code"><figcaption>acctmap.c — 계좌 해시 테이블 (체이닝 + 리사이즈)</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;string.h&gt;
+#include &lt;stdint.h&gt;
+#include &lt;stdbool.h&gt;
+
+#define ACCT_LEN 14
+
+typedef struct account {
+    char     acct_no[ACCT_LEN + 1];
+    char     owner[32];
+    int64_t  balance;
+    struct account *next;           /* 같은 버킷의 다음 계좌 */
+} account_t;
+
+typedef struct {
+    account_t **buckets;            /* 버킷 배열: 각 원소는 체인의 head */
+    size_t cap;                     /* 버킷 수 (2의 거듭제곱) */
+    size_t count;                   /* 저장된 계좌 수 */
+} acct_map_t;
+
+static uint64_t fnv1a64(const char *s)
+{
+    uint64_t h = UINT64_C(0xcbf29ce484222325);
+    while (*s) { h ^= (unsigned char)*s++; h *= UINT64_C(0x100000001b3); }
+    return h;
+}
+
+static size_t bucket_of(const acct_map_t *m, const char *key)
+{
+    return (size_t)(fnv1a64(key) &amp; (m-&gt;cap - 1));
+}
+
+static bool map_init(acct_map_t *m, size_t cap)          /* cap: 2의 거듭제곱 */
+{
+    m-&gt;buckets = calloc(cap, sizeof *m-&gt;buckets);         /* 모든 head를 NULL로 */
+    m-&gt;cap = cap;
+    m-&gt;count = 0;
+    return m-&gt;buckets != NULL;
+}
+
+static account_t *map_get(const acct_map_t *m, const char *acct_no)
+{
+    for (account_t *p = m-&gt;buckets[bucket_of(m, acct_no)]; p; p = p-&gt;next)
+        if (strcmp(p-&gt;acct_no, acct_no) == 0)             /* 해시가 아니라 키로 최종 비교 */
+            return p;
+    return NULL;
+}
+
+/* 모든 노드를 새 버킷 배열로 옮긴다 (노드는 재할당하지 않음) */
+static bool map_resize(acct_map_t *m, size_t new_cap)
+{
+    account_t **nb = calloc(new_cap, sizeof *nb);
+    if (!nb) return false;                                /* 실패해도 기존 테이블은 온전 */
+    for (size_t i = 0; i &lt; m-&gt;cap; i++) {
+        account_t *p = m-&gt;buckets[i];
+        while (p) {
+            account_t *next = p-&gt;next;
+            size_t idx = (size_t)(fnv1a64(p-&gt;acct_no) &amp; (new_cap - 1));
+            p-&gt;next = nb[idx];                            /* 새 버킷의 맨 앞에 */
+            nb[idx] = p;
+            p = next;
+        }
+    }
+    free(m-&gt;buckets);
+    m-&gt;buckets = nb;
+    m-&gt;cap = new_cap;
+    return true;
+}
+
+/* 0: 추가, 1: 이미 존재, -1: 메모리 부족 */
+static int map_put(acct_map_t *m, account_t *a)
+{
+    if (map_get(m, a-&gt;acct_no)) return 1;                 /* 중복 계좌번호 거부 */
+    if ((m-&gt;count + 1) * 4 &gt; m-&gt;cap * 3) {                /* 로드 팩터 0.75 초과 예정 */
+        printf("  [리사이즈] %zu → %zu (count=%zu)\n", m-&gt;cap, m-&gt;cap * 2, m-&gt;count);
+        if (!map_resize(m, m-&gt;cap * 2)) return -1;
+    }
+    size_t idx = bucket_of(m, a-&gt;acct_no);
+    a-&gt;next = m-&gt;buckets[idx];
+    m-&gt;buckets[idx] = a;
+    m-&gt;count++;
+    return 0;
+}
+
+static bool map_remove(acct_map_t *m, const char *acct_no)
+{
+    for (account_t **pp = &amp;m-&gt;buckets[bucket_of(m, acct_no)]; *pp; pp = &amp;(*pp)-&gt;next) {
+        if (strcmp((*pp)-&gt;acct_no, acct_no) == 0) {
+            account_t *v = *pp;
+            *pp = v-&gt;next;
+            free(v);
+            m-&gt;count--;
+            return true;
+        }
+    }
+    return false;
+}
+
+static void map_stats(const acct_map_t *m)
+{
+    size_t used = 0, longest = 0;
+    for (size_t i = 0; i &lt; m-&gt;cap; i++) {
+        size_t len = 0;
+        for (const account_t *p = m-&gt;buckets[i]; p; p = p-&gt;next) len++;
+        if (len) used++;
+        if (len &gt; longest) longest = len;
+    }
+    printf("count=%zu cap=%zu 로드팩터=%.4f 사용버킷=%zu 최장체인=%zu\n",
+           m-&gt;count, m-&gt;cap, (double)m-&gt;count / (double)m-&gt;cap, used, longest);
+}
+
+static void map_free(acct_map_t *m)
+{
+    for (size_t i = 0; i &lt; m-&gt;cap; i++) {
+        account_t *p = m-&gt;buckets[i];
+        while (p) { account_t *n = p-&gt;next; free(p); p = n; }
+    }
+    free(m-&gt;buckets);
+    m-&gt;buckets = NULL;
+    m-&gt;cap = m-&gt;count = 0;
+}
+
+static account_t *acct_new(const char *no, const char *owner, int64_t bal)
+{
+    account_t *a = calloc(1, sizeof *a);
+    if (!a) return NULL;
+    snprintf(a-&gt;acct_no, sizeof a-&gt;acct_no, "%s", no);   /* 길이는 사전 검증 가정 */
+    snprintf(a-&gt;owner, sizeof a-&gt;owner, "%s", owner);
+    a-&gt;balance = bal;
+    return a;
+}
+
+int main(void)
+{
+    const char *nos[] = { "110123456701", "110123456702", "110123456703", "220987654321",
+                          "330555000111", "110123456704", "440000000001", "550111222333",
+                          "110999888777", "660123123123" };
+    acct_map_t m;
+    if (!map_init(&amp;m, 8)) return 1;
+    for (int i = 0; i &lt; 10; i++) {
+        char owner[16];
+        snprintf(owner, sizeof owner, "고객%02d", i + 1);
+        account_t *a = acct_new(nos[i], owner, (int64_t)(i + 1) * 100000);
+        if (!a || map_put(&amp;m, a) != 0) { free(a); map_free(&amp;m); return 1; }
+    }
+    account_t *dup = acct_new("330555000111", "중복", 0);
+    printf("중복 등록 결과: %d\n", dup ? map_put(&amp;m, dup) : -1);
+    free(dup);                                            /* 등록 실패한 노드는 호출자가 해제 */
+
+    account_t *a = map_get(&amp;m, "330555000111");
+    if (a) printf("조회 %s → %s, 잔액 %lld원\n", a-&gt;acct_no, a-&gt;owner, (long long)a-&gt;balance);
+    printf("조회 999999999999 → %s\n", map_get(&amp;m, "999999999999") ? "있음" : "없음");
+    printf("삭제 220987654321 → %s\n", map_remove(&amp;m, "220987654321") ? "성공" : "실패");
+    printf("재조회 220987654321 → %s\n", map_get(&amp;m, "220987654321") ? "있음" : "없음");
+    map_stats(&amp;m);
+    map_free(&amp;m);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>  [리사이즈] 8 → 16 (count=6)
+중복 등록 결과: 1
+조회 330555000111 → 고객05, 잔액 500000원
+조회 999999999999 → 없음
+삭제 220987654321 → 성공
+재조회 220987654321 → 없음
+count=9 cap=16 로드팩터=0.5625 사용버킷=8 최장체인=2</pre></figure>
+
+<h3 id="s23-2-4">로드 팩터와 리사이즈</h3>
+
+<p><strong>로드 팩터(load factor)</strong> α = 원소 수 / 버킷 수입니다. 해시가 고르다면 체이닝에서 평균 체인 길이는 α이므로, 성공한 검색은 평균 약 1 + α/2번, 실패한 검색은 약 α번의 비교가 필요합니다. α를 0.75 정도로 유지하면 검색이 사실상 상수 시간이 됩니다. 원소가 늘어 α가 기준을 넘으면 버킷 수를 늘리고 모든 원소를 새 위치로 옮기는 <strong>리해시(rehash)</strong>를 합니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 220" width="700" role="img" aria-label="버킷 8개에서 16개로 리사이즈하면 해시 하위 비트가 하나 더 쓰여 원소가 두 버킷으로 나뉜다">
+  <text x="160" y="24" text-anchor="middle" class="small bold">cap = 8 (하위 3비트)</text>
+  <rect class="hl2" x="60" y="40" width="200" height="34" rx="4"/>
+  <text x="160" y="62" text-anchor="middle" class="small mono">[5]: h=…0101, h=…1101</text>
+  <text x="160" y="100" text-anchor="middle" class="small mute">두 원소가 같은 버킷</text>
+  <path class="arrow" d="M270 57 H 400"/>
+  <text x="335" y="48" text-anchor="middle" class="small acc">2배로 리사이즈</text>
+  <text x="530" y="24" text-anchor="middle" class="small bold">cap = 16 (하위 4비트)</text>
+  <rect class="hl" x="420" y="40" width="220" height="34" rx="4"/>
+  <text x="530" y="62" text-anchor="middle" class="small mono">[5]:  h=…0101</text>
+  <rect class="hl" x="420" y="84" width="220" height="34" rx="4"/>
+  <text x="530" y="106" text-anchor="middle" class="small mono">[13]: h=…1101</text>
+  <text x="350" y="160" text-anchor="middle" class="small">원소는 원래 버킷 i 또는 i + old_cap 둘 중 하나로만 이동한다</text>
+  <text x="350" y="184" text-anchor="middle" class="small mute">리사이즈 한 번은 O(n)이지만, 2배씩 늘리면 삽입 n번의 총 비용이 O(n) → 분할 상환 O(1)</text>
+  <text x="350" y="208" text-anchor="middle" class="small warn-t">실시간 시스템에서는 리사이즈 순간의 지연(latency spike)에 주의 — 초기 용량을 넉넉히</text>
+</svg>
+<figcaption>그림 23-8 리사이즈와 리해시 — 버킷 수가 두 배가 되면 해시의 비트 하나를 더 보고 원소를 나눈다</figcaption>
+</figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 두 배씩 늘리면 평균 O(1)일까? (분할 상환 분석)</p>
+<p>용량 1에서 시작해 두 배씩 늘리며 n개를 넣는다고 합시다. 리사이즈 때 옮기는 원소 수는 1 + 2 + 4 + … + n/2 &lt; n입니다. 즉 n번의 삽입에 드는 이동 비용 총합이 n보다 작으므로, 삽입 한 번당 평균(분할 상환) 비용은 O(1)입니다. 반대로 "10개씩" 늘리면 이동 총량이 n²/20이 되어 삽입당 O(n)이 됩니다. 동적 배열(벡터)의 용량 증가도 같은 원리이며, 배수는 1.5나 2를 씁니다.</p>
+</div>
+
+<div class="box fin"><p class="box-title" data-tag="금융 실무">은행 시스템에서는 — 배치 시작 직후 30초의 정체</p>
+<p>어느 대사 배치는 대외기관 파일(약 800만 건)을 읽어 해시 테이블에 넣은 뒤 자체 원장과 맞추는 구조였습니다. 초기 버킷 수를 1,024로 잡아 두었기 때문에 적재 중에 리사이즈가 13번 일어났고, 마지막 몇 번은 수백만 노드를 옮기느라 각각 수 초씩 걸렸습니다. 게다가 리사이즈 중 할당 실패 처리가 없어 메모리가 부족한 날에는 배치가 비정상 종료되었습니다. 파일 헤더의 총건수를 읽어 <strong>처음부터 적정 용량(건수 / 0.75 이상의 2의 거듭제곱)</strong>으로 만들도록 바꾸자 적재 시간이 크게 줄었고, 할당 실패 시 명확한 오류 코드로 종료하게 했습니다. 예상 크기를 알면 미리 잡는 것, 그리고 리사이즈 실패에도 기존 데이터가 온전하게 설계하는 것이 실무 포인트입니다.</p>
+</div>
+
+<h3 id="s23-2-5">이진 탐색</h3>
+
+<p>데이터가 정렬되어 있으면 가운데 원소와 비교해 탐색 범위를 절반씩 줄이는 <strong>이진 탐색</strong>으로 O(log n)에 찾을 수 있습니다. 100만 건이면 최대 20번, 10억 건이면 30번의 비교면 충분합니다. 해시 테이블과 달리 <strong>범위 검색</strong>("계좌번호 1100으로 시작하는 모든 계좌", "금액 100만~500만 원 거래")과 <strong>순서 순회</strong>가 가능하다는 장점이 있습니다.</p>
+
+<p>실무에서 가장 유용한 형태는 "값이 있으면 그 위치, 없으면 들어갈 위치"를 돌려주는 <strong>lower_bound</strong>(key 이상인 첫 위치)입니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 240" width="700" role="img" aria-label="정렬된 배열에서 1050을 lower_bound로 찾는 3단계">
+  <g class="small mono">
+  <rect class="box" x="40" y="40" width="70" height="36"/><text x="75" y="63" text-anchor="middle">1001</text>
+  <rect class="box" x="110" y="40" width="70" height="36"/><text x="145" y="63" text-anchor="middle">1005</text>
+  <rect class="box" x="180" y="40" width="70" height="36"/><text x="215" y="63" text-anchor="middle">1010</text>
+  <rect class="box" x="250" y="40" width="70" height="36"/><text x="285" y="63" text-anchor="middle">1023</text>
+  <rect class="hl2" x="320" y="40" width="70" height="36"/><text x="355" y="63" text-anchor="middle">1040</text>
+  <rect class="hl" x="390" y="40" width="70" height="36"/><text x="425" y="63" text-anchor="middle">1077</text>
+  <rect class="box" x="460" y="40" width="70" height="36"/><text x="495" y="63" text-anchor="middle">1100</text>
+  <rect class="box" x="530" y="40" width="70" height="36"/><text x="565" y="63" text-anchor="middle">1234</text>
+  <text x="75" y="94" text-anchor="middle" class="mute">0</text><text x="145" y="94" text-anchor="middle" class="mute">1</text>
+  <text x="215" y="94" text-anchor="middle" class="mute">2</text><text x="285" y="94" text-anchor="middle" class="mute">3</text>
+  <text x="355" y="94" text-anchor="middle" class="mute">4</text><text x="425" y="94" text-anchor="middle" class="mute">5</text>
+  <text x="495" y="94" text-anchor="middle" class="mute">6</text><text x="565" y="94" text-anchor="middle" class="mute">7</text>
+  </g>
+  <text x="40" y="128" class="small">key = 1050</text>
+  <text x="40" y="152" class="small mono">① lo=0 hi=8 mid=4: 1040 &lt; 1050 → lo=5</text>
+  <text x="40" y="176" class="small mono">② lo=5 hi=8 mid=6: 1100 &gt;= 1050 → hi=6</text>
+  <text x="40" y="200" class="small mono">③ lo=5 hi=6 mid=5: 1077 &gt;= 1050 → hi=5</text>
+  <text x="40" y="226" class="small acc">lo == hi == 5 → 없음, 삽입 위치 5 (1077 앞)</text>
+  <text x="470" y="152" class="small mute">구간 [lo, hi)는 반열린 구간</text>
+  <text x="470" y="176" class="small mute">mid = lo + (hi - lo) / 2</text>
+</svg>
+<figcaption>그림 23-9 lower_bound 이진 탐색 — 매 단계 후보 구간이 절반으로 줄어든다</figcaption>
+</figure>
+
+<figure class="code"><figcaption>bsearch_lb.c — lower_bound와 비교 횟수</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stdint.h&gt;
+
+/* a[0..n) 오름차순. key 이상인 첫 위치를 반환(모두 작으면 n). *cmps에 비교 횟수 */
+static size_t lower_bound(const int64_t *a, size_t n, int64_t key, int *cmps)
+{
+    size_t lo = 0, hi = n;                 /* 답은 항상 [lo, hi] 안에 있다 */
+    *cmps = 0;
+    while (lo &lt; hi) {
+        size_t mid = lo + (hi - lo) / 2;   /* (lo+hi)/2 는 오버플로 가능 */
+        (*cmps)++;
+        if (a[mid] &lt; key) lo = mid + 1;    /* mid는 답이 아님 */
+        else              hi = mid;        /* mid가 답일 수 있음 */
+    }
+    return lo;
+}
+
+int main(void)
+{
+    const int64_t accts[] = { 1001, 1005, 1010, 1023, 1040, 1077, 1100, 1234 };
+    const size_t n = sizeof accts / sizeof accts[0];
+    const int64_t keys[] = { 1040, 1050, 999, 2000 };
+    for (int i = 0; i &lt; 4; i++) {
+        int c;
+        size_t pos = lower_bound(accts, n, keys[i], &amp;c);
+        if (pos &lt; n &amp;&amp; accts[pos] == keys[i])
+            printf("%lld → 찾음 idx=%zu (비교 %d회)\n", (long long)keys[i], pos, c);
+        else
+            printf("%lld → 없음, 삽입 위치=%zu (비교 %d회)\n", (long long)keys[i], pos, c);
+    }
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>1040 → 찾음 idx=4 (비교 3회)
+1050 → 없음, 삽입 위치=5 (비교 3회)
+999 → 없음, 삽입 위치=0 (비교 4회)
+2000 → 없음, 삽입 위치=8 (비교 3회)</pre></figure>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 — 이진 탐색의 세 가지 버그</p>
+<ul>
+<li><strong>중간값 오버플로</strong>: <code>(lo + hi) / 2</code>는 lo + hi가 타입 최대값을 넘으면 깨집니다(실제로 유명 라이브러리에서 수년간 숨어 있던 버그). <code>lo + (hi - lo) / 2</code>를 씁니다.</li>
+<li><strong>무한 루프</strong>: 구간 정의(닫힌 [lo, hi] vs 반열린 [lo, hi))와 갱신식(<code>hi = mid</code> vs <code>hi = mid - 1</code>)을 섞으면 구간이 줄지 않습니다. 한 가지 정의로 통일합니다. 특히 size_t로 <code>hi = mid - 1</code>을 쓰면 mid가 0일 때 순환해 거대한 값이 됩니다.</li>
+<li><strong>정렬 기준 불일치</strong>: 금액순으로 정렬한 배열을 계좌번호로 이진 탐색하면 엉뚱한 결과가 나옵니다. 탐색의 비교 기준은 정렬 기준과 정확히 같아야 합니다.</li>
+</ul>
+</div>
+
+<h3 id="s23-2-6">qsort와 bsearch</h3>
+
+<p>C 표준 라이브러리는 범용 정렬 <code>qsort</code>와 이진 탐색 <code>bsearch</code>를 제공합니다. 원소 타입을 모르므로 <code>void *</code>와 원소 크기, 그리고 <strong>비교 함수 포인터</strong>를 받습니다. 비교 함수는 첫 인자가 작으면 음수, 같으면 0, 크면 양수를 반환해야 합니다.</p>
+
+<figure class="code"><figcaption>sortsearch.c — 비교 함수의 올바른 작성과 qsort/bsearch</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;string.h&gt;
+#include &lt;stdint.h&gt;
+
+typedef struct {
+    char    acct_no[15];
+    int64_t balance;
+} acct_t;
+
+/* 나쁜 예: 뺄셈 결과를 int로 → 넘치거나 잘려서 부호가 뒤집힌다 */
+static int cmp_balance_bad(const void *a, const void *b)
+{
+    return (int)(((const acct_t *)a)-&gt;balance - ((const acct_t *)b)-&gt;balance);
+}
+
+/* 좋은 예: 비교 연산 결과(0/1)의 차이 → -1, 0, 1 */
+static int cmp_balance(const void *a, const void *b)
+{
+    int64_t x = ((const acct_t *)a)-&gt;balance, y = ((const acct_t *)b)-&gt;balance;
+    return (x &gt; y) - (x &lt; y);
+}
+
+static int cmp_acct_no(const void *a, const void *b)
+{
+    return strcmp(((const acct_t *)a)-&gt;acct_no, ((const acct_t *)b)-&gt;acct_no);
+}
+
+int main(void)
+{
+    acct_t big = { "1", 3000000000LL }, zero = { "2", 0 };
+    printf("bad(30억, 0) = %d, good(30억, 0) = %d\n",
+           cmp_balance_bad(&amp;big, &amp;zero), cmp_balance(&amp;big, &amp;zero));
+
+    acct_t arr[] = {
+        { "330555000111", 500 }, { "110123456701", 1000 }, { "550111222333", 20 },
+        { "220987654321", 7 },   { "110999888777", 300 }
+    };
+    size_t n = sizeof arr / sizeof arr[0];
+    qsort(arr, n, sizeof arr[0], cmp_acct_no);            /* 계좌번호순 정렬 */
+    for (size_t i = 0; i &lt; n; i++)
+        printf("  %s %lld\n", arr[i].acct_no, (long long)arr[i].balance);
+
+    acct_t key = { "220987654321", 0 };                   /* 키도 같은 타입으로 */
+    acct_t *hit = bsearch(&amp;key, arr, n, sizeof arr[0], cmp_acct_no);
+    printf("bsearch 220987654321 → %s", hit ? "찾음" : "없음");
+    if (hit) printf(" (잔액 %lld)", (long long)hit-&gt;balance);
+    printf("\n");
+    strcpy(key.acct_no, "999");
+    printf("bsearch 999 → %s\n", bsearch(&amp;key, arr, n, sizeof arr[0], cmp_acct_no) ? "찾음" : "없음");
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과 (gcc, x86-64)</figcaption><pre>bad(30억, 0) = -1294967296, good(30억, 0) = 1
+  110123456701 1000
+  110999888777 300
+  220987654321 7
+  330555000111 500
+  550111222333 20
+bsearch 220987654321 → 찾음 (잔액 7)
+bsearch 999 → 없음</pre></figure>
+
+<p>나쁜 비교 함수는 30억 원이 0원보다 "작다"고 판정했습니다. int64 차이(3,000,000,000)를 int로 변환하면서 잘렸기 때문입니다(20장). 이런 비교 함수로 정렬하면 결과가 틀릴 뿐 아니라, 비교가 일관되지 않아(a &lt; b이고 b &lt; c인데 c &lt; a) qsort 구현에 따라 배열 범위 밖을 접근하는 사고까지 날 수 있습니다. 비교 함수는 반드시 <strong>일관된 전순서</strong>(반사·반대칭·추이)를 정의해야 합니다.</p>
+
+<div class="box tip"><p class="box-title" data-tag="잠깐">qsort는 퀵 정렬일까?</p>
+<p>표준은 <code>qsort</code>의 알고리즘도, 시간 복잡도도, 안정성도 규정하지 않습니다. glibc는 오랫동안 메모리가 충분하면 병합 정렬(결과적으로 안정)을 썼지만, 최근 버전에서는 인트로 정렬 계열로 바뀌어 안정성이 보장되지 않습니다. MSVC와 다른 libc도 제각각입니다. "지금까지 qsort가 안정적으로 동작했다"는 경험은 근거가 될 수 없으므로, 안정성이 필요하면 직접 보장해야 합니다(다음 절).</p>
+</div>
+
+<h3 id="s23-2-7">퀵 정렬과 병합 정렬</h3>
+
+<p>면접과 실무 모두에서 가장 중요한 두 정렬 알고리즘입니다.</p>
+<ul>
+<li><strong>퀵 정렬</strong>: 기준값(피벗)을 하나 골라, 피벗보다 작은 것은 왼쪽, 큰 것은 오른쪽으로 나눈(partition) 뒤 양쪽을 재귀로 정렬합니다. 제자리(in-place) 정렬이라 추가 메모리가 적고 평균적으로 가장 빠르지만, 피벗이 계속 최솟값/최댓값으로 걸리면(이미 정렬된 입력에 끝 원소 피벗) O(n²)이 됩니다. 원소를 멀리 교환하므로 <strong>불안정</strong>합니다.</li>
+<li><strong>병합 정렬</strong>: 배열을 반으로 나눠 각각 재귀로 정렬한 뒤, 정렬된 두 배열을 하나로 합칩니다(merge). 항상 O(n log n)이고 <strong>안정</strong>하지만, 합칠 때 O(n)의 추가 메모리가 필요합니다. 파일처럼 순차 접근만 가능한 대용량 데이터의 외부 정렬(external sort)에 적합합니다.</li>
+</ul>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 270" width="700" role="img" aria-label="병합 정렬의 분할과 병합 과정">
+  <g class="small mono">
+  <rect class="box" x="230" y="14" width="240" height="30" rx="4"/><text x="350" y="34" text-anchor="middle">38 27 43 3 | 9 82 10 5</text>
+  <rect class="box" x="110" y="64" width="150" height="30" rx="4"/><text x="185" y="84" text-anchor="middle">38 27 | 43 3</text>
+  <rect class="box" x="440" y="64" width="150" height="30" rx="4"/><text x="515" y="84" text-anchor="middle">9 82 | 10 5</text>
+  <rect class="box" x="60" y="114" width="80" height="30" rx="4"/><text x="100" y="134" text-anchor="middle">38 | 27</text>
+  <rect class="box" x="170" y="114" width="80" height="30" rx="4"/><text x="210" y="134" text-anchor="middle">43 | 3</text>
+  <rect class="box" x="450" y="114" width="80" height="30" rx="4"/><text x="490" y="134" text-anchor="middle">9 | 82</text>
+  <rect class="box" x="560" y="114" width="80" height="30" rx="4"/><text x="600" y="134" text-anchor="middle">10 | 5</text>
+  <rect class="hl" x="60" y="164" width="80" height="30" rx="4"/><text x="100" y="184" text-anchor="middle">27 38</text>
+  <rect class="hl" x="170" y="164" width="80" height="30" rx="4"/><text x="210" y="184" text-anchor="middle">3 43</text>
+  <rect class="hl" x="450" y="164" width="80" height="30" rx="4"/><text x="490" y="184" text-anchor="middle">9 82</text>
+  <rect class="hl" x="560" y="164" width="80" height="30" rx="4"/><text x="600" y="184" text-anchor="middle">5 10</text>
+  <rect class="hl" x="100" y="208" width="120" height="30" rx="4"/><text x="160" y="228" text-anchor="middle">3 27 38 43</text>
+  <rect class="hl" x="480" y="208" width="120" height="30" rx="4"/><text x="540" y="228" text-anchor="middle">5 9 10 82</text>
+  <rect class="hl2" x="250" y="236" width="200" height="30" rx="4"/><text x="350" y="256" text-anchor="middle">3 5 9 10 27 38 43 82</text>
+  </g>
+  <path class="arrow-m" d="M300 44 L 200 62"/><path class="arrow-m" d="M400 44 L 500 62"/>
+  <path class="arrow-m" d="M160 94 L 110 112"/><path class="arrow-m" d="M210 94 L 210 112"/>
+  <path class="arrow-m" d="M500 94 L 490 112"/><path class="arrow-m" d="M540 94 L 590 112"/>
+  <path class="arrow" d="M220 223 L 248 245"/><path class="arrow" d="M480 223 L 452 245"/>
+  <text x="660" y="84" class="small mute">분할</text>
+  <text x="660" y="184" class="small acc">병합</text>
+  <text x="20" y="260" class="small mute">깊이 log n, 단계마다 n</text>
+</svg>
+<figcaption>그림 23-10 병합 정렬 — 반씩 나눈 뒤(log n 단계), 각 단계에서 n개를 합친다 → O(n log n)</figcaption>
+</figure>
+
+<div class="tbl"><table>
+<thead><tr><th>알고리즘</th><th>최선</th><th>평균</th><th>최악</th><th>추가 메모리</th><th>안정</th><th>비고</th></tr></thead>
+<tbody>
+<tr><td>버블 정렬</td><td>O(n)</td><td>O(n²)</td><td>O(n²)</td><td>O(1)</td><td>예</td><td>교육용</td></tr>
+<tr><td>선택 정렬</td><td>O(n²)</td><td>O(n²)</td><td>O(n²)</td><td>O(1)</td><td>아니오</td><td>교환 횟수 최소</td></tr>
+<tr><td>삽입 정렬</td><td>O(n)</td><td>O(n²)</td><td>O(n²)</td><td>O(1)</td><td>예</td><td>거의 정렬된 데이터·작은 n에 최강</td></tr>
+<tr><td>퀵 정렬</td><td>O(n log n)</td><td>O(n log n)</td><td>O(n²)</td><td>O(log n) 스택</td><td>아니오</td><td>평균 최고속, 피벗 선택 중요</td></tr>
+<tr><td>병합 정렬</td><td>O(n log n)</td><td>O(n log n)</td><td>O(n log n)</td><td>O(n)</td><td>예</td><td>외부 정렬, 연결 리스트 정렬</td></tr>
+<tr><td>힙 정렬</td><td>O(n log n)</td><td>O(n log n)</td><td>O(n log n)</td><td>O(1)</td><td>아니오</td><td>최악 보장 + 제자리</td></tr>
+<tr><td>인트로 정렬</td><td>O(n log n)</td><td>O(n log n)</td><td>O(n log n)</td><td>O(log n)</td><td>아니오</td><td>퀵 → 깊어지면 힙 정렬로 전환</td></tr>
+<tr><td>Timsort</td><td>O(n)</td><td>O(n log n)</td><td>O(n log n)</td><td>O(n)</td><td>예</td><td>병합+삽입, 실데이터의 정렬된 구간 활용</td></tr>
+</tbody></table></div>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 비교 기반 정렬은 O(n log n)보다 빠를 수 없을까?</p>
+<p>원소 n개의 가능한 순서는 n!가지이고, 비교 한 번은 결과가 두 가지(예/아니오)입니다. 어떤 순서인지 확정하려면 비교들로 만든 결정 트리의 잎이 n!개 이상이어야 하므로, 트리 높이(최악 비교 횟수)는 log₂(n!) 이상입니다. 스털링 근사로 log₂(n!) ≈ n log₂ n − 1.44n이므로 하한은 Ω(n log n)입니다. 계수 정렬·기수 정렬처럼 비교 대신 키의 자릿값을 이용하는 정렬은 이 하한을 받지 않아, 키 범위가 제한된 경우(예: 0~999 지점 코드) O(n)에 정렬할 수 있습니다.</p>
+</div>
+
+<h3 id="s23-2-8">안정 정렬이 거래 정렬에서 중요한 이유</h3>
+
+<p><strong>안정 정렬(stable sort)</strong>은 비교 기준이 같은 원소들의 <strong>원래 상대 순서를 보존</strong>하는 정렬입니다. 금융 데이터는 대개 이미 시간순으로 쌓여 있고, 이를 계좌별·지점별로 다시 정렬하는 일이 많습니다. 이때 정렬이 불안정하면 같은 계좌 안에서 거래의 시간 순서가 뒤섞입니다.</p>
+
+<p>왜 문제가 될까요? 거래내역 조회 화면과 통장 인쇄는 "계좌별, 그 안에서 시간순"이어야 하고, 잔액 재계산 배치는 같은 계좌의 거래를 <strong>발생 순서대로</strong> 적용해야 중간 잔액이 맞습니다. 순서가 바뀌면 "잔액 부족" 판정이나 이자 계산의 기준 잔액이 달라질 수 있습니다.</p>
+
+<figure class="code"><figcaption>stable.c — 같은 데이터, 병합 정렬(안정) vs 퀵 정렬(불안정)</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+
+typedef struct { int seq; char hhmm[5]; char acct; } rec_t;   /* 시간순으로 쌓인 거래 */
+
+static int cmp_acct(const rec_t *x, const rec_t *y)          /* 계좌만 비교 */
+{
+    return (x-&gt;acct &gt; y-&gt;acct) - (x-&gt;acct &lt; y-&gt;acct);
+}
+
+/* 병합 정렬 [lo, hi) — 같으면 왼쪽(먼저 있던 것)을 먼저 내보내 안정 */
+static void merge_sort(rec_t *a, rec_t *tmp, size_t lo, size_t hi)
+{
+    if (hi - lo &lt; 2) return;
+    size_t mid = lo + (hi - lo) / 2;
+    merge_sort(a, tmp, lo, mid);
+    merge_sort(a, tmp, mid, hi);
+    size_t i = lo, j = mid, k = lo;
+    while (i &lt; mid &amp;&amp; j &lt; hi)
+        tmp[k++] = (cmp_acct(&amp;a[j], &amp;a[i]) &lt; 0) ? a[j++] : a[i++];   /* 엄격히 작을 때만 오른쪽 */
+    while (i &lt; mid) tmp[k++] = a[i++];
+    while (j &lt; hi)  tmp[k++] = a[j++];
+    memcpy(a + lo, tmp + lo, (hi - lo) * sizeof *a);
+}
+
+static void swap(rec_t *x, rec_t *y) { rec_t t = *x; *x = *y; *y = t; }
+
+/* 퀵 정렬 (Lomuto 분할, 마지막 원소 피벗) [lo, hi] */
+static void quick_sort(rec_t *a, int lo, int hi)
+{
+    if (lo &gt;= hi) return;
+    rec_t pivot = a[hi];
+    int i = lo;
+    for (int j = lo; j &lt; hi; j++)
+        if (cmp_acct(&amp;a[j], &amp;pivot) &lt; 0) { swap(&amp;a[i], &amp;a[j]); i++; }
+    swap(&amp;a[i], &amp;a[hi]);
+    quick_sort(a, lo, i - 1);
+    quick_sort(a, i + 1, hi);
+}
+
+static void show(const char *title, const rec_t *a, int n)
+{
+    printf("%s:", title);
+    for (int i = 0; i &lt; n; i++) printf(" %c%s#%d", a[i].acct, a[i].hhmm, a[i].seq);
+    printf("\n");
+}
+
+int main(void)
+{
+    const rec_t src[] = { {1,"0900",'B'}, {2,"0905",'A'}, {3,"0910",'B'},
+                          {4,"0915",'A'}, {5,"0920",'B'}, {6,"0925",'A'} };
+    rec_t a[6], tmp[6];
+    show("원본(시간순)    ", src, 6);
+    memcpy(a, src, sizeof a); merge_sort(a, tmp, 0, 6);  show("병합 정렬(안정) ", a, 6);
+    memcpy(a, src, sizeof a); quick_sort(a, 0, 5);       show("퀵 정렬(불안정) ", a, 6);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>원본(시간순)    : B0900#1 A0905#2 B0910#3 A0915#4 B0920#5 A0925#6
+병합 정렬(안정) : A0905#2 A0915#4 A0925#6 B0900#1 B0910#3 B0920#5
+퀵 정렬(불안정) : A0925#6 A0915#4 A0905#2 B0900#1 B0910#3 B0920#5</pre></figure>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 200" width="700" role="img" aria-label="안정 정렬은 같은 계좌 안의 시간 순서를 보존하고 불안정 정렬은 뒤섞는다">
+  <text x="20" y="30" class="small bold">계좌 A의 거래만 보면</text>
+  <text x="20" y="70" class="small">안정 정렬</text>
+  <rect class="hl" x="140" y="50" width="110" height="34" rx="4"/><text x="195" y="72" text-anchor="middle" class="small mono">09:05 입금</text>
+  <rect class="hl" x="270" y="50" width="110" height="34" rx="4"/><text x="325" y="72" text-anchor="middle" class="small mono">09:15 출금</text>
+  <rect class="hl" x="400" y="50" width="110" height="34" rx="4"/><text x="455" y="72" text-anchor="middle" class="small mono">09:25 이체</text>
+  <path class="arrow-m" d="M250 67 H 268"/><path class="arrow-m" d="M380 67 H 398"/>
+  <text x="530" y="72" class="small acc">발생 순서 그대로</text>
+  <text x="20" y="140" class="small">불안정 정렬</text>
+  <rect class="bad" x="140" y="120" width="110" height="34" rx="4"/><text x="195" y="142" text-anchor="middle" class="small mono">09:25 이체</text>
+  <rect class="bad" x="270" y="120" width="110" height="34" rx="4"/><text x="325" y="142" text-anchor="middle" class="small mono">09:15 출금</text>
+  <rect class="bad" x="400" y="120" width="110" height="34" rx="4"/><text x="455" y="142" text-anchor="middle" class="small mono">09:05 입금</text>
+  <path class="arrow-m" d="M250 137 H 268"/><path class="arrow-m" d="M380 137 H 398"/>
+  <text x="530" y="134" class="small warn-t">입금 전에 출금 적용</text>
+  <text x="530" y="152" class="small warn-t">→ 잔액 부족 오판정</text>
+  <text x="350" y="190" text-anchor="middle" class="small mute">해결: 안정 정렬을 쓰거나, 비교 기준에 (계좌, 시각, 일련번호)를 모두 넣어 순서를 완전히 정한다</text>
+</svg>
+<figcaption>그림 23-11 안정 정렬과 불안정 정렬 — 같은 키 안의 원래 순서가 업무 의미를 가질 때 안정성이 필수다</figcaption>
+</figure>
+
+<div class="box fix"><p class="box-title" data-tag="해결">이렇게 해결합니다 — 순서를 "운"에 맡기지 않는다</p>
+<ol>
+<li><strong>비교 기준을 완전하게</strong>: <code>(계좌, 거래시각, 거래일련번호)</code>처럼 동률이 생기지 않도록 고유한 마지막 키까지 비교 함수에 넣습니다. 그러면 어떤 정렬 알고리즘(<code>qsort</code> 포함)을 써도 결과가 하나로 정해집니다. 가장 권장되는 방법입니다.</li>
+<li><strong>안정 정렬 사용</strong>: 원래 순서 자체에 의미가 있고 별도 키가 없다면, 병합 정렬처럼 안정성이 보장된 정렬을 직접 구현하거나 공통 라이브러리를 씁니다.</li>
+<li><strong>원래 인덱스를 키로 추가</strong>: 정렬 전에 각 원소에 원래 위치를 기록해 두고 마지막 비교 기준으로 쓰면, 불안정 정렬도 안정 정렬과 같은 결과를 냅니다.</li>
+</ol>
+</div>
+
+<div class="box fin"><p class="box-title" data-tag="금융 실무">은행 시스템에서는 — 플랫폼 이전 후 달라진 거래내역 순서</p>
+<p>유닉스 서버에서 리눅스로 시스템을 이전한 뒤, 일부 고객의 거래내역 조회 화면에서 같은 시각(초 단위까지 동일)의 거래 순서가 이전과 다르게 나온다는 민원이 접수되었습니다. 원인은 정렬 비교 함수가 "계좌번호, 거래시각"까지만 비교하고 있었고, 이전 플랫폼의 qsort 구현은 우연히 원래 순서를 유지했지만 새 플랫폼의 구현은 그렇지 않았기 때문입니다. 화면 순서만의 문제가 아니라, 같은 정렬 결과를 쓰던 통장 이월 잔액 계산에서도 중간 잔액 표시가 바뀌는 영향이 있었습니다. 비교 함수에 거래일련번호를 추가하는 한 줄 수정으로 해결되었지만, 영향 범위 분석과 재검증에는 몇 주가 걸렸습니다. <strong>정렬 결과가 업무 의미를 가진다면 그 순서를 완전히 정의하라</strong>는 것이 교훈입니다.</p>
+</div>
+
+<h3 id="s23-2-9">우선순위 큐(힙)와 주문 체결 우선순위</h3>
+
+<p>증권 거래소의 매매 체결은 <strong>가격 우선, 시간 우선</strong> 원칙을 따릅니다. 매수 주문은 높은 가격이 먼저, 같은 가격이면 먼저 들어온 주문이 먼저 체결됩니다(매도는 낮은 가격 우선). 주문이 계속 들어오고 체결로 빠져나가는 상황에서 "지금 가장 우선순위가 높은 주문"을 빠르게 꺼내는 자료구조가 <strong>우선순위 큐</strong>이고, 대표적인 구현이 <strong>이진 힙(binary heap)</strong>입니다.</p>
+
+<p>이진 힙은 "부모가 항상 자식보다 우선순위가 높거나 같은" 완전 이진 트리입니다. 완전 이진 트리이므로 포인터 없이 <strong>배열</strong>에 저장할 수 있습니다. 인덱스 i의 자식은 2i+1, 2i+2이고 부모는 (i−1)/2입니다. 삽입은 맨 끝에 넣고 부모와 비교하며 올리고(sift-up), 꺼내기는 루트를 빼고 마지막 원소를 루트에 올린 뒤 자식과 비교하며 내립니다(sift-down). 둘 다 트리 높이만큼, 즉 O(log n)입니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 290" width="700" role="img" aria-label="매수 주문 5건으로 만든 최대 힙의 트리 모양과 배열 저장">
+  <rect class="hl2" x="280" y="20" width="140" height="44" rx="22"/>
+  <text x="350" y="40" text-anchor="middle" class="small bold">B4 70,700</text>
+  <text x="350" y="56" text-anchor="middle" class="small mono">09:00:02</text>
+  <rect class="hl" x="130" y="100" width="140" height="44" rx="22"/>
+  <text x="200" y="120" text-anchor="middle" class="small bold">B2 70,700</text>
+  <text x="200" y="136" text-anchor="middle" class="small mono">09:00:03</text>
+  <rect class="hl" x="430" y="100" width="140" height="44" rx="22"/>
+  <text x="500" y="120" text-anchor="middle" class="small bold">B3 70,500</text>
+  <text x="500" y="136" text-anchor="middle" class="small mono">09:00:00</text>
+  <rect class="box" x="40" y="180" width="140" height="44" rx="22"/>
+  <text x="110" y="200" text-anchor="middle" class="small bold">B1 70,500</text>
+  <text x="110" y="216" text-anchor="middle" class="small mono">09:00:01</text>
+  <rect class="box" x="220" y="180" width="140" height="44" rx="22"/>
+  <text x="290" y="200" text-anchor="middle" class="small bold">B5 70,600</text>
+  <text x="290" y="216" text-anchor="middle" class="small mono">09:00:04</text>
+  <path class="line" d="M320 64 L 230 100"/><path class="line" d="M380 64 L 470 100"/>
+  <path class="line" d="M170 144 L 120 180"/><path class="line" d="M230 144 L 280 180"/>
+  <g class="small mono">
+  <rect class="hl2" x="400" y="190" width="56" height="30"/><text x="428" y="210" text-anchor="middle">B4</text>
+  <rect class="hl" x="456" y="190" width="56" height="30"/><text x="484" y="210" text-anchor="middle">B2</text>
+  <rect class="hl" x="512" y="190" width="56" height="30"/><text x="540" y="210" text-anchor="middle">B3</text>
+  <rect class="box" x="568" y="190" width="56" height="30"/><text x="596" y="210" text-anchor="middle">B1</text>
+  <rect class="box" x="624" y="190" width="56" height="30"/><text x="652" y="210" text-anchor="middle">B5</text>
+  <text x="428" y="236" text-anchor="middle" class="mute">[0]</text><text x="484" y="236" text-anchor="middle" class="mute">[1]</text>
+  <text x="540" y="236" text-anchor="middle" class="mute">[2]</text><text x="596" y="236" text-anchor="middle" class="mute">[3]</text>
+  <text x="652" y="236" text-anchor="middle" class="mute">[4]</text>
+  </g>
+  <text x="540" y="262" text-anchor="middle" class="small mute">배열 저장: 자식 2i+1, 2i+2 / 부모 (i-1)/2</text>
+  <text x="350" y="284" text-anchor="middle" class="small">B5(70,600)가 B3(70,500)보다 우선이지만 형제 사이 순서는 힙이 보장하지 않는다 — 루트만 최우선</text>
+</svg>
+<figcaption>그림 23-12 매수 주문 최대 힙(가격 높은 순, 같으면 시각 빠른 순) — 트리 모양과 실제 배열 저장</figcaption>
+</figure>
+
+<figure class="code"><figcaption>orderheap.c — 가격-시간 우선 매수 호가 힙과 체결</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stdint.h&gt;
+#include &lt;stdbool.h&gt;
+
+typedef struct {
+    char    id[4];
+    int64_t price;          /* 원 */
+    int64_t qty;            /* 주 */
+    int     hhmmss;         /* 접수 시각 */
+    uint64_t seq;           /* 접수 일련번호: 같은 시각 동률 해소 */
+} order_t;
+
+#define HEAP_MAX 1024
+typedef struct { order_t a[HEAP_MAX]; size_t n; } buy_heap_t;
+
+/* x가 y보다 먼저 체결되어야 하면 true (매수: 높은 가격 → 이른 시각 → 작은 일련번호) */
+static bool higher(const order_t *x, const order_t *y)
+{
+    if (x-&gt;price != y-&gt;price)   return x-&gt;price &gt; y-&gt;price;
+    if (x-&gt;hhmmss != y-&gt;hhmmss) return x-&gt;hhmmss &lt; y-&gt;hhmmss;
+    return x-&gt;seq &lt; y-&gt;seq;
+}
+
+static void swap_o(order_t *x, order_t *y) { order_t t = *x; *x = *y; *y = t; }
+
+static bool heap_push(buy_heap_t *h, order_t o)
+{
+    if (h-&gt;n == HEAP_MAX) return false;
+    size_t i = h-&gt;n++;
+    h-&gt;a[i] = o;
+    while (i &gt; 0) {                                  /* sift-up */
+        size_t p = (i - 1) / 2;
+        if (!higher(&amp;h-&gt;a[i], &amp;h-&gt;a[p])) break;
+        swap_o(&amp;h-&gt;a[i], &amp;h-&gt;a[p]);
+        i = p;
+    }
+    return true;
+}
+
+static const order_t *heap_top(const buy_heap_t *h) { return h-&gt;n ? &amp;h-&gt;a[0] : NULL; }
+
+static void heap_pop(buy_heap_t *h)
+{
+    if (h-&gt;n == 0) return;
+    h-&gt;a[0] = h-&gt;a[--h-&gt;n];                          /* 마지막을 루트로 */
+    size_t i = 0;
+    for (;;) {                                       /* sift-down */
+        size_t l = 2 * i + 1, r = l + 1, best = i;
+        if (l &lt; h-&gt;n &amp;&amp; higher(&amp;h-&gt;a[l], &amp;h-&gt;a[best])) best = l;
+        if (r &lt; h-&gt;n &amp;&amp; higher(&amp;h-&gt;a[r], &amp;h-&gt;a[best])) best = r;
+        if (best == i) break;
+        swap_o(&amp;h-&gt;a[i], &amp;h-&gt;a[best]);
+        i = best;
+    }
+}
+
+int main(void)
+{
+    static buy_heap_t bids;                          /* 큰 구조체는 static (스택 절약) */
+    const order_t in[] = {
+        { "B1", 70500, 10, 90001, 1 }, { "B2", 70700,  5, 90003, 2 },
+        { "B3", 70500, 20, 90000, 3 }, { "B4", 70700,  8, 90002, 4 },
+        { "B5", 70600, 15, 90004, 5 },
+    };
+    for (int i = 0; i &lt; 5; i++) heap_push(&amp;bids, in[i]);
+    printf("힙 배열:");
+    for (size_t i = 0; i &lt; bids.n; i++) printf(" %s", bids.a[i].id);
+    printf("\n");
+
+    /* 지정가 매도 30주 @ 70,600원 (70,600원 이상 매수 주문과 체결) */
+    int64_t sell_qty = 30, sell_limit = 70600;
+    printf("[매도] %lld주 @ %lld원 지정가\n", (long long)sell_qty, (long long)sell_limit);
+    while (sell_qty &gt; 0) {
+        const order_t *best = heap_top(&amp;bids);
+        if (!best || best-&gt;price &lt; sell_limit) {
+            if (best) printf("  최우선 매수호가 %lld &lt; %lld → 체결 중단\n",
+                             (long long)best-&gt;price, (long long)sell_limit);
+            break;
+        }
+        int64_t q = best-&gt;qty &lt; sell_qty ? best-&gt;qty : sell_qty;
+        printf("  체결: %s %lld주 @ %lld (접수 %06d)\n",
+               best-&gt;id, (long long)q, (long long)best-&gt;price, best-&gt;hhmmss);
+        sell_qty -= q;
+        if (q == best-&gt;qty) heap_pop(&amp;bids);
+        else bids.a[0].qty -= q;                     /* 부분 체결: 수량만 줄고 우선순위 유지 */
+    }
+    if (sell_qty &gt; 0) printf("  미체결 %lld주 → 매도 호가에 등록\n", (long long)sell_qty);
+    if (heap_top(&amp;bids))
+        printf("남은 매수 %zu건, 최우선 %s %lld원 %lld주\n", bids.n, heap_top(&amp;bids)-&gt;id,
+               (long long)heap_top(&amp;bids)-&gt;price, (long long)heap_top(&amp;bids)-&gt;qty);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>힙 배열: B4 B2 B3 B1 B5
+[매도] 30주 @ 70600원 지정가
+  체결: B4 8주 @ 70700 (접수 090002)
+  체결: B2 5주 @ 70700 (접수 090003)
+  체결: B5 15주 @ 70600 (접수 090004)
+  최우선 매수호가 70500 &lt; 70600 → 체결 중단
+  미체결 2주 → 매도 호가에 등록
+남은 매수 2건, 최우선 B3 70500원 20주</pre></figure>
+
+<p>B3(70,500원, 09:00:00)은 가장 먼저 들어왔지만 가격이 낮아 뒤로 밀렸고, 같은 70,700원인 B4와 B2는 접수 시각이 빠른 B4가 먼저 체결되었습니다. 70,500원 두 건이 남았을 때는 B3가 B1보다 먼저 들어왔으므로 최우선입니다. "가격 → 시간 → 일련번호"의 비교 함수 하나가 체결 규칙 전체를 표현하고 있다는 점에 주목하십시오.</p>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 정렬된 배열이나 연결 리스트가 아니라 힙일까?</p>
+<p>정렬된 배열은 최우선 원소를 O(1)에 보지만 새 주문 삽입이 O(n)(밀어내기)입니다. 정렬된 연결 리스트도 삽입 위치를 찾는 데 O(n)입니다. 정렬되지 않은 배열은 삽입 O(1)이지만 최우선을 찾는 데 O(n)입니다. 힙은 삽입과 꺼내기가 모두 O(log n)이라 "계속 들어오고 계속 빠지는" 흐름에 균형이 맞습니다. 다만 실제 거래소 매칭 엔진은 주문 취소(임의 원소 삭제)와 가격대별 일괄 처리가 많아서, <strong>가격대별 이중 연결 리스트(23-1-3) + 가격 정렬 구조(트리나 가격 인덱스 배열)</strong> 조합을 주로 씁니다. 힙은 타이머 관리(가장 먼저 만료되는 타임아웃), 작업 스케줄링, 상위 K개 추출에도 널리 쓰입니다.</p>
+</div>
+
+<div class="ex"><p class="ex-title">예제 23-3 <span class="lv">난이도 ★★☆</span></p>
+<p>위 힙(B4 B2 B3 B1 B5)에서 <code>heap_pop</code>을 한 번 했을 때의 배열 상태를 단계별로 쓰십시오.</p>
+<details><summary>정답과 해설 보기</summary>
+<ol>
+<li>루트 B4를 제거하고 마지막 원소 B5를 루트로: [B5, B2, B3, B1], n=4.</li>
+<li>i=0: 자식 B2(70,700), B3(70,500). B5(70,600)보다 우선인 B2와 교환 → [B2, B5, B3, B1], i=1.</li>
+<li>i=1: 자식 l=3(B1, 70,500), r=4(없음). B5(70,600)가 B1보다 우선이므로 멈춤.</li>
+</ol>
+<p>결과: <strong>[B2, B5, B3, B1]</strong>. 루트가 다음 최우선 주문 B2입니다.</p>
+</details></div>
+
+<h2 id="summary">핵심 정리</h2>
+<ul class="summary-list">
+<li>배열은 연속 메모리라 임의 접근 O(1)·캐시 효율이 뛰어나고, 연결 리스트는 노드 포인터를 알 때 삽입·삭제 O(1)이지만 탐색 O(n)·캐시 효율이 나쁩니다. 데이터 수가 적으면 배열이 이기는 경우가 많습니다.</li>
+<li>연결 리스트 삽입은 "새 노드가 다음을 먼저 잡고 → 앞 링크를 새 노드로", 삭제는 "링크 우회 → 해제" 순서입니다. 포인터의 포인터(<code>node **pp</code>)를 쓰면 맨 앞 특수 처리가 사라집니다. 해제하며 순회할 때는 다음 포인터를 먼저 저장합니다.</li>
+<li>더미 노드를 둔 원형 이중 연결 리스트는 NULL 검사 없이 O(1) 삭제를 제공하며, 주문 취소처럼 "포인터를 이미 아는 원소 삭제"에 적합합니다. 링크를 구조체에 내장하는 침입형 리스트가 실무에서 흔합니다.</li>
+<li>스택(LIFO)은 중첩 구조 검사에, 큐(FIFO)는 순서대로 처리할 작업에 씁니다. 외부 입력을 다루는 스택·큐에는 반드시 상한을 둡니다.</li>
+<li>원형 버퍼는 head와 count(또는 한 칸 비우기)로 full/empty를 구분하고, TCP 바이트 스트림에서 길이 헤더로 전문 경계를 복원하는 수신 버퍼로 씁니다. TCP는 메시지 경계를 보존하지 않습니다.</li>
+<li>해시 테이블은 평균 O(1)이지만 충돌 처리(체이닝/개방 주소법), 좋은 해시 함수(FNV-1a 등), 로드 팩터 관리(약 0.75에서 2배 리사이즈, 분할 상환 O(1))가 성능을 좌우합니다. 최종 비교는 항상 원래 키로 합니다. 외부 키는 HashDoS에 대비합니다.</li>
+<li>정렬된 배열의 이진 탐색은 O(log n)이며 범위 검색이 가능합니다. 중간값은 <code>lo + (hi - lo) / 2</code>, 구간은 반열린 [lo, hi)로 통일합니다.</li>
+<li><code>qsort</code>/<code>bsearch</code>의 비교 함수는 <code>(x &gt; y) - (x &lt; y)</code>로 쓰고 뺄셈을 쓰지 않습니다. qsort의 알고리즘과 안정성은 표준이 보장하지 않습니다.</li>
+<li>퀵 정렬은 평균 최고속·제자리지만 최악 O(n²)·불안정, 병합 정렬은 항상 O(n log n)·안정이지만 O(n) 메모리가 필요합니다. 비교 기반 정렬의 하한은 Ω(n log n)입니다.</li>
+<li>같은 키 안의 원래 순서가 업무 의미를 가지면(계좌별 거래 순서) 안정 정렬을 쓰거나, 비교 기준에 고유 키(일련번호)까지 넣어 순서를 완전히 정의합니다.</li>
+<li>이진 힙은 배열 기반 완전 이진 트리로 삽입·꺼내기 O(log n), 최우선 조회 O(1)입니다. 비교 함수 하나로 가격-시간 우선 같은 업무 규칙을 표현합니다.</li>
+</ul>
+
+<h2 id="interview">CS 면접 단골 질문</h2>
+<div class="box iv"><p class="box-title" data-tag="면접">이 장에서 나오는 면접 질문</p>
+<details><summary>Q1. 배열과 연결 리스트의 차이를 설명하고, 각각 언제 쓰는지 말해 주십시오.</summary>
+<p>배열은 연속된 메모리에 저장되어 인덱스로 O(1) 접근이 가능하고 캐시 효율이 좋지만, 중간 삽입·삭제가 O(n)이고 크기 변경 시 재할당·복사가 필요합니다. 연결 리스트는 노드가 포인터로 이어져 삽입·삭제가 O(1)(위치를 알 때)이지만, 탐색이 O(n)이고 노드마다 포인터 메모리가 들며 캐시 효율이 낮습니다. 임의 접근과 순회가 많으면 배열, 노드를 직접 가리킨 상태에서 빈번한 삽입·삭제가 필요하면(LRU 캐시, 주문 취소) 연결 리스트를 씁니다.</p>
+<p><strong>꼬리 질문 대비:</strong> "연결 리스트 뒤집기를 구현해 보라" → prev/cur/next 세 포인터로 O(n), O(1) 공간(예제 23-1).</p>
+</details>
+<details><summary>Q2. 스택과 큐의 차이와 구현 방법은?</summary>
+<p>스택은 마지막에 넣은 것을 먼저 꺼내는 LIFO, 큐는 먼저 넣은 것을 먼저 꺼내는 FIFO 구조입니다. 스택은 배열과 top 인덱스로 간단히 구현하고, 큐는 배열을 원형으로 써서 head와 tail(또는 count)로 구현하면 모든 연산이 O(1)입니다. 연결 리스트로도 구현할 수 있습니다. 스택은 함수 호출, 괄호 검사, 실행 취소에, 큐는 작업 대기열, BFS, 버퍼링에 씁니다.</p>
+<p><strong>꼬리 질문 대비:</strong> "스택 두 개로 큐를 만들라" → 입력 스택에 넣고, 출력 스택이 비었을 때 입력 스택을 모두 옮겨 꺼내면 분할 상환 O(1)입니다.</p>
+</details>
+<details><summary>Q3. 원형 큐에서 가득 찬 상태와 빈 상태를 어떻게 구분합니까?</summary>
+<p>head와 tail만 두면 둘 다 head == tail이 되어 구분할 수 없습니다. 해결책은 ① 한 칸을 비워 두고 (tail + 1) % N == head를 가득 참으로 보는 방법, ② 원소 개수 count를 따로 유지하는 방법, ③ head·tail을 계속 증가시키고 그 차이로 개수를 구하는 방법(용량을 2의 거듭제곱으로 두고 마스크로 인덱싱)이 있습니다.</p>
+</details>
+<details><summary>Q4. 해시 테이블의 충돌 해결 방법과 각각의 장단점은?</summary>
+<p>체이닝은 버킷마다 연결 리스트를 두어 충돌한 원소를 매다는 방식으로, 구현과 삭제가 쉽고 로드 팩터가 높아도 성능이 완만히 저하되지만 포인터 오버헤드와 캐시 미스가 있습니다. 개방 주소법은 충돌 시 정해진 탐사 순서로 다른 빈칸을 찾는 방식으로, 메모리가 연속이라 캐시 효율이 좋지만 클러스터링이 생기고 삭제에 tombstone이 필요하며 로드 팩터가 높으면 급격히 느려집니다.</p>
+<p><strong>꼬리 질문 대비:</strong> "최악 시간 복잡도는?" → 모든 키가 한 버킷에 몰리면 O(n)입니다. 그래서 좋은 해시 함수, 리사이즈, 외부 입력에는 시드 기반 해시가 필요합니다.</p>
+</details>
+<details><summary>Q5. 로드 팩터란 무엇이고, 리사이즈는 왜·어떻게 합니까?</summary>
+<p>로드 팩터는 저장된 원소 수를 버킷 수로 나눈 값으로, 체이닝에서는 평균 체인 길이입니다. 값이 커지면 검색 비용이 늘어나므로 보통 0.75 정도를 넘으면 버킷 수를 두 배로 늘리고 모든 원소를 새 버킷 위치로 다시 배치합니다. 한 번의 리사이즈는 O(n)이지만 두 배씩 늘리면 전체 삽입의 분할 상환 비용은 O(1)입니다. 실시간 시스템에서는 리사이즈 순간의 지연을 피하기 위해 초기 용량을 넉넉히 잡거나 점진적 리해시를 씁니다.</p>
+</details>
+<details><summary>Q6. 이진 탐색의 전제 조건과 구현 시 주의점은?</summary>
+<p>데이터가 탐색 키 기준으로 정렬되어 있어야 하고, 임의 접근이 가능한 구조(배열)여야 합니다. 시간 복잡도는 O(log n)입니다. 구현 시 중간 인덱스를 <code>(lo + hi) / 2</code>로 계산하면 오버플로가 날 수 있으므로 <code>lo + (hi - lo) / 2</code>를 쓰고, 구간 정의(닫힌/반열린)와 갱신식을 일관되게 맞춰 무한 루프를 피해야 합니다.</p>
+</details>
+<details><summary>Q7. 퀵 정렬과 병합 정렬을 비교해 주십시오. 퀵 정렬의 최악은 언제입니까?</summary>
+<p>둘 다 분할 정복이며 평균 O(n log n)입니다. 퀵 정렬은 제자리 정렬이라 추가 메모리가 적고 캐시 효율이 좋아 평균적으로 빠르지만 불안정하고, 피벗이 매번 최솟값이나 최댓값으로 골라지면(이미 정렬된 배열에서 첫/끝 원소를 피벗으로 쓸 때) O(n²)이 됩니다. 병합 정렬은 항상 O(n log n)이고 안정하지만 O(n) 추가 메모리가 필요합니다. 퀵 정렬의 최악을 피하려고 무작위 피벗, 세 값의 중앙값 피벗, 재귀가 깊어지면 힙 정렬로 바꾸는 인트로 정렬을 씁니다.</p>
+</details>
+<details><summary>Q8. 안정 정렬이란 무엇이고 왜 중요합니까?</summary>
+<p>정렬 키가 같은 원소들의 원래 상대 순서를 유지하는 정렬입니다. 여러 기준으로 차례로 정렬할 때(먼저 시간순, 그다음 계좌순) 앞선 정렬 결과를 보존하려면 안정성이 필요합니다. 금융에서는 같은 계좌 거래의 발생 순서가 잔액 계산에 영향을 주므로 중요하며, 불안정 정렬을 쓴다면 비교 키에 일련번호 같은 고유 키를 포함해 순서를 완전히 정의해야 합니다. 병합·삽입·Timsort는 안정, 퀵·힙·선택 정렬은 불안정입니다.</p>
+</details>
+<details><summary>Q9. 힙이란 무엇이고 삽입·삭제의 시간 복잡도는?</summary>
+<p>힙은 부모가 자식보다 항상 크거나(최대 힙) 작은(최소 힙) 완전 이진 트리로, 배열에 인덱스 규칙(자식 2i+1, 2i+2)으로 저장합니다. 삽입은 맨 끝에 넣고 위로 올리며, 최댓값 삭제는 루트를 마지막 원소로 바꾼 뒤 아래로 내리므로 둘 다 O(log n), 최댓값 조회는 O(1)입니다. n개로 힙을 한 번에 만드는 heapify는 O(n)입니다. 우선순위 큐, 힙 정렬, 타이머 관리, 상위 K개 추출에 씁니다.</p>
+</details>
+<details><summary>Q10. qsort 비교 함수에서 <code>return a - b;</code>를 쓰면 안 되는 이유는?</summary>
+<p>뺄셈이 오버플로하면(int에서 큰 양수와 큰 음수의 차) signed 오버플로로 UB이고, 64비트 값의 차이를 int로 반환하면 잘려서 부호가 뒤집힐 수 있습니다. 그러면 비교 결과가 일관되지 않아 정렬이 틀리거나 구현에 따라 범위 밖 접근까지 발생할 수 있습니다. <code>(a &gt; b) - (a &lt; b)</code>처럼 비교 결과로 −1, 0, 1을 만들면 안전합니다.</p>
+</details>
+</div>
+
+<h2 id="exercises">연습문제</h2>
+
+<div class="ex"><p class="ex-title">연습문제 23-1 <span class="lv">난이도 ★☆☆</span> 시간 복잡도</p>
+<p>다음 연산의 시간 복잡도를 쓰십시오. (1) 정렬된 배열 100만 개에서 이진 탐색 (2) 단일 연결 리스트의 맨 뒤에 삽입(tail 포인터 없음) (3) 해시 테이블 평균 검색 (4) 힙에서 최댓값 조회 (5) 힙에서 최댓값 삭제 (6) 정렬되지 않은 배열에서 최솟값 찾기</p>
+<details><summary>정답과 해설 보기</summary>
+<p>(1) O(log n), 최대 약 20회 비교 (2) O(n), 끝까지 따라가야 함(tail 포인터를 두면 O(1)) (3) O(1) 평균, 최악 O(n) (4) O(1), 루트 (5) O(log n), sift-down (6) O(n), 모두 봐야 함.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 23-2 <span class="lv">난이도 ★☆☆</span> 스택 추적</p>
+<p>빈 스택에 push 1, push 2, pop, push 3, push 4, pop, pop, push 5를 수행했습니다. pop된 순서와 최종 스택 내용(바닥부터)을 쓰십시오.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>pop 순서: <strong>2, 4, 3</strong>. 최종 스택: <strong>[1, 5]</strong>(5가 맨 위). push 1·2 후 pop → 2, push 3·4 후 pop → 4, pop → 3, 남은 [1]에 5를 push.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 23-3 <span class="lv">난이도 ★★☆</span> 버그 찾기 — 연결 리스트 삭제</p>
+<pre><code class="language-c">void remove_negative(tx_node *head)       /* 금액이 음수인 노드를 모두 제거 */
+{
+    for (tx_node *p = head; p; p = p-&gt;next) {
+        if (p-&gt;next &amp;&amp; p-&gt;next-&gt;amount &lt; 0) {
+            free(p-&gt;next);
+            p-&gt;next = p-&gt;next-&gt;next;
+        }
+    }
+}</code></pre>
+<details><summary>정답과 해설 보기</summary>
+<p>① <code>free(p-&gt;next)</code> 다음 줄에서 해제된 노드의 <code>next</code>를 읽는 use-after-free입니다. ② 첫 노드(head)가 음수면 제거되지 않습니다(head를 바꿀 수 없는 시그니처). ③ 음수 노드가 연속이면 하나를 건너뜁니다(삭제 후 p가 바로 다음으로 전진). 포인터의 포인터로 고칩니다.</p>
+<figure class="code good"><figcaption>정답 코드</figcaption>
+<pre><code class="language-c">void remove_negative(tx_node **head)
+{
+    tx_node **pp = head;
+    while (*pp) {
+        if ((*pp)-&gt;amount &lt; 0) {
+            tx_node *v = *pp;
+            *pp = v-&gt;next;        /* 먼저 우회 */
+            free(v);              /* 그다음 해제, pp는 그대로(다음 노드 검사) */
+        } else {
+            pp = &amp;(*pp)-&gt;next;
+        }
+    }
+}</code></pre></figure>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 23-4 <span class="lv">난이도 ★★☆</span> 원형 버퍼</p>
+<p>본문의 <code>ringbuf_t</code>(용량 16)가 head=12, count=6일 때 7바이트 "ABCDEFG"를 <code>rb_write</code>하면 각 문자는 어느 인덱스에 들어가고, 쓰기 후 head·count·tail은 얼마입니까? 그다음 10바이트를 더 쓰면 어떻게 됩니까?</p>
+<details><summary>정답과 해설 보기</summary>
+<p>tail = (12 + 6) % 16 = 2. first = 16 − 2 = 14 ≥ 7이므로 감김 없이 인덱스 2~8에 A~G가 들어갑니다. 쓰기 후 head=12(변화 없음), count=13, tail=(12+13)%16=9. 이어서 10바이트를 쓰려 하면 빈 공간이 16 − 13 = 3바이트뿐이므로 <code>rb_write</code>는 아무것도 쓰지 않고 false를 반환합니다(부분 쓰기 없음). 호출자는 수신을 잠시 멈추는 흐름 제어나 연결 종료로 대응합니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 23-5 <span class="lv">난이도 ★★☆</span> 코드 작성 — 해시 테이블 잔액 갱신</p>
+<p>본문의 <code>acct_map_t</code>를 이용해 "계좌번호와 금액(음수 출금)을 받아 잔액을 갱신하되, 계좌가 없으면 -1, 잔액이 음수가 되면 -2를 반환하고 갱신하지 않는" 함수 <code>int apply_tx(acct_map_t *m, const char *acct_no, int64_t amount)</code>를 작성하십시오.</p>
+<details><summary>정답과 해설 보기</summary>
+<figure class="code good"><figcaption>정답 코드</figcaption>
+<pre><code class="language-c">int apply_tx(acct_map_t *m, const char *acct_no, int64_t amount)
+{
+    account_t *a = map_get(m, acct_no);
+    if (!a) return -1;
+    int64_t nb;
+    if (__builtin_add_overflow(a-&gt;balance, amount, &amp;nb)) return -3;   /* 20장 */
+    if (nb &lt; 0) return -2;                 /* 잔액 부족: 상태 변경 없음 */
+    a-&gt;balance = nb;                       /* 모든 검사 후 한 번에 반영 */
+    return 0;
+}</code></pre></figure>
+<p>"검사를 모두 통과한 뒤에만 상태를 바꾼다"는 원칙이 핵심입니다. 중간에 실패하면 원래 상태가 그대로 남아 재처리가 쉽습니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 23-6 <span class="lv">난이도 ★★☆</span> 이진 탐색 응용</p>
+<p>오름차순 정렬된 거래 금액 배열에서 [lo_amt, hi_amt] 범위에 드는 거래 건수를 O(log n)에 구하는 함수를 본문의 <code>lower_bound</code>를 이용해 작성하십시오. {100, 200, 200, 300, 500, 800}에서 [200, 500]이면 몇 건입니까?</p>
+<details><summary>정답과 해설 보기</summary>
+<p>건수 = (hi_amt보다 큰 첫 위치) − (lo_amt 이상인 첫 위치). 정수 금액이므로 "hi_amt보다 큰 첫 위치"는 <code>lower_bound(hi_amt + 1)</code>입니다(hi_amt가 INT64_MAX면 n으로 처리). 예: lower_bound(200) = 1, lower_bound(501) = 5 → <strong>4건</strong>(200, 200, 300, 500).</p>
+<figure class="code good"><figcaption>정답 코드</figcaption>
+<pre><code class="language-c">size_t count_in_range(const int64_t *a, size_t n, int64_t lo_amt, int64_t hi_amt)
+{
+    int c;
+    if (lo_amt &gt; hi_amt) return 0;
+    size_t L = lower_bound(a, n, lo_amt, &amp;c);
+    size_t R = (hi_amt == INT64_MAX) ? n : lower_bound(a, n, hi_amt + 1, &amp;c);
+    return R - L;
+}</code></pre></figure>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 23-7 <span class="lv">난이도 ★★☆</span> 비교 함수 작성</p>
+<p>거래 구조체 <code>{ char acct[15]; int hhmmss; uint64_t seq; int64_t amount; }</code>를 "계좌번호 오름차순 → 시각 오름차순 → 일련번호 오름차순"으로 정렬하는 qsort 비교 함수를 작성하십시오.</p>
+<details><summary>정답과 해설 보기</summary>
+<figure class="code good"><figcaption>정답 코드</figcaption>
+<pre><code class="language-c">typedef struct { char acct[15]; int hhmmss; uint64_t seq; int64_t amount; } tx_t;
+
+static int cmp_tx(const void *pa, const void *pb)
+{
+    const tx_t *a = pa, *b = pb;
+    int c = strcmp(a-&gt;acct, b-&gt;acct);
+    if (c != 0) return c;
+    if (a-&gt;hhmmss != b-&gt;hhmmss) return (a-&gt;hhmmss &gt; b-&gt;hhmmss) - (a-&gt;hhmmss &lt; b-&gt;hhmmss);
+    return (a-&gt;seq &gt; b-&gt;seq) - (a-&gt;seq &lt; b-&gt;seq);   /* unsigned도 뺄셈 금지 */
+}</code></pre></figure>
+<p>마지막 키(seq)가 고유하므로 동률이 없고, qsort가 불안정해도 결과가 하나로 정해집니다. <code>a-&gt;seq - b-&gt;seq</code>는 unsigned라 음수가 될 수 없어 특히 위험합니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 23-8 <span class="lv">난이도 ★★☆</span> 힙 추적</p>
+<p>빈 최소 힙(작은 값 우선)에 7, 3, 9, 1, 5를 차례로 넣은 뒤의 배열 상태와, 최솟값을 두 번 꺼낸 뒤의 배열 상태를 쓰십시오.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>삽입: [7] → [3,7](3이 7과 교환) → [3,7,9] → 1 삽입: [3,7,9,1] → 1과 부모 7 교환 [3,1,9,7] → 부모 3과 교환 <strong>[1,3,9,7]</strong> → 5 삽입: [1,3,9,7,5], 부모 3보다 크므로 그대로 → <strong>[1,3,9,7,5]</strong>.</p>
+<p>첫 꺼내기(1): 마지막 5를 루트로 [5,3,9,7] → 자식 3·9 중 3과 교환 [3,5,9,7] → i=1의 자식 7(인덱스 3)보다 5가 작으므로 멈춤 → <strong>[3,5,9,7]</strong>. 두 번째 꺼내기(3): [7,5,9] → 5와 교환 → <strong>[5,7,9]</strong>.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 23-9 <span class="lv">난이도 ★★☆</span> 해시 테이블 설계</p>
+<p>계좌 500만 건을 메모리 해시 테이블에 올리려 합니다. 로드 팩터 0.75 이하를 유지하려면 초기 버킷 수(2의 거듭제곱)를 얼마로 잡아야 합니까? 버킷 배열만의 메모리는(포인터 8바이트)?</p>
+<details><summary>정답과 해설 보기</summary>
+<p>필요 버킷 ≥ 5,000,000 / 0.75 ≈ 6,666,667. 2의 거듭제곱 중 이 이상인 최솟값은 2<sup>23</sup> = 8,388,608입니다(2<sup>22</sup> = 4,194,304는 부족). 로드 팩터는 약 0.596. 버킷 배열 메모리는 8,388,608 × 8바이트 = 64MiB입니다. 노드 자체(계좌 구조체 + malloc 헤더)는 별도이며, 대량 적재 시에는 노드를 하나씩 malloc하지 않고 큰 배열(풀)에서 나눠 쓰면 할당 오버헤드와 단편화를 줄일 수 있습니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 23-10 <span class="lv">난이도 ★★★</span> 코드 작성 — 정렬된 두 파일 대사</p>
+<p>계좌번호 오름차순으로 정렬된 두 배열(우리 원장 A, 대외기관 B: <code>{acct, amount}</code>)을 비교해 "A에만 있음", "B에만 있음", "금액 불일치"를 출력하는 함수를 O(n + m)으로 작성하십시오(병합 정렬의 merge 단계 응용).</p>
+<details><summary>정답과 해설 보기</summary>
+<p>두 포인터 i, j를 앞에서부터 전진시키며 계좌번호를 비교합니다. 작은 쪽은 상대에 없는 것이므로 보고하고 그쪽만 전진, 같으면 금액을 비교하고 둘 다 전진합니다. 해시 테이블 없이 정렬만으로 대사하는 일마감 배치의 고전적 방법이며, 파일을 순차로 읽으므로 데이터가 메모리보다 커도 동작합니다.</p>
+<figure class="code good"><figcaption>정답 코드</figcaption>
+<pre><code class="language-c">typedef struct { char acct[15]; int64_t amount; } rec_t;
+
+void reconcile(const rec_t *A, size_t n, const rec_t *B, size_t m)
+{
+    size_t i = 0, j = 0;
+    while (i &lt; n || j &lt; m) {
+        int c = (i == n) ? 1 : (j == m) ? -1 : strcmp(A[i].acct, B[j].acct);
+        if (c &lt; 0) {
+            printf("A에만: %s\n", A[i++].acct);
+        } else if (c &gt; 0) {
+            printf("B에만: %s\n", B[j++].acct);
+        } else {
+            if (A[i].amount != B[j].amount)
+                printf("불일치: %s A=%lld B=%lld\n", A[i].acct,
+                       (long long)A[i].amount, (long long)B[j].amount);
+            i++; j++;
+        }
+    }
+}</code></pre></figure>
+<p>전제: 각 배열 안에 같은 계좌번호가 중복되지 않아야 합니다. 중복 가능성이 있다면 사전에 검증하거나 합산해 두어야 합니다. 또 두 데이터의 정렬 기준(문자열 비교 vs 숫자 비교, 앞자리 0 처리)이 정확히 같아야 합니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 23-11 <span class="lv">난이도 ★★☆</span> 서술 — 자료구조 선택</p>
+<p>다음 각 요구에 가장 알맞은 자료구조를 고르고 이유를 쓰십시오. (1) 대외기관 응답 대기 중인 요청을 타임아웃이 가장 임박한 순서로 처리 (2) 단말 화면의 "실행 취소" 기능 (3) 계좌번호로 계좌 캐시 조회(범위 검색 불필요) (4) 지점코드 범위로 계좌 목록 조회 (5) 로그 기록 스레드에 넘길 메시지 대기열</p>
+<details><summary>정답과 해설 보기</summary>
+<p>(1) <strong>최소 힙</strong>(만료 시각 기준 우선순위 큐): 가장 임박한 것을 O(1)에 확인, 삽입·삭제 O(log n). (2) <strong>스택</strong>: 가장 최근 작업부터 되돌림(LIFO). (3) <strong>해시 테이블</strong>: 정확한 키 조회 평균 O(1). (4) <strong>정렬된 배열 + 이진 탐색</strong>(또는 균형 트리/B-트리): 범위의 시작 위치를 O(log n)에 찾고 순서대로 순회. 해시는 범위 검색 불가. (5) <strong>원형 큐</strong>(고정 크기 링 버퍼): 생산자-소비자 FIFO, 할당 없이 O(1), 가득 찰 때의 정책(대기/버림) 명시.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 23-12 <span class="lv">난이도 ★★★</span> 종합 — 주문 취소 지원</p>
+<p>본문의 매수 호가 힙에 "주문 ID로 임의 주문 취소" 기능을 O(log n)에 추가하려면 무엇이 필요합니까? 설계를 설명하십시오.</p>
+<details><summary>정답과 해설 보기</summary>
+<ol>
+<li><strong>위치 추적</strong>: 주문 ID → 힙 배열 인덱스를 저장하는 해시 테이블(또는 주문 객체 안의 <code>heap_idx</code> 필드)을 두고, sift-up/sift-down에서 원소를 교환할 때마다 인덱스를 갱신합니다.</li>
+<li><strong>임의 삭제</strong>: 취소할 원소의 인덱스 k를 찾아(O(1)), 마지막 원소를 k로 옮기고 n을 줄인 뒤, 옮겨진 원소를 부모와 비교해 sift-up 또는 sift-down 중 필요한 쪽을 수행합니다(O(log n)).</li>
+<li><strong>대안(지연 삭제)</strong>: 취소 시 주문에 "취소됨" 표시만 하고, 루트로 올라왔을 때 꺼내 버리는 방식도 간단하지만, 취소가 많으면 힙이 부풀어 메모리와 시간이 낭비됩니다.</li>
+<li><strong>실무형 구조</strong>: 같은 가격의 주문은 가격대별 이중 연결 리스트(시간 우선, O(1) 취소)에 두고, 가격대 자체만 힙이나 정렬 구조로 관리하면 취소와 체결이 모두 효율적입니다.</li>
+</ol>
+</details></div>
+
+</main>
+<aside class="rail" aria-label="이 페이지 목차"></aside>
+</div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-c.min.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>

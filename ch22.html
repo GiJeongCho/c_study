@@ -1,0 +1,1338 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ch22 시큐어 코딩 · C언어 금융 IT 마스터</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+KR:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-ch="ch22">
+<header class="topbar">
+  <button class="menu-btn" type="button" aria-expanded="false" aria-controls="sidebar">목차</button>
+  <a class="brand" href="index.html"><b>C</b>금융 IT 마스터</a>
+  <span class="where"></span>
+  <span class="progress"></span>
+</header>
+<div class="layout">
+<nav id="sidebar" class="sidebar" aria-label="과정 목차"></nav>
+<div class="page">
+<main class="content">
+
+<header class="ch-head">
+  <p class="eyebrow">PART 2 · 금융 IT 베테랑 트랙 · CHAPTER</p>
+  <div class="bignum">22</div>
+  <h1>시큐어 코딩</h1>
+  <p class="lede">C는 메모리를 직접 다루는 대신, 메모리를 지켜 주지 않습니다. 버퍼 하나를 넘쳐 쓰는 실수가 원격 코드 실행으로, 로그 한 줄이 개인정보 유출 사고로 이어집니다. 금융권은 법령과 감독규정으로 시큐어 코딩과 보안약점 진단을 요구합니다. 이 장에서는 공격이 실제로 어떻게 성립하는지 메모리 그림으로 이해하고, 그것을 막는 코딩 습관·도구·컴파일러 옵션을 실무 수준으로 익힙니다.</p>
+  <div class="goals"><p class="goals-title">이 장에서 배울 것</p><ul>
+    <li>스택 버퍼 오버플로가 리턴 주소를 덮어쓰는 원리를 스택 프레임 그림으로 설명합니다.</li>
+    <li><code>gets</code>/<code>strcpy</code>/<code>sprintf</code>의 위험과 안전한 대체 함수, <code>strncpy</code>의 함정을 압니다.</li>
+    <li>포맷 스트링 취약점, 정수 오버플로로 인한 할당 크기 버그, off-by-one, use-after-free를 재현하고 고칩니다.</li>
+    <li>계좌번호·금액 등 입력을 화이트리스트 방식으로 검증하는 함수를 작성합니다.</li>
+    <li>보안약점 진단 가이드의 분류와 CERT C 대표 규칙을 실무 체크리스트로 정리합니다.</li>
+    <li>계좌번호·카드번호·이름·주민등록번호 마스킹, 민감정보 메모리 제거(<code>explicit_bzero</code>), 로그 비식별화를 구현합니다.</li>
+    <li><code>rand()</code>를 보안 용도로 쓰면 안 되는 이유와 OS 난수 생성기 사용법, 편향 없는 범위 난수를 구현합니다.</li>
+    <li>스택 카나리, FORTIFY_SOURCE, ASLR/PIE, NX, RELRO와 정적·동적 분석 도구를 빌드 파이프라인에 적용합니다.</li>
+  </ul></div>
+</header>
+
+<h2 id="s22-1"><span class="num">22-1</span>메모리 안전과 입력 검증</h2>
+
+<p>C 프로그램의 보안 취약점 대부분은 <strong>메모리 안전성(memory safety)</strong> 위반에서 나옵니다. 배열 경계를 넘어 쓰기(buffer overflow), 이미 해제한 메모리 사용(use-after-free), 초기화하지 않은 메모리 읽기, 그리고 그 원인이 되는 정수 오버플로와 검증되지 않은 입력입니다. 이 절에서는 각각이 "어떻게 공격으로 이어지는지"를 메모리 그림으로 보고, 방어 코드를 작성합니다.</p>
+
+<div class="box tip"><p class="box-title" data-tag="잠깐">이 장의 공격 예시에 대하여</p>
+<p>이 장의 취약 코드는 <strong>왜 위험한지 이해하고 방어하기 위한</strong> 교육용 예시입니다. 실제 메모리 배치는 컴파일러, 최적화 옵션, 보호 기법에 따라 달라지므로 그림은 개념도입니다. 운영 시스템이나 타인의 시스템에 대한 시험은 반드시 승인된 범위 안에서만 해야 하며, 무단 시도는 정보통신망법 등에 따라 처벌 대상입니다.</p>
+</div>
+
+<h3 id="s22-1-1">스택 버퍼 오버플로의 원리</h3>
+
+<p>PART 1에서 함수를 호출하면 스택에 <strong>스택 프레임</strong>이 만들어진다고 배웠습니다. x86-64에서 <code>call</code> 명령은 "돌아갈 주소(리턴 주소)"를 스택에 넣고, 함수 시작 부분(프롤로그)은 이전 프레임 포인터(<code>rbp</code>)를 저장한 뒤 지역 변수 공간을 확보합니다. 스택은 높은 주소에서 낮은 주소 쪽으로 자라지만, <strong>배열은 낮은 주소에서 높은 주소 쪽으로 채워집니다</strong>. 바로 이 방향 차이가 문제의 핵심입니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 680 330" width="680" role="img" aria-label="스택 프레임 구조와 버퍼가 넘쳐 리턴 주소 쪽으로 쓰이는 방향">
+  <text x="140" y="22" text-anchor="middle" class="small mute">높은 주소</text>
+  <rect class="box" x="40" y="32" width="200" height="40"/>
+  <text x="140" y="57" text-anchor="middle" class="small">호출자(main)의 프레임</text>
+  <rect class="hl2" x="40" y="72" width="200" height="40"/>
+  <text x="140" y="97" text-anchor="middle" class="small bold">리턴 주소 (8B)</text>
+  <rect class="box" x="40" y="112" width="200" height="40"/>
+  <text x="140" y="137" text-anchor="middle" class="small">저장된 rbp (8B)</text>
+  <rect class="box" x="40" y="152" width="200" height="40"/>
+  <text x="140" y="177" text-anchor="middle" class="small">int authed (4B) + 패딩</text>
+  <rect class="hl" x="40" y="192" width="200" height="64"/>
+  <text x="140" y="220" text-anchor="middle" class="small">char pin[8]</text>
+  <text x="140" y="238" text-anchor="middle" class="small mono mute">pin[0] … pin[7]</text>
+  <text x="140" y="276" text-anchor="middle" class="small mute">낮은 주소 (rsp 쪽)</text>
+  <path class="arrow-m" d="M20 60 V 250"/>
+  <text x="14" y="300" class="small mute">스택 성장 ↓</text>
+  <path class="arrow" d="M260 250 V 80"/>
+  <text x="275" y="170" class="small acc">strcpy가 쓰는 방향 ↑</text>
+  <rect class="bad" x="360" y="40" width="300" height="150" rx="6"/>
+  <text x="510" y="66" text-anchor="middle" class="small bold">입력이 8바이트를 넘으면</text>
+  <text x="375" y="94" class="small">① pin 뒤의 authed를 덮음</text>
+  <text x="390" y="112" class="small mute">→ 인증 우회 (논리 공격)</text>
+  <text x="375" y="138" class="small">② 저장된 rbp, 리턴 주소를 덮음</text>
+  <text x="390" y="156" class="small mute">→ 함수 반환 시 공격자가 정한</text>
+  <text x="390" y="174" class="small mute">   주소로 점프 (제어 흐름 탈취)</text>
+  <text x="510" y="230" text-anchor="middle" class="small">실제 배치는 컴파일러·옵션마다 다름</text>
+  <text x="510" y="250" text-anchor="middle" class="small mute">(stack protector는 배열을 다른 지역변수보다</text>
+  <text x="510" y="268" text-anchor="middle" class="small mute">높은 주소로 재배치하기도 함)</text>
+</svg>
+<figcaption>그림 22-1 스택 프레임과 버퍼 오버플로 — 배열은 위(높은 주소)로 채워지고, 그 위에 리턴 주소가 있다</figcaption>
+</figure>
+
+<figure class="code bad"><figcaption>잘못된 예 — 길이 검사 없는 PIN 검증</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+
+static int verify_pin(const char *input)
+{
+    int  authed = 0;
+    char pin[8];
+    strcpy(pin, input);                  /* input 길이를 전혀 확인하지 않는다 */
+    if (strcmp(pin, "4827") == 0)        /* (교육용: 실제로는 PIN을 평문 비교하지 않음) */
+        authed = 1;
+    return authed;
+}
+
+int main(int argc, char *argv[])
+{
+    if (argc &lt; 2) return 1;
+    printf("인증 결과: %d\n", verify_pin(argv[1]));
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과 (예: gcc 기본 설정, stack protector 동작 시)</figcaption><pre>$ ./pin 1234
+인증 결과: 0
+$ ./pin AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+*** stack smashing detected ***: terminated
+Aborted (core dumped)</pre></figure>
+
+<p>32바이트를 넣자 프로그램이 "stack smashing detected"를 출력하고 강제 종료되었습니다. 이것은 컴파일러가 심어 둔 <strong>스택 카나리</strong>(22-2절)가 오버플로를 감지하고 프로세스를 죽인 것입니다. 보호 기법을 끄고(<code>-fno-stack-protector</code>) 빌드하면 같은 입력으로 <code>Segmentation fault</code>가 나거나, 입력을 정교하게 만들면 <code>authed</code>만 0이 아닌 값으로 덮어 "인증 결과: 1"을 얻을 수도 있습니다. 즉 프로그램이 죽는 것은 <strong>운이 좋은 경우</strong>입니다.</p>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 리턴 주소를 덮으면 제어권이 넘어갈까?</p>
+<p>함수가 끝날 때 <code>ret</code> 명령은 스택 꼭대기의 8바이트를 꺼내 그 주소로 점프합니다. CPU는 그 값이 "원래 호출한 곳"인지 확인하지 않습니다. 그래서 입력 데이터가 리턴 주소 자리를 덮으면, 함수가 끝나는 순간 공격자가 입력에 넣은 주소로 실행이 이동합니다. 고전적인 공격은 버퍼 안에 기계어(셸코드)를 넣고 그 주소로 점프시켰고, 스택 실행 금지(NX)가 도입된 뒤에는 프로그램 안에 이미 있는 코드 조각들을 이어 붙이는 ROP(Return-Oriented Programming)로 발전했습니다. 방어 기법(카나리, ASLR, NX, CFI)은 이 단계들을 하나씩 어렵게 만들지만, 근본 해결은 <strong>애초에 경계를 넘어 쓰지 않는 코드</strong>입니다.</p>
+</div>
+
+<div class="box fix"><p class="box-title" data-tag="해결">이렇게 해결합니다 — 길이를 먼저 검사하고, 경계를 아는 함수로 복사</p>
+<figure class="code good"><figcaption>고친 코드</figcaption>
+<pre><code class="language-c">#include &lt;string.h&gt;
+#include &lt;stdbool.h&gt;
+
+#define PIN_LEN 4
+
+static bool is_digits(const char *s, size_t n)
+{
+    for (size_t i = 0; i &lt; n; i++)
+        if (s[i] &lt; '0' || s[i] &gt; '9') return false;
+    return true;
+}
+
+static int verify_pin(const char *input)
+{
+    char pin[PIN_LEN + 1];
+    size_t n = strnlen(input, PIN_LEN + 1);     /* 최대 PIN_LEN+1까지만 센다 */
+    if (n != PIN_LEN || !is_digits(input, n))   /* 형식이 다르면 즉시 거부 */
+        return 0;
+    memcpy(pin, input, PIN_LEN);                /* 길이를 확정한 뒤 복사 */
+    pin[PIN_LEN] = '\0';
+    /* 실제 시스템: PIN은 HSM/암호화 PIN 블록으로 검증, 평문 비교 금지 */
+    return 0;
+}</code></pre></figure>
+<p>입력 길이를 <strong>복사하기 전에</strong> 확정하는 것이 핵심입니다. <code>strnlen</code>은 최대 길이까지만 세므로, 종료 문자가 없는 거대한 입력에서도 안전합니다(POSIX 2008 함수, C23 표준에도 포함).</p>
+</div>
+
+<h3 id="s22-1-2">위험한 함수와 안전한 대체 함수</h3>
+
+<p>C 표준 라이브러리의 문자열 함수 중 일부는 <strong>목적지 버퍼 크기를 받지 않습니다</strong>. 버퍼 크기를 모르는 함수는 넘쳐 쓰는 것을 막을 방법이 없습니다.</p>
+
+<div class="tbl"><table>
+<thead><tr><th>위험 함수</th><th>문제</th><th>대체 방법</th></tr></thead>
+<tbody>
+<tr><td><code>gets(buf)</code></td><td>입력 길이 제한이 아예 없음. C11에서 <strong>표준에서 삭제</strong></td><td><code>fgets(buf, sizeof buf, stdin)</code> 후 개행 제거·잘림 검사</td></tr>
+<tr><td><code>strcpy(d, s)</code></td><td>d 크기 모름</td><td>길이 검사 후 <code>memcpy</code>, 또는 <code>snprintf(d, sz, "%s", s)</code>, BSD/glibc 2.38+ <code>strlcpy</code></td></tr>
+<tr><td><code>strcat(d, s)</code></td><td>d 크기 모름, 매번 끝을 찾아 O(n²)</td><td>현재 길이를 추적하며 <code>snprintf</code>/<code>memcpy</code>, <code>strlcat</code></td></tr>
+<tr><td><code>sprintf(d, fmt, …)</code></td><td>결과 길이를 예측하기 어려움</td><td><code>snprintf(d, sz, fmt, …)</code> + 반환값으로 잘림 검사</td></tr>
+<tr><td><code>scanf("%s", buf)</code></td><td>길이 제한 없음</td><td><code>scanf("%15s", buf)</code>(크기−1) 또는 <code>fgets</code> + 파싱</td></tr>
+<tr><td><code>strncpy(d, s, n)</code></td><td>s가 n 이상이면 <strong>NUL을 붙이지 않음</strong>, 짧으면 나머지를 0으로 채워 느림</td><td>고정 길이 필드(전문) 복사 용도로만 쓰고, 문자열에는 위 방법 사용</td></tr>
+<tr><td><code>atoi</code>/<code>atol</code></td><td>오류 보고 없음, 범위 초과는 UB</td><td><code>strtol</code>/<code>strtoll</code> + errno·endptr 검사(21장의 전용 파서)</td></tr>
+</tbody></table></div>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 — strncpy를 "안전한 strcpy"로 착각</p>
+<figure class="code bad"><figcaption>잘못된 예</figcaption>
+<pre><code class="language-c">char name[8];
+strncpy(name, "HONGGILDONG", sizeof name);   /* 8바이트만 복사, NUL 없음 */
+printf("%s\n", name);                         /* name 뒤의 메모리까지 읽는다 (범위 밖 읽기) */</code></pre></figure>
+<p><code>strncpy</code>는 원래 고정 길이 필드(유닉스 디렉터리 엔트리)를 채우기 위한 함수입니다. 원본이 n 이상이면 NUL 종료 문자를 넣지 않습니다. 굳이 쓴다면 <code>strncpy(d, s, sz - 1); d[sz - 1] = '\0';</code>처럼 직접 종료해야 하고, 그래도 <strong>잘림을 알려 주지 않습니다</strong>. 계좌번호나 이름이 잘린 채로 처리되는 것도 버그입니다.</p>
+</div>
+
+<figure class="code good"><figcaption>safe_str.c — 잘림을 오류로 보고하는 복사·결합 함수</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+#include &lt;stdbool.h&gt;
+
+/* src를 dst(크기 dsz)에 복사. 들어가지 않으면 false (dst는 빈 문자열) */
+bool str_copy(char *dst, size_t dsz, const char *src)
+{
+    if (dsz == 0) return false;
+    size_t n = strnlen(src, dsz);
+    if (n &gt;= dsz) { dst[0] = '\0'; return false; }   /* NUL 자리가 없음 → 잘림 */
+    memcpy(dst, src, n + 1);                          /* NUL까지 복사 */
+    return true;
+}
+
+/* dst 뒤에 src를 붙인다. 넘치면 false (dst는 변경 없음) */
+bool str_append(char *dst, size_t dsz, const char *src)
+{
+    size_t dl = strnlen(dst, dsz);
+    if (dl == dsz) return false;                      /* dst가 이미 종료되지 않음 */
+    size_t sl = strlen(src);
+    if (sl &gt;= dsz - dl) return false;
+    memcpy(dst + dl, src, sl + 1);
+    return true;
+}
+
+/* fgets로 한 줄 읽기: 개행 제거, 줄이 너무 길면 나머지를 버리고 false */
+bool read_line(char *buf, size_t sz, FILE *fp)
+{
+    if (!fgets(buf, (int)sz, fp)) return false;
+    size_t n = strlen(buf);
+    if (n &gt; 0 &amp;&amp; buf[n - 1] == '\n') { buf[n - 1] = '\0'; return true; }
+    if (feof(fp)) return true;                        /* 마지막 줄에 개행 없음 */
+    int c;
+    while ((c = fgetc(fp)) != '\n' &amp;&amp; c != EOF) { } /* 남은 입력 버리기 */
+    return false;                                     /* 너무 긴 줄: 거부 */
+}
+
+int main(void)
+{
+    char acct[15];
+    printf("%d\n", str_copy(acct, sizeof acct, "11012345678901"));     /* 14자: OK */
+    printf("%d\n", str_copy(acct, sizeof acct, "110123456789012"));    /* 15자: 거부 */
+    char msg[16] = "TX:";
+    printf("%d [%s]\n", str_append(msg, sizeof msg, "0200"), msg);
+    printf("%d [%s]\n", str_append(msg, sizeof msg, "-OVERFLOW-TEST"), msg);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>1
+0
+1 [TX:0200]
+0 [TX:0200]</pre></figure>
+
+<p>마지막 줄을 보십시오. 넘칠 결합은 거부되었고, <code>msg</code>는 이전 상태 그대로입니다. "실패하면 아무것도 바꾸지 않는다"는 원칙은 금융 코드의 데이터 일관성에 중요합니다. <code>snprintf</code>도 잘림 검사에 유용합니다. 반환값은 "버퍼가 충분했다면 썼을 길이"이므로 <code>if (n &lt; 0 || (size_t)n &gt;= sz)</code>면 잘림 또는 오류입니다.</p>
+
+<div class="box tip"><p class="box-title" data-tag="잠깐">C11 Annex K의 strcpy_s는?</p>
+<p>C11은 선택 사항(Annex K)으로 <code>strcpy_s</code>, <code>sprintf_s</code> 같은 "경계 검사 인터페이스"를 정의했지만, glibc와 대부분의 리눅스 환경은 구현하지 않았습니다. MSVC에는 비슷한 이름의 함수가 있으나 표준과 세부 동작이 다릅니다. 이식성이 필요한 금융 시스템에서는 위처럼 <strong>프로젝트 공통 안전 문자열 라이브러리</strong>를 만들어 쓰고, 코딩 표준에서 위험 함수 사용을 금지(정적분석 규칙으로 강제)하는 방식이 일반적입니다.</p>
+</div>
+
+<h3 id="s22-1-3">포맷 스트링 취약점</h3>
+
+<p><code>printf</code>는 첫 번째 인자인 포맷 문자열을 해석하면서, <code>%</code> 지시자를 만날 때마다 <strong>다음 인자를 꺼내 씁니다</strong>. 인자가 실제로 몇 개 전달되었는지는 모릅니다. 그래서 사용자 입력을 포맷 문자열 자리에 그대로 넣으면, 사용자가 <code>%</code> 지시자로 printf를 조종할 수 있습니다.</p>
+
+<figure class="code bad"><figcaption>잘못된 예 — 사용자 입력을 포맷으로 사용</figcaption>
+<pre><code class="language-c">void log_memo(const char *memo)        /* memo: 이체 메모 (고객 입력) */
+{
+    printf(memo);                       /* 위험! */
+    printf("\n");
+}
+/* 고객이 메모에 "%p %p %p %p %p %p" 를 입력하면? */</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과 (예시 — 값은 실행마다 다름)</figcaption><pre>0x7ffd3c2a1b40 (nil) 0x7f2a1c3e5a37 0x4 0x55d0c18e72a0 0x7ffd3c2a1c88</pre></figure>
+
+<figure class="diagram">
+<svg viewBox="0 0 680 230" width="680" role="img" aria-label="printf가 존재하지 않는 인자를 레지스터와 스택에서 꺼내 읽는 모습">
+  <rect class="bad" x="20" y="30" width="200" height="44" rx="6"/>
+  <text x="120" y="57" text-anchor="middle" class="mono small">printf("%p %p %p …")</text>
+  <path class="arrow" d="M220 52 H 280"/>
+  <text x="250" y="44" text-anchor="middle" class="small mute">인자 0개</text>
+  <rect class="box" x="280" y="20" width="180" height="30"/>
+  <text x="370" y="40" text-anchor="middle" class="small mono">rsi, rdx, rcx, r8, r9</text>
+  <rect class="box" x="280" y="50" width="180" height="30"/>
+  <text x="370" y="70" text-anchor="middle" class="small mono">스택 [rsp+8], [rsp+16] …</text>
+  <rect class="hl2" x="280" y="80" width="180" height="30"/>
+  <text x="370" y="100" text-anchor="middle" class="small">지역변수, 카나리, 리턴주소</text>
+  <text x="480" y="40" class="small">쓰레기값 → 그대로 출력</text>
+  <text x="480" y="70" class="small">계속 위로 읽어 나감</text>
+  <text x="480" y="100" class="small warn-t">비밀값·주소 유출</text>
+  <rect class="bad" x="20" y="140" width="640" height="70" rx="6"/>
+  <text x="340" y="166" text-anchor="middle" class="small bold">%n : "지금까지 출력한 글자 수를 다음 인자(포인터)가 가리키는 곳에 쓴다"</text>
+  <text x="340" y="190" text-anchor="middle" class="small">→ 읽기를 넘어 임의 메모리 쓰기까지 가능 (glibc FORTIFY는 쓰기 가능 메모리의 포맷에서 %n을 차단)</text>
+</svg>
+<figcaption>그림 22-2 포맷 스트링 공격 — printf는 인자 개수를 모르므로, %p는 존재하지 않는 인자를 레지스터·스택에서 꺼내 읽는다</figcaption>
+</figure>
+
+<p>x86-64 System V 호출 규약에서 printf의 2~6번째 인자는 레지스터(<code>rsi</code>, <code>rdx</code>, <code>rcx</code>, <code>r8</code>, <code>r9</code>)로, 그 뒤는 스택으로 전달됩니다. 인자가 없는데 <code>%p</code>를 여러 개 쓰면 printf는 레지스터에 남아 있던 값과 스택 내용을 차례로 출력합니다. 스택에는 카나리 값, 리턴 주소(ASLR 우회 정보), 다른 지역 변수(비밀번호 버퍼일 수도)가 있습니다. <code>%n</code>은 더 위험해서 메모리에 값을 <strong>씁니다</strong>.</p>
+
+<div class="box fix"><p class="box-title" data-tag="해결">이렇게 해결합니다 — 포맷은 항상 상수 문자열</p>
+<figure class="code good"><figcaption>고친 코드</figcaption>
+<pre><code class="language-c">void log_memo(const char *memo)
+{
+    printf("%s\n", memo);               /* 사용자 입력은 언제나 "인자"로 */
+}
+
+/* 직접 만든 로깅 함수도 포맷 검사를 받게 속성 지정 */
+void app_log(int level, const char *fmt, ...)
+    __attribute__((format(printf, 2, 3)));</code></pre></figure>
+<p>gcc의 <code>-Wformat -Wformat-security</code>는 "포맷 인자 없는 비상수 포맷"을 경고하고, <code>-Werror=format-security</code>로 빌드를 실패시킬 수 있습니다(여러 리눅스 배포판의 기본 패키지 빌드 옵션). 직접 만든 가변 인자 로깅 함수에는 <code>__attribute__((format(printf, …)))</code>를 붙여 같은 검사를 받게 합니다. <code>syslog(LOG_INFO, msg)</code>, <code>fprintf(fp, msg)</code>도 같은 취약점이므로 주의합니다.</p>
+</div>
+
+<h3 id="s22-1-4">정수 오버플로로 인한 할당 크기 버그</h3>
+
+<p>20장에서 본 정수 오버플로는 그 자체로도 금액 오류를 만들지만, <strong>메모리 할당 크기 계산</strong>에서 일어나면 힙 버퍼 오버플로로 이어집니다. 패턴은 이렇습니다. ① 외부에서 받은 개수 × 원소 크기로 할당 크기를 계산, ② 곱셈이 넘쳐 작은 값이 됨, ③ 작은 버퍼가 할당됨, ④ 원래 개수만큼 쓰면서 힙을 덮어씀.</p>
+
+<figure class="code bad"><figcaption>잘못된 예 — 전문 헤더의 건수를 그대로 믿는 일괄 처리</figcaption>
+<pre><code class="language-c">#include &lt;stdint.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;string.h&gt;
+
+typedef struct {               /* 64바이트 */
+    char    acct[16];
+    int64_t amount;
+    char    memo[40];
+} tx_rec_t;
+
+tx_rec_t *load_batch(const uint8_t *msg, size_t msg_len)
+{
+    uint32_t count;
+    memcpy(&amp;count, msg, 4);                          /* 헤더의 건수 (공격자가 조작 가능) */
+    uint32_t bytes = count * (uint32_t)sizeof(tx_rec_t);   /* 32비트 곱셈: 넘칠 수 있다 */
+    tx_rec_t *arr = malloc(bytes);
+    if (!arr) return NULL;
+    for (uint32_t i = 0; i &lt; count; i++)             /* count만큼 복사 */
+        memcpy(&amp;arr[i], msg + 4 + (size_t)i * sizeof(tx_rec_t), sizeof(tx_rec_t));
+    return arr;                                      /* msg_len 검사도 없다 */
+}</code></pre></figure>
+
+<figure class="diagram">
+<svg viewBox="0 0 680 220" width="680" role="img" aria-label="건수 곱하기 64가 32비트에서 넘쳐 64바이트만 할당되는 과정">
+  <rect class="box" x="20" y="30" width="180" height="44" rx="6"/>
+  <text x="110" y="50" text-anchor="middle" class="small">count = 0x04000001</text>
+  <text x="110" y="66" text-anchor="middle" class="small mute">(67,108,865건)</text>
+  <path class="arrow" d="M200 52 H 250"/>
+  <rect class="hl2" x="250" y="30" width="200" height="44" rx="6"/>
+  <text x="350" y="50" text-anchor="middle" class="small mono">× 64 = 0x1_0000_0040</text>
+  <text x="350" y="66" text-anchor="middle" class="small mute">33비트 필요</text>
+  <path class="arrow" d="M450 52 H 500"/>
+  <rect class="bad" x="500" y="30" width="160" height="44" rx="6"/>
+  <text x="580" y="50" text-anchor="middle" class="small mono">bytes = 0x40</text>
+  <text x="580" y="66" text-anchor="middle" class="small">= 64바이트!</text>
+  <rect class="hl" x="20" y="120" width="80" height="40"/>
+  <text x="60" y="145" text-anchor="middle" class="small">arr[0]</text>
+  <rect class="bad" x="100" y="120" width="560" height="40"/>
+  <text x="380" y="138" text-anchor="middle" class="small">arr[1], arr[2], … → 다른 힙 객체와 힙 관리 정보를 덮어씀</text>
+  <text x="380" y="154" text-anchor="middle" class="small mute">(malloc 메타데이터 손상 → 크래시 또는 임의 쓰기)</text>
+  <text x="60" y="180" text-anchor="middle" class="small mute">할당된 64B</text>
+  <text x="340" y="206" text-anchor="middle" class="small warn-t">곱셈 결과의 상위 비트가 잘려 나가 "아주 작은" 할당이 성공해 버린다</text>
+</svg>
+<figcaption>그림 22-3 정수 오버플로 → 작은 할당 → 힙 오버플로로 이어지는 연쇄</figcaption>
+</figure>
+
+<div class="box fix"><p class="box-title" data-tag="해결">이렇게 해결합니다 — 외부 개수는 세 겹으로 검사</p>
+<figure class="code good"><figcaption>고친 코드</figcaption>
+<pre><code class="language-c">#define BATCH_MAX 100000u                           /* 업무상 최대 건수 */
+
+tx_rec_t *load_batch(const uint8_t *msg, size_t msg_len, uint32_t *out_count)
+{
+    if (msg_len &lt; 4) return NULL;
+    uint32_t count;
+    memcpy(&amp;count, msg, 4);                          /* (엔디안 변환은 24장) */
+    if (count == 0 || count &gt; BATCH_MAX)             /* ① 업무 상한 */
+        return NULL;
+    if ((msg_len - 4) / sizeof(tx_rec_t) &lt; count)    /* ② 실제 데이터 길이와 일치? */
+        return NULL;
+    tx_rec_t *arr = calloc(count, sizeof *arr);      /* ③ calloc은 곱셈 오버플로를 검사 */
+    if (!arr) return NULL;
+    memcpy(arr, msg + 4, (size_t)count * sizeof *arr);
+    *out_count = count;
+    return arr;
+}</code></pre></figure>
+<p>① <strong>업무 상한</strong>: 일괄 이체 최대 건수처럼 도메인에서 나올 수 없는 값을 먼저 거부합니다. ② <strong>실제 길이 대조</strong>: 헤더가 말하는 건수와 실제로 받은 바이트 수가 맞는지 확인합니다(나눗셈으로 비교해 곱셈 오버플로를 피함). ③ <strong>안전한 할당</strong>: glibc의 <code>calloc</code>은 <code>count * size</code> 오버플로를 검사해 NULL을 반환합니다. <code>malloc(a * b)</code>를 쓸 때는 <code>if (b != 0 &amp;&amp; a &gt; SIZE_MAX / b)</code>로 직접 검사합니다(glibc 2.26+의 <code>reallocarray</code>도 같은 검사를 합니다).</p>
+</div>
+
+<h3 id="s22-1-5">off-by-one 오류</h3>
+
+<p><strong>off-by-one</strong>은 경계를 딱 1만큼 잘못 잡는 오류입니다. "겨우 1바이트"지만, 그 1바이트가 다음 변수의 첫 바이트나 힙 청크의 크기 정보, 저장된 프레임 포인터의 최하위 바이트를 덮어 실제 공격에 이용된 사례가 많습니다.</p>
+
+<figure class="code bad"><figcaption>잘못된 예 — 세 가지 off-by-one</figcaption>
+<pre><code class="language-c">#define ACCT_LEN 14
+#define MAX_TX   100
+
+char acct[ACCT_LEN];                         /* 14자리 계좌번호 */
+memcpy(acct, src, ACCT_LEN);
+acct[ACCT_LEN] = '\0';                       /* ① acct[14]는 범위 밖 (0~13만 유효) */
+
+tx_t txs[MAX_TX];
+for (int i = 0; i &lt;= MAX_TX; i++)            /* ② &lt;= 로 101번 반복 */
+    init_tx(&amp;txs[i]);
+
+char name[20];
+if (strlen(in) &gt; sizeof name) return -1;     /* ③ strlen==20이면 통과 → NUL 넣을 자리 없음 */
+strcpy(name, in);</code></pre></figure>
+
+<div class="box fix"><p class="box-title" data-tag="해결">이렇게 해결합니다 — 경계 규칙을 습관으로</p>
+<ul>
+<li>문자열 버퍼는 항상 <strong>"내용 길이 + 1"</strong>로 선언합니다: <code>char acct[ACCT_LEN + 1];</code></li>
+<li>반복문은 <strong>반열린 구간 [0, N)</strong>으로 씁니다: <code>for (i = 0; i &lt; N; i++)</code>. <code>&lt;=</code>를 보면 일단 의심합니다.</li>
+<li>길이 검사는 <code>strlen(in) &gt;= sizeof name</code>(NUL 자리 포함)처럼 "크기 − 1까지만 허용"으로 씁니다.</li>
+<li>배열 크기는 <code>sizeof arr / sizeof arr[0]</code> 매크로로 구하고, 숫자 리터럴을 여러 곳에 반복해 쓰지 않습니다.</li>
+<li>고정 길이 전문 필드처럼 NUL 종료가 없는 데이터는 "문자열"로 다루지 말고 <strong>(포인터, 길이) 쌍</strong>으로 다룹니다.</li>
+</ul>
+</div>
+
+<h3 id="s22-1-6">use-after-free와 double free</h3>
+
+<p><strong>use-after-free(UAF)</strong>는 <code>free</code>로 반납한 메모리를 가리키는 포인터(dangling pointer)를 계속 사용하는 오류입니다. 반납된 메모리는 힙 관리자가 <strong>다음 malloc 요청에 재사용</strong>하므로, 해제 후 같은 크기의 할당이 일어나면 옛 포인터와 새 객체가 같은 메모리를 공유하게 됩니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 680 250" width="680" role="img" aria-label="세션 해제 후 같은 메모리가 다른 객체로 재사용되어 옛 포인터가 새 데이터를 가리키는 과정">
+  <text x="110" y="24" text-anchor="middle" class="small bold">① 세션 생성</text>
+  <rect class="hl" x="40" y="36" width="140" height="56" rx="4"/>
+  <text x="110" y="58" text-anchor="middle" class="small">session</text>
+  <text x="110" y="78" text-anchor="middle" class="small mono">user=kim, role=1</text>
+  <text x="110" y="116" text-anchor="middle" class="small mono mute">s = 0x5000</text>
+  <text x="340" y="24" text-anchor="middle" class="small bold">② free(s) — 포인터는 그대로</text>
+  <rect class="dash" x="270" y="36" width="140" height="56" rx="4"/>
+  <text x="340" y="68" text-anchor="middle" class="small mute">(빈 청크)</text>
+  <text x="340" y="116" text-anchor="middle" class="small mono warn-t">s = 0x5000 (dangling)</text>
+  <text x="570" y="24" text-anchor="middle" class="small bold">③ 다른 malloc이 재사용</text>
+  <rect class="bad" x="500" y="36" width="140" height="56" rx="4"/>
+  <text x="570" y="58" text-anchor="middle" class="small">memo 버퍼 (고객 입력)</text>
+  <text x="570" y="78" text-anchor="middle" class="small mono">"AAAA…role=9"</text>
+  <text x="570" y="116" text-anchor="middle" class="small mono mute">m = 0x5000</text>
+  <path class="arrow-m" d="M180 64 H 268"/>
+  <path class="arrow-m" d="M410 64 H 498"/>
+  <rect class="bad" x="120" y="150" width="440" height="70" rx="6"/>
+  <text x="340" y="176" text-anchor="middle" class="small bold">④ s-&gt;role 을 읽으면 공격자가 쓴 값</text>
+  <text x="340" y="200" text-anchor="middle" class="small">권한 상승, 함수 포인터가 있으면 제어 흐름 탈취까지</text>
+</svg>
+<figcaption>그림 22-4 use-after-free — 해제된 메모리는 재사용되고, 남은 포인터는 "다른 누군가의 데이터"를 가리킨다</figcaption>
+</figure>
+
+<figure class="code bad"><figcaption>잘못된 예 — 로그아웃 후에도 세션 포인터가 남아 있다</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;string.h&gt;
+
+typedef struct { char user[16]; int role; } session_t;
+
+int main(void)
+{
+    session_t *s = malloc(sizeof *s);
+    strcpy(s-&gt;user, "kim");
+    s-&gt;role = 1;                         /* 1: 일반 조회 권한 */
+
+    free(s);                             /* 로그아웃 처리 */
+    /* s = NULL; 을 하지 않았다 */
+
+    char *memo = malloc(sizeof(session_t));   /* 같은 크기 → 같은 청크 재사용 가능성 높음 */
+    memset(memo, 'A', sizeof(session_t));
+    printf("role = %d\n", s-&gt;role);      /* UAF: 정의되지 않은 동작 */
+    free(memo);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과 (예시: 일반 빌드 / AddressSanitizer 빌드)</figcaption><pre>$ gcc uaf.c -o uaf &amp;&amp; ./uaf
+role = 1094795585
+$ gcc -g -fsanitize=address uaf.c -o uaf &amp;&amp; ./uaf
+==4242==ERROR: AddressSanitizer: heap-use-after-free on address 0x603000000020 ...
+READ of size 4 at 0x603000000020 thread T0
+    #0 0x... in main uaf.c:18
+freed by thread T0 here:
+    #1 0x... in main uaf.c:13
+previously allocated by thread T0 here:
+    #1 0x... in main uaf.c:9</pre></figure>
+
+<p>일반 빌드에서 role이 1094795585(= <code>0x41414141</code>, 즉 'AAAA')가 되었습니다. 해제된 세션 메모리가 메모 버퍼로 재사용되어, 메모에 쓴 내용이 권한 값으로 읽힌 것입니다(정확한 결과는 할당기와 버전에 따라 다름). AddressSanitizer(ASan)로 빌드하면 해제된 메모리를 일정 기간 격리(quarantine)하고 접근을 감시하므로, 사용·해제·할당 위치를 정확히 알려 줍니다.</p>
+
+<div class="box fix"><p class="box-title" data-tag="해결">이렇게 해결합니다 — 소유권을 분명히, 해제 후 즉시 무효화</p>
+<figure class="code good"><figcaption>고친 코드 — 해제와 무효화를 한 번에</figcaption>
+<pre><code class="language-c">/* 포인터의 주소를 받아 해제 후 NULL로 만든다 */
+#define FREE_AND_NULL(pp) do { free(*(pp)); *(pp) = NULL; } while (0)
+
+void session_destroy(session_t **ps)
+{
+    if (!ps || !*ps) return;              /* NULL이면 아무것도 안 함 → double free 방지 */
+    explicit_bzero(*ps, sizeof **ps);     /* 민감정보 제거 (22-2절) */
+    FREE_AND_NULL(ps);
+}</code></pre></figure>
+<ul>
+<li><strong>소유권 규칙</strong>: 메모리를 할당한 모듈이 해제도 책임지고, 다른 곳에는 "빌려준 포인터"만 줍니다. 세션 테이블처럼 여러 곳이 참조하는 객체는 테이블에서 먼저 제거한 뒤 해제합니다.</li>
+<li><strong>해제 후 NULL</strong>: 같은 변수를 통한 재사용과 double free를 막습니다(<code>free(NULL)</code>은 아무 일도 하지 않음). 다른 변수에 복사된 포인터까지 막지는 못하므로 소유권 규칙과 함께 씁니다.</li>
+<li><strong>double free</strong>(같은 포인터를 두 번 해제)도 힙 관리 구조를 망가뜨려 공격에 이용됩니다. 오류 처리 경로에서 자주 생기므로 "정리(cleanup) 코드는 한 곳에서" 작성합니다(goto cleanup 패턴).</li>
+<li>테스트 빌드에는 항상 <code>-fsanitize=address,undefined</code>를 켜고, 배치 프로그램은 Valgrind로도 주기적으로 점검합니다.</li>
+</ul>
+</div>
+
+<div class="box fin"><p class="box-title" data-tag="금융 실무">은행 시스템에서는 — 1년에 한 번 죽는 서버</p>
+<p>어느 대외계 전문 중계 서버가 몇 달에 한 번, 특정 시간대에만 원인 모를 크래시를 일으켰습니다. 코어 덤프를 보면 매번 다른 곳에서 죽어 원인을 잡기 어려웠습니다. 결국 ASan으로 빌드한 검증 환경에서 대외기관 응답 지연 상황을 재현하자 문제가 드러났습니다. <strong>타임아웃 처리 루틴이 요청 컨텍스트를 해제한 직후, 늦게 도착한 응답이 같은 컨텍스트 포인터로 결과를 기록</strong>하는 use-after-free였습니다. 평소에는 해제된 메모리가 아직 재사용되지 않아 "우연히" 문제가 없었고, 트래픽이 몰려 재사용이 빨라지는 시간대에만 다른 요청의 데이터가 오염되었던 것입니다.</p>
+<p>해결은 컨텍스트에 상태와 일련번호를 두어 "이미 타임아웃 처리된 요청의 응답은 버린다"는 규칙을 넣고, 해제 대신 상태 전이 후 지연 회수하는 방식으로 바꾸는 것이었습니다. 교훈: <strong>메모리 오류는 재현이 어렵고 증상이 원인과 멀리 떨어져 나타납니다.</strong> 그래서 사후 디버깅보다 ASan·정적분석으로 사전에 잡는 것이 훨씬 쌉니다.</p>
+</div>
+
+<h3 id="s22-1-7">입력 화이트리스트 검증</h3>
+
+<p>모든 공격은 입력에서 시작합니다. 입력 검증의 원칙은 <strong>"허용할 것을 정의하고(화이트리스트), 나머지는 전부 거부한다"</strong>입니다. 위험한 문자를 골라 지우는 블랙리스트 방식(예: <code>'</code>, <code>;</code>, <code>&lt;</code> 제거)은 반드시 빠뜨리는 경우가 생기고, 제거 후 새로운 위험 문자열이 만들어지기도 합니다.</p>
+
+<ol class="steps">
+<li><strong>정규화(canonicalize)</strong>: 비교 전에 표현을 하나로 맞춥니다. 예: 하이픈 제거, 전각 숫자 거부, 앞뒤 공백 처리 규칙.</li>
+<li><strong>길이 검사</strong>: 최소·최대 길이를 먼저 확인합니다(복사·파싱 전에).</li>
+<li><strong>문자 집합 검사</strong>: 허용 문자만 있는지 확인합니다.</li>
+<li><strong>형식·구조 검사</strong>: 자리 구성, 검증번호(Luhn 등), 날짜 유효성.</li>
+<li><strong>업무 규칙 검사</strong>: 범위(금액 한도), 존재 여부(DB 조회), 권한.</li>
+</ol>
+
+<figure class="code good"><figcaption>validate.c — 계좌번호 화이트리스트 검증과 정규화</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+
+#define ACCT_MIN 11
+#define ACCT_MAX 14
+#define RAW_MAX  20                 /* 하이픈 포함 원문 최대 길이 */
+
+typedef enum { V_OK, V_LEN, V_CHAR, V_HYPHEN } verr_t;
+static const char *const VMSG[] = { "OK", "길이 오류", "허용되지 않는 문자", "하이픈 위치 오류" };
+
+/* "110-123-456789" → out="110123456789". 숫자 11~14자리, 하이픈은 숫자 사이에만 */
+static verr_t normalize_account(const char *in, char out[ACCT_MAX + 1])
+{
+    size_t n = strnlen(in, RAW_MAX + 1);
+    if (n == 0 || n &gt; RAW_MAX) return V_LEN;          /* ① 원문 길이 먼저 */
+    size_t k = 0;
+    char prev = '\0';
+    for (size_t i = 0; i &lt; n; i++) {
+        char c = in[i];
+        if (c &gt;= '0' &amp;&amp; c &lt;= '9') {                   /* ② 허용 문자: 숫자 */
+            if (k == ACCT_MAX) return V_LEN;
+            out[k++] = c;
+        } else if (c == '-') {                         /*    허용 문자: 하이픈 */
+            if (i == 0 || i == n - 1 || prev == '-') return V_HYPHEN;
+        } else {
+            return V_CHAR;                             /* 그 외 전부 거부 */
+        }
+        prev = c;
+    }
+    if (k &lt; ACCT_MIN) return V_LEN;                   /* ③ 숫자 자릿수 */
+    out[k] = '\0';
+    return V_OK;
+}
+
+int main(void)
+{
+    const char *cases[] = {
+        "110-123-456789", "11012345678901", "110-123-45678a", "110--123456789",
+        "1234", "-110123456789", "110-123-456789; rm -rf /", "110 123 456789"
+    };
+    for (size_t i = 0; i &lt; sizeof cases / sizeof cases[0]; i++) {
+        char norm[ACCT_MAX + 1];
+        verr_t e = normalize_account(cases[i], norm);
+        printf("%-28s → %s%s%s\n", cases[i], VMSG[e],
+               e == V_OK ? " " : "", e == V_OK ? norm : "");
+    }
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>110-123-456789               → OK 110123456789
+11012345678901               → OK 11012345678901
+110-123-45678a               → 허용되지 않는 문자
+110--123456789               → 하이픈 위치 오류
+1234                         → 길이 오류
+-110123456789                → 하이픈 위치 오류
+110-123-456789; rm -rf /     → 길이 오류
+110 123 456789               → 허용되지 않는 문자</pre></figure>
+
+<p><code>"110-123-456789; rm -rf /"</code>는 24자라서 문자 검사 전에 길이 검사에서 걸렸습니다. 길이 검사를 먼저 하면 거대한 입력을 끝까지 훑는 비용(서비스 거부 공격 표면)도 줄어듭니다. 검증이 끝난 정규화 값(<code>norm</code>)만 이후 로직(DB 조회, 전문 생성)에 넘기고, <strong>원문은 다시 쓰지 않습니다</strong>.</p>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 "고쳐서 받기"보다 "거부하기"가 나을까?</p>
+<p>공백을 지워 주고, 전각 숫자를 반각으로 바꿔 주고, 이상한 문자를 무시해 주는 "친절한" 입력 처리는 사용자 경험에는 좋아 보이지만, 시스템 안에 <strong>같은 값을 나타내는 여러 표현</strong>이 생기게 합니다. 화면에서 검증한 값과 서버에서 처리한 값이 미묘하게 다르면, 검증을 우회하는 입력이 생깁니다(예: 화면은 "1,000"을 1000으로, 서버의 다른 모듈은 1로 해석). 금융 시스템은 형식을 엄격하게 정의하고, 화면(UI)에서 사용자를 돕되 <strong>서버는 정의된 형식만 받습니다</strong>. 클라이언트 검증은 편의 기능일 뿐 보안 통제가 아니므로, 서버는 모든 입력을 다시 검증합니다.</p>
+</div>
+
+<div class="ex"><p class="ex-title">예제 22-1 <span class="lv">난이도 ★★☆</span></p>
+<p>다음 코드의 보안 문제를 모두 찾으십시오.</p>
+<pre><code class="language-c">void reply(int sock, const char *user_name)
+{
+    char buf[64];
+    sprintf(buf, "안녕하세요 %s님, 잔액 조회 결과입니다.", user_name);
+    syslog(LOG_INFO, buf);
+    send(sock, buf, strlen(buf), 0);
+}</code></pre>
+<details><summary>정답과 해설 보기</summary>
+<p>① <code>sprintf</code>는 buf 크기를 모릅니다. 고정 문구만 해도 UTF-8 한글이 많아 64바이트에 가깝고(한글 1자 = 3바이트), user_name이 조금만 길어도 스택 버퍼 오버플로입니다. <code>snprintf</code> + 잘림 검사로 바꿉니다. ② <code>syslog(LOG_INFO, buf)</code>는 포맷 스트링 취약점입니다. user_name에 <code>%n</code>, <code>%p</code>가 들어가면 위험합니다. <code>syslog(LOG_INFO, "%s", buf)</code>로 고칩니다. ③ user_name에 대한 입력 검증(길이·문자 집합)이 없습니다. ④ 로그에 사용자 이름(개인정보)을 그대로 남기는 것이 정책에 맞는지 검토가 필요합니다(마스킹, 22-2절).</p>
+</details></div>
+
+<h2 id="s22-2"><span class="num">22-2</span>금융보안 시큐어 코딩 실무</h2>
+
+<p>앞 절이 "C 언어 자체의 함정"이었다면, 이 절은 "금융 시스템 개발자로서 지켜야 할 보안 규칙"입니다. 국내 금융권은 전자금융거래법과 전자금융감독규정, 공공·금융 분야의 소프트웨어 개발보안(시큐어 코딩) 가이드에 따라 개발 단계에서 보안약점을 제거하고 진단받도록 요구받습니다. 실제 프로젝트에서는 정적분석 도구가 수천 건의 지적 사항을 쏟아 내고, 개발자는 그것을 하나하나 조치하고 소명해야 합니다. 그 지적의 의미를 이해하는 것이 이 절의 목표입니다.</p>
+
+<h3 id="s22-2-1">시큐어 코딩 가이드의 구성</h3>
+
+<p>행정안전부(구 행정자치부)와 한국인터넷진흥원(KISA)이 발간한 <strong>소프트웨어 보안약점 진단가이드</strong>는 구현 단계 보안약점을 7개 분류로 나눕니다. 금융권 프로젝트의 보안약점 진단도 대부분 이 분류 체계를 바탕으로 합니다(세부 항목 수와 명칭은 판에 따라 조금씩 다릅니다).</p>
+
+<div class="tbl"><table>
+<thead><tr><th>분류</th><th>C 언어에서의 대표 항목</th><th>이 과정에서 다룬 곳</th></tr></thead>
+<tbody>
+<tr><td>입력데이터 검증 및 표현</td><td>버퍼 오버플로, 포맷 스트링 삽입, 정수형 오버플로, 운영체제 명령어 삽입(<code>system()</code>), SQL 삽입, 경로 조작, 보호 메커니즘을 우회하는 입력값 변조</td><td>20장, 21장, 22-1절</td></tr>
+<tr><td>보안기능</td><td>하드코딩된 비밀번호·암호키, 취약한 암호 알고리즘, 적절하지 않은 난수 사용, 중요정보 평문 저장·전송, 부적절한 인증·인가</td><td>22-2절</td></tr>
+<tr><td>시간 및 상태</td><td>경쟁 조건(TOCTOU), 종료되지 않는 반복문·재귀</td><td>스레드 장(27장 이후)</td></tr>
+<tr><td>에러처리</td><td>오류 메시지 정보 노출, 오류 상황 대응 부재, 부적절한 예외 처리</td><td>로그·오류 코드 설계</td></tr>
+<tr><td>코드오류</td><td>NULL 포인터 역참조, 부적절한 자원 해제(누수), 해제된 자원 사용(UAF), 초기화되지 않은 변수 사용</td><td>22-1절, 포인터·동적 메모리 장</td></tr>
+<tr><td>캡슐화</td><td>잘못된 세션에 의한 정보 노출, 디버그 코드 잔존, 시스템 데이터 정보 노출</td><td>22-2절</td></tr>
+<tr><td>API 오용</td><td>DNS lookup에 의존한 보안 결정, 취약한 API 사용(<code>gets</code>, <code>strcpy</code> 등)</td><td>22-1절</td></tr>
+</tbody></table></div>
+
+<div class="box fin"><p class="box-title" data-tag="금융 실무">은행 시스템에서는 — 보안약점 진단과 "조치 결과서"</p>
+<p>금융권 차세대·신규 구축 프로젝트에서는 보통 개발 막바지에 정적분석 도구로 전체 소스를 진단하고, 결과를 "조치 완료 / 오탐 소명 / 위험 수용" 중 하나로 분류한 조치 결과서를 제출합니다. 이때 흔한 실수는 도구 경고를 없애는 데만 집중하는 것입니다. 예를 들어 <code>strcpy</code>를 <code>strncpy</code>로 기계적으로 바꾸면 경고는 사라지지만 NUL 미종료라는 새 버그가 생깁니다. 오탐 소명도 "입력 길이가 앞 단계에서 검증됨(파일:줄)"처럼 <strong>근거를 코드로 제시</strong>해야 통과합니다. 처음부터 안전한 공통 라이브러리를 쓰면 진단 막바지의 고통이 크게 줄어듭니다.</p>
+</div>
+
+<h3 id="s22-2-2">CERT C 대표 규칙</h3>
+
+<p>카네기멜런대학 SEI가 관리하는 <strong>SEI CERT C 코딩 표준</strong>은 C 보안 코딩의 사실상 국제 기준으로, 정적분석 도구 대부분이 규칙 ID로 매핑을 제공합니다. 금융 C 개발자가 꼭 알아야 할 규칙을 골라 정리합니다.</p>
+
+<div class="tbl"><table>
+<thead><tr><th>규칙 ID</th><th>내용</th><th>한 줄 요약</th></tr></thead>
+<tbody>
+<tr><td>STR31-C</td><td>문자열 저장 공간이 종료 문자까지 충분함을 보장하라</td><td>버퍼 = 길이 + 1, 복사 전 길이 검사</td></tr>
+<tr><td>STR32-C</td><td>NUL로 끝나지 않는 문자 배열을 문자열 함수에 넘기지 마라</td><td><code>strncpy</code> 결과, 전문 필드 주의</td></tr>
+<tr><td>INT30-C / INT32-C</td><td>unsigned 순환·signed 오버플로가 일어나지 않게 하라</td><td>연산 전 검사, <code>ckd_*</code></td></tr>
+<tr><td>INT33-C</td><td>0으로 나누지 마라</td><td>나눗셈·나머지 전 제수 검사</td></tr>
+<tr><td>ARR30-C</td><td>범위를 벗어난 포인터·첨자를 만들거나 쓰지 마라</td><td>인덱스 범위 검사</td></tr>
+<tr><td>EXP33-C</td><td>초기화되지 않은 메모리를 읽지 마라</td><td>선언과 동시에 초기화</td></tr>
+<tr><td>MEM30-C</td><td>해제된 메모리에 접근하지 마라</td><td>UAF 방지, 해제 후 NULL</td></tr>
+<tr><td>MEM31-C</td><td>더 이상 필요 없는 동적 메모리를 해제하라</td><td>메모리 누수 방지</td></tr>
+<tr><td>MEM35-C</td><td>객체에 충분한 메모리를 할당하라</td><td>할당 크기 계산 오버플로 방지</td></tr>
+<tr><td>FIO30-C</td><td>포맷 문자열에 사용자 입력을 넣지 마라</td><td><code>printf("%s", s)</code></td></tr>
+<tr><td>ERR33-C</td><td>표준 라이브러리 오류를 감지하고 처리하라</td><td><code>malloc</code>, <code>fopen</code>, <code>fwrite</code> 반환값 검사</td></tr>
+<tr><td>ENV33-C</td><td><code>system()</code>을 호출하지 마라</td><td>명령어 삽입 방지, <code>execve</code> 계열 + 인자 배열</td></tr>
+<tr><td>MSC30-C / MSC32-C</td><td>난수에 <code>rand()</code>를 쓰지 마라 / 난수 생성기를 적절히 시드하라</td><td>OS 암호학적 난수 사용</td></tr>
+<tr><td>MSC41-C</td><td>민감 정보를 하드코딩하지 마라</td><td>키·비밀번호는 키 관리 시스템에서</td></tr>
+<tr><td>MEM03-C (권고)</td><td>재사용 자원에 남은 민감 정보를 지워라</td><td><code>explicit_bzero</code></td></tr>
+</tbody></table></div>
+
+<h3 id="s22-2-3">개인정보·계좌번호 마스킹</h3>
+
+<p>화면, 로그, 출력물, 테스트 데이터에 개인정보와 금융정보를 그대로 노출하면 개인정보보호법과 신용정보법 위반이 될 수 있습니다. 표시가 꼭 필요한 경우에도 업무 목적에 필요한 최소한만 보여 주는 <strong>마스킹(masking)</strong>을 적용합니다. 마스킹 위치는 기관 내부 기준과 업계 관행을 따르며, 카드번호는 국제 카드 보안 표준(PCI DSS)이 "앞 6자리와 뒤 4자리까지만 표시 가능"으로 제한합니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 680 230" width="680" role="img" aria-label="계좌번호, 카드번호, 주민등록번호, 이름의 마스킹 예">
+  <text x="20" y="40" class="small bold">계좌번호</text>
+  <text x="150" y="40" class="mono">110-123-456789</text>
+  <path class="arrow" d="M330 35 H 380"/>
+  <text x="400" y="40" class="mono">110-<tspan class="warn-t">***</tspan>-<tspan class="warn-t">**</tspan>6789</text>
+  <text x="590" y="40" class="small mute">앞3·뒤4</text>
+  <text x="20" y="90" class="small bold">카드번호</text>
+  <text x="150" y="90" class="mono">4111111111111111</text>
+  <path class="arrow" d="M330 85 H 380"/>
+  <text x="400" y="90" class="mono">411111<tspan class="warn-t">******</tspan>1111</text>
+  <text x="590" y="90" class="small mute">앞6·뒤4</text>
+  <text x="20" y="140" class="small bold">주민등록번호</text>
+  <text x="150" y="140" class="mono">900101-1234567</text>
+  <path class="arrow" d="M330 135 H 380"/>
+  <text x="400" y="140" class="mono">900101-1<tspan class="warn-t">******</tspan></text>
+  <text x="590" y="140" class="small mute">뒤 6자리</text>
+  <text x="20" y="190" class="small bold">이름</text>
+  <text x="150" y="190">홍길동 / 남궁민수</text>
+  <path class="arrow" d="M330 185 H 380"/>
+  <text x="400" y="190">홍<tspan class="warn-t">*</tspan>동 / 남<tspan class="warn-t">**</tspan>수</text>
+  <text x="590" y="190" class="small mute">가운데</text>
+  <text x="340" y="222" text-anchor="middle" class="small mute">구분자(하이픈)는 유지하고 숫자만 가린다 — 정확한 위치는 기관 기준을 따른다</text>
+</svg>
+<figcaption>그림 22-5 정보 유형별 마스킹 예 — 업무에 필요한 최소한만 노출한다</figcaption>
+</figure>
+
+<figure class="code good"><figcaption>mask.c — 숫자 마스킹과 UTF-8 이름 마스킹</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+#include &lt;stdbool.h&gt;
+
+/* 숫자 중 앞 front개, 뒤 back개만 남기고 '*'. 숫자가 아닌 문자는 그대로.
+   dst 크기 부족 시 false */
+bool mask_digits(const char *src, size_t front, size_t back, char *dst, size_t dsz)
+{
+    size_t len = strlen(src), ndig = 0;
+    if (len + 1 &gt; dsz) return false;
+    for (size_t i = 0; i &lt; len; i++)
+        if (src[i] &gt;= '0' &amp;&amp; src[i] &lt;= '9') ndig++;
+    size_t k = 0;                                   /* 지금까지 본 숫자 개수 */
+    for (size_t i = 0; i &lt; len; i++) {
+        char c = src[i];
+        if (c &gt;= '0' &amp;&amp; c &lt;= '9') {
+            bool show = (k &lt; front) || (k + back &gt;= ndig);
+            dst[i] = show ? c : '*';
+            k++;
+        } else {
+            dst[i] = c;
+        }
+    }
+    dst[len] = '\0';
+    return true;
+}
+
+/* UTF-8 선행 바이트로 글자 길이 판정. 잘못된 바이트면 0 */
+static size_t u8_len(unsigned char c)
+{
+    if (c &lt; 0x80)           return 1;
+    if ((c &amp; 0xE0) == 0xC0) return 2;
+    if ((c &amp; 0xF0) == 0xE0) return 3;               /* 한글 음절은 3바이트 */
+    if ((c &amp; 0xF8) == 0xF0) return 4;
+    return 0;
+}
+
+/* 이름: 2글자면 "김*", 3글자 이상이면 첫·끝 글자만 남김 */
+bool mask_name(const char *src, char *dst, size_t dsz)
+{
+    size_t off[64], cnt = 0, len = strlen(src);
+    for (size_t i = 0; i &lt; len; ) {                 /* 글자 시작 위치 수집 */
+        size_t l = u8_len((unsigned char)src[i]);
+        if (l == 0 || i + l &gt; len || cnt == 64) return false;  /* 잘못된 UTF-8 거부 */
+        off[cnt++] = i;
+        i += l;
+    }
+    if (cnt == 0) return false;
+    size_t first_end = (cnt &gt; 1) ? off[1] : len;    /* 첫 글자 바이트 수 */
+    size_t last_beg  = off[cnt - 1];
+    size_t stars = (cnt &lt;= 2) ? cnt - 1 : cnt - 2;
+    size_t tail  = (cnt &gt;= 3) ? len - last_beg : 0;
+    size_t need  = first_end + stars + tail + 1;
+    if (need &gt; dsz) return false;
+    memcpy(dst, src, first_end);
+    memset(dst + first_end, '*', stars);
+    memcpy(dst + first_end + stars, src + last_beg, tail);
+    dst[need - 1] = '\0';
+    return true;
+}
+
+int main(void)
+{
+    char out[64];
+    mask_digits("110-123-456789", 3, 4, out, sizeof out);       puts(out);
+    mask_digits("4111111111111111", 6, 4, out, sizeof out);     puts(out);
+    mask_digits("4111-1111-1111-1111", 6, 4, out, sizeof out);  puts(out);
+    mask_digits("900101-1234567", 7, 0, out, sizeof out);       puts(out);
+    const char *names[] = { "홍길동", "김철", "남궁민수", "Lee" };
+    for (int i = 0; i &lt; 4; i++)
+        if (mask_name(names[i], out, sizeof out)) puts(out);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과 (UTF-8 터미널)</figcaption><pre>110-***-**6789
+411111******1111
+4111-11**-****-1111
+900101-1******
+홍*동
+김*
+남**수
+L*e</pre></figure>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 — 바이트 단위로 이름 마스킹</p>
+<p>이름을 <code>dst[1] = '*'</code>처럼 바이트 단위로 가리면 UTF-8 한글(3바이트)의 중간 바이트가 깨져, 화면에 깨진 문자가 나오거나 뒤 시스템에서 문자 변환 오류가 납니다. EUC-KR/CP949(한글 2바이트)를 쓰는 레거시 시스템과 연계할 때는 인코딩마다 글자 경계 판단이 다르므로, 마스킹 함수가 어떤 인코딩을 가정하는지 이름과 주석에 명시합니다(24장의 문자 코드 변환 참고). 또한 마스킹은 <strong>표시 단계</strong>의 통제일 뿐이므로, 저장 단계에서는 암호화가 별도로 필요합니다.</p>
+</div>
+
+<h3 id="s22-2-4">민감정보 메모리 제거</h3>
+
+<p>비밀번호, PIN, 암호키, 세션 토큰은 사용이 끝나면 메모리에서 즉시 지워야 합니다. 지우지 않으면 ① 해제된 메모리가 다른 요청에 재사용되며 내용이 노출되고, ② 코어 덤프·스왑 파일·메모리 덤프에 평문으로 남고, ③ 앞에서 본 포맷 스트링이나 범위 밖 읽기 취약점으로 유출될 수 있습니다. 그런데 "그냥 <code>memset</code>으로 0을 쓰면 되지 않나?"라는 생각에는 함정이 있습니다.</p>
+
+<figure class="code bad"><figcaption>잘못된 예 — 컴파일러가 지워 버리는 memset</figcaption>
+<pre><code class="language-c">#include &lt;string.h&gt;
+
+int login(const char *user)
+{
+    char pw[64];
+    read_password(pw, sizeof pw);       /* 사용자 비밀번호 입력 */
+    int ok = check_password(user, pw);
+    memset(pw, 0, sizeof pw);           /* 지운다…고 생각했다 */
+    return ok;                          /* pw는 이후 읽히지 않음 → memset은 "죽은 저장" */
+}</code></pre></figure>
+
+<figure class="diagram">
+<svg viewBox="0 0 680 220" width="680" role="img" aria-label="최적화 컴파일러가 이후 읽히지 않는 memset을 제거하는 과정">
+  <rect class="box" x="20" y="30" width="190" height="130" rx="6"/>
+  <text x="115" y="54" text-anchor="middle" class="small bold">소스 코드</text>
+  <text x="34" y="80" class="small mono">check(pw)</text>
+  <text x="34" y="104" class="small mono acc">memset(pw,0,64)</text>
+  <text x="34" y="128" class="small mono">return ok</text>
+  <path class="arrow" d="M210 95 H 260"/>
+  <rect class="hl2" x="260" y="40" width="170" height="110" rx="6"/>
+  <text x="345" y="66" text-anchor="middle" class="small bold">gcc -O2 분석</text>
+  <text x="345" y="92" text-anchor="middle" class="small">pw는 곧 사라질 지역변수</text>
+  <text x="345" y="112" text-anchor="middle" class="small">이후 읽는 코드 없음</text>
+  <text x="345" y="132" text-anchor="middle" class="small warn-t">→ 관찰 불가능한 쓰기</text>
+  <path class="arrow" d="M430 95 H 480"/>
+  <rect class="bad" x="480" y="30" width="180" height="130" rx="6"/>
+  <text x="570" y="54" text-anchor="middle" class="small bold">기계어</text>
+  <text x="494" y="80" class="small mono">call check</text>
+  <text x="494" y="104" class="small mono warn-t">(memset 삭제됨)</text>
+  <text x="494" y="128" class="small mono">ret</text>
+  <text x="340" y="196" text-anchor="middle" class="small">스택에 비밀번호가 그대로 남아 다음 함수 호출 프레임이 덮어쓸 때까지 존재</text>
+</svg>
+<figcaption>그림 22-6 죽은 저장 제거(dead store elimination) — 표준상 "관찰할 수 없는" memset은 최적화로 사라질 수 있다</figcaption>
+</figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 컴파일러가 memset을 지워도 될까?</p>
+<p>C 표준의 "as-if 규칙"에 따르면 컴파일러는 프로그램의 <strong>관찰 가능한 동작</strong>(volatile 접근, 입출력, 종료 상태)만 보존하면 어떤 변형도 할 수 있습니다. <code>pw</code>는 함수가 끝나면 수명이 끝나는 지역 변수이고, memset 이후 아무도 읽지 않으므로, 0을 쓰든 안 쓰든 표준 관점에서 프로그램의 동작은 같습니다. 컴파일러는 <code>memset</code>의 의미를 알고 있으므로(내장 함수) 이 "쓸모없는" 쓰기를 제거합니다. 보안 관점의 의도는 표준이 말하는 관찰 가능한 동작에 포함되지 않는다는 것이 문제의 본질입니다. 같은 이유로 <code>free</code> 직전의 memset도 제거될 수 있습니다.</p>
+</div>
+
+<div class="box fix"><p class="box-title" data-tag="해결">이렇게 해결합니다 — 제거되지 않는 소거 함수</p>
+<figure class="code good"><figcaption>secure_zero.c — 플랫폼별 안전한 메모리 소거</figcaption>
+<pre><code class="language-c">#include &lt;stddef.h&gt;
+#include &lt;string.h&gt;
+#if defined(_WIN32)
+#  include &lt;windows.h&gt;
+#endif
+
+void secure_zero(void *p, size_t n)
+{
+#if defined(_WIN32)
+    SecureZeroMemory(p, n);                    /* Windows: 제거되지 않음 보장 */
+#elif defined(__GLIBC__) || defined(__OpenBSD__) || defined(__FreeBSD__)
+    explicit_bzero(p, n);                      /* glibc 2.25+, BSD */
+#elif defined(__STDC_LIB_EXT1__)
+    memset_s(p, n, 0, n);                      /* C11 Annex K (구현된 경우만) */
+#else
+    /* 최후 수단: volatile 함수 포인터로 호출 → 컴파일러가 대상을 알 수 없어 제거 못 함 */
+    static void *(*const volatile memset_v)(void *, int, size_t) = memset;
+    memset_v(p, 0, n);
+#endif
+}
+
+/* 사용 예 */
+int login(const char *user)
+{
+    char pw[64];
+    read_password(pw, sizeof pw);
+    int ok = check_password(user, pw);
+    secure_zero(pw, sizeof pw);                /* 반드시 남는다 */
+    return ok;
+}</code></pre></figure>
+<p>C23에는 같은 목적의 표준 함수 <code>memset_explicit</code>이 추가되었습니다. 추가로 고려할 사항: ① 비밀번호를 담은 버퍼를 <code>realloc</code>하면 이전 위치에 사본이 남으므로 민감정보 버퍼는 크기를 고정합니다. ② 함수 인자로 값 복사된 구조체, 문자열 변환 중간 버퍼 등 <strong>사본</strong>을 모두 지웁니다. ③ 장시간 메모리에 머무는 키는 <code>mlock</code>으로 스왑을 막고, 운영 환경에서는 코어 덤프에 민감 영역이 포함되지 않게 설정합니다(<code>madvise(MADV_DONTDUMP)</code> 등). ④ 가장 좋은 방법은 애초에 평문 키를 애플리케이션 메모리에 두지 않고 HSM(하드웨어 보안 모듈)에서 처리하는 것입니다.</p>
+</div>
+
+<h3 id="s22-2-5">로그에 민감정보를 남기지 않기</h3>
+
+<p>장애 분석을 위해 "전문 전체를 로그로 남기자"는 유혹은 매우 큽니다. 하지만 로그 파일은 운영자·개발자·외주 인력·로그 수집 시스템 등 원장보다 훨씬 많은 사람과 시스템이 접근합니다. 금융권 보안 사고의 상당수는 원장이 아니라 <strong>로그, 백업, 테스트 데이터</strong>에서 발생합니다.</p>
+
+<div class="tbl"><table>
+<thead><tr><th>로그에 절대 남기면 안 되는 것</th><th>마스킹 후 남길 수 있는 것</th><th>그대로 남겨도 되는 것(예)</th></tr></thead>
+<tbody>
+<tr><td>비밀번호, PIN, CVC/CVV, 카드 마그네틱·IC 데이터, 암호키, 인증 토큰, OTP 값</td><td>계좌번호, 카드번호, 이름, 전화번호, 주민등록번호(기관 기준에 따라)</td><td>거래 고유번호, 전문 코드, 응답 코드, 처리 시간, 금액(정책에 따라)</td></tr>
+</tbody></table></div>
+
+<figure class="code good"><figcaption>msglog.c — 전문 레이아웃 기반 자동 마스킹 로그</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+
+typedef enum { F_PLAIN, F_ACCT, F_SECRET } fmask_t;
+
+typedef struct {
+    const char *name;
+    size_t off, len;
+    fmask_t mask;
+} field_t;
+
+/* 교육용 고정길이 전문: 전문코드4 + 계좌14 + 비밀번호4 + 금액13 = 35바이트 */
+static const field_t TX_LAYOUT[] = {
+    { "code",   0,  4, F_PLAIN  },
+    { "acct",   4, 14, F_ACCT   },
+    { "pw",    18,  4, F_SECRET },   /* 실제로는 평문 비밀번호를 전문에 싣지 않음(암호화 블록) */
+    { "amount",22, 13, F_PLAIN  },
+};
+#define N_FIELDS (sizeof TX_LAYOUT / sizeof TX_LAYOUT[0])
+
+/* msg(길이 n)를 필드별로 마스킹해 out에 "a|b|c" 형태로. 레이아웃과 길이가 안 맞으면 거부 */
+int format_masked(const char *msg, size_t n, char *out, size_t osz)
+{
+    size_t o = 0;
+    for (size_t f = 0; f &lt; N_FIELDS; f++) {
+        const field_t *fd = &amp;TX_LAYOUT[f];
+        if (fd-&gt;off + fd-&gt;len &gt; n) return -1;            /* 짧은 전문: 범위 밖 읽기 방지 */
+        if (o + fd-&gt;len + 2 &gt; osz) return -1;            /* 출력 공간 부족 */
+        if (f &gt; 0) out[o++] = '|';
+        for (size_t i = 0; i &lt; fd-&gt;len; i++) {
+            char c = msg[fd-&gt;off + i];
+            switch (fd-&gt;mask) {
+            case F_PLAIN:  break;
+            case F_SECRET: c = '*'; break;                 /* 길이까지 숨기려면 고정 "****" */
+            case F_ACCT:   if (i &gt;= 3 &amp;&amp; i + 4 &lt; fd-&gt;len) c = '*'; break;
+            }
+            out[o++] = c;
+        }
+    }
+    out[o] = '\0';
+    return (int)o;
+}
+
+int main(void)
+{
+    const char msg[] = "0200" "11012345678901" "1234" "0000000050000";
+    char line[128];
+    if (format_masked(msg, sizeof msg - 1, line, sizeof line) &gt; 0)
+        printf("[TX] %s\n", line);
+    if (format_masked(msg, 20, line, sizeof line) &lt; 0)
+        printf("[TX] 전문 길이 오류(len=20) - 원문 미기록\n");
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>[TX] 0200|110*******8901|****|0000000050000
+[TX] 전문 길이 오류(len=20) - 원문 미기록</pre></figure>
+
+<p>핵심은 마스킹을 개발자가 로그를 찍을 때마다 기억해서 하는 것이 아니라, <strong>전문 레이아웃 정의에 "민감도"를 메타데이터로 넣고 공통 로그 함수가 자동으로</strong> 적용하게 하는 것입니다. 새 필드가 추가되어도 레이아웃 정의만 맞게 하면 됩니다. 그리고 길이 오류 같은 비정상 전문일수록 "원문을 통째로 찍고 싶은" 유혹이 크지만, 그때도 원문 대신 길이·전문 코드 같은 메타 정보만 남깁니다.</p>
+
+<div class="box fin"><p class="box-title" data-tag="금융 실무">은행 시스템에서는 — 디버그 로그 한 줄의 대가</p>
+<p>한 금융회사에서 장애 분석을 위해 대외 연계 모듈의 로그 레벨을 일시적으로 DEBUG로 올렸습니다. DEBUG 레벨에서는 송수신 전문 전체가 16진 덤프로 기록되도록 되어 있었고, 그 안에는 고객의 카드번호와 유효기간이 평문으로 들어 있었습니다. 장애는 하루 만에 해결되었지만 로그 레벨은 몇 주간 그대로였고, 그 로그는 로그 통합 시스템을 거쳐 여러 부서가 조회할 수 있는 저장소에 보관되었습니다. 정기 점검에서 발견되어 해당 로그를 파기하고 신고 대상 여부를 검토하는 등 큰 비용을 치렀습니다.</p>
+<p>교훈: ① <strong>DEBUG 레벨에서도 마스킹은 꺼지지 않게</strong> 설계합니다. ② 로그 레벨 변경은 변경 관리 대상으로 기한을 정해 자동 원복합니다. ③ 로그 저장소에 대해서도 민감정보 패턴(카드번호 Luhn 검사 통과 16자리 숫자 등)을 주기적으로 스캔합니다.</p>
+</div>
+
+<h3 id="s22-2-6">난수: rand()를 쓰면 안 되는 이유</h3>
+
+<p>OTP 대체 인증번호, 세션 ID, 일회용 토큰, 암호키, 거래 고유번호의 무작위 부분처럼 <strong>예측되면 안 되는 값</strong>에 <code>rand()</code>를 쓰는 것은 대표적인 보안약점입니다.</p>
+
+<ul>
+<li><code>rand()</code>는 대개 선형 합동 생성기(LCG)나 그와 비슷한 단순 알고리즘이라, 출력 몇 개를 관찰하면 내부 상태를 복원해 다음 값을 예측할 수 있습니다.</li>
+<li><code>srand(time(NULL))</code>로 시드하면 시드가 "초 단위 현재 시각"이라, 생성 시각을 대략 아는 공격자는 수천 개 후보만 시도하면 됩니다.</li>
+<li><code>RAND_MAX</code>는 최소 32767만 보장되어 범위가 좁고(MSVC는 실제로 32767), <code>rand() % 1000000</code>은 범위 자체가 부족하거나 편향됩니다.</li>
+</ul>
+
+<p>보안 용도의 난수는 운영체제가 제공하는 <strong>암호학적으로 안전한 의사난수 생성기(CSPRNG)</strong>를 씁니다. 리눅스는 <code>getrandom()</code>(glibc 2.25+) 또는 <code>/dev/urandom</code>, 윈도우는 <code>BCryptGenRandom</code>, BSD/macOS는 <code>arc4random_buf</code>입니다.</p>
+
+<figure class="code good"><figcaption>secure_rand.c — 편향 없는 6자리 인증번호</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stdint.h&gt;
+#include &lt;stdbool.h&gt;
+#include &lt;errno.h&gt;
+#include &lt;unistd.h&gt;              /* ssize_t */
+#include &lt;sys/random.h&gt;          /* Linux: getrandom */
+
+/* 버퍼를 OS CSPRNG로 채운다. 실패 시 false (절대 rand()로 대체하지 않는다) */
+static bool rand_bytes(void *buf, size_t n)
+{
+    uint8_t *p = buf;
+    while (n &gt; 0) {
+        ssize_t r = getrandom(p, n, 0);
+        if (r &lt; 0) {
+            if (errno == EINTR) continue;        /* 시그널로 중단되면 재시도 */
+            return false;
+        }
+        p += r;
+        n -= (size_t)r;
+    }
+    return true;
+}
+
+/* [0, bound) 범위의 균등 난수. 나머지 편향을 거부 표본추출로 제거 */
+static bool rand_uniform(uint32_t bound, uint32_t *out)
+{
+    if (bound == 0) return false;
+    uint32_t limit = UINT32_MAX - (UINT32_MAX % bound);   /* bound의 배수 경계 */
+    uint32_t r;
+    do {
+        if (!rand_bytes(&amp;r, sizeof r)) return false;
+    } while (r &gt;= limit);                    /* 경계 이상이면 버리고 다시 */
+    *out = r % bound;
+    return true;
+}
+
+int main(void)
+{
+    uint32_t code;
+    if (!rand_uniform(1000000, &amp;code)) {
+        fprintf(stderr, "난수 생성 실패 - 인증번호 발급 중단\n");
+        return 1;
+    }
+    printf("인증번호: %06u\n", code);         /* 앞자리 0도 6자리로 */
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과 (예시 — 실행마다 다름)</figcaption><pre>인증번호: 073915</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 <code>r % bound</code>만 하면 편향이 생길까?</p>
+<p>32비트 난수는 0~4,294,967,295의 4,294,967,296가지 값을 균등하게 냅니다. 이를 1,000,000으로 나눈 나머지를 쓰면, 4,294,967,296 = 1,000,000 × 4,294 + 967,296이므로 0~967,295는 4,295번, 967,296~999,999는 4,294번 나옵니다. 차이는 작지만 특정 값이 더 자주 나온다는 것은 암호학적으로 결함입니다. 마지막 "자투리 구간"(limit 이상)에 걸린 값을 버리고 다시 뽑으면 모든 결과가 정확히 같은 확률이 됩니다. 버려질 확률은 967,296/2<sup>32</sup> ≈ 0.02%라 성능 부담도 없습니다.</p>
+</div>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 — 난수 실패 시 조용히 대체</p>
+<p>"getrandom이 실패하면 어쩌지?"라며 <code>rand()</code>로 폴백하는 코드를 종종 봅니다. 이렇게 하면 공격자가 난수 소스를 고갈시키거나 실패를 유도하는 것만으로 예측 가능한 값을 만들 수 있습니다. 보안 난수 생성 실패는 <strong>치명적 오류로 처리해 거래를 중단</strong>해야 합니다. 또 하나, 인증번호의 안전성은 난수만으로 결정되지 않습니다. 시도 횟수 제한(예: 5회 실패 시 폐기), 유효 시간(예: 3분), 1회 사용 후 폐기가 함께 있어야 6자리(100만 가지)가 의미를 가집니다.</p>
+</div>
+
+<h3 id="s22-2-7">컴파일러와 운영체제의 보호 기법</h3>
+
+<p>안전한 코드를 쓰는 것이 1차 방어라면, 컴파일러와 OS의 보호 기법은 "그래도 남은 버그"가 공격으로 이어지는 것을 어렵게 만드는 2차 방어입니다(심층 방어, defense in depth).</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 680 270" width="680" role="img" aria-label="스택 카나리가 버퍼와 리턴 주소 사이에 놓여 오버플로를 감지하는 구조">
+  <rect class="box" x="40" y="20" width="220" height="38"/>
+  <text x="150" y="44" text-anchor="middle" class="small">리턴 주소</text>
+  <rect class="box" x="40" y="58" width="220" height="38"/>
+  <text x="150" y="82" text-anchor="middle" class="small">저장된 rbp</text>
+  <rect class="hl2" x="40" y="96" width="220" height="38"/>
+  <text x="150" y="120" text-anchor="middle" class="small bold">카나리 (무작위 8B, 첫 바이트 0)</text>
+  <rect class="hl" x="40" y="134" width="220" height="60"/>
+  <text x="150" y="168" text-anchor="middle" class="small">char buf[…]</text>
+  <path class="arrow" d="M280 190 V 30"/>
+  <text x="292" y="120" class="small acc">넘쳐 쓰기</text>
+  <rect class="box" x="360" y="20" width="300" height="80" rx="6"/>
+  <text x="510" y="44" text-anchor="middle" class="small bold">함수 시작 (프롤로그)</text>
+  <text x="375" y="68" class="small mono">mov rax, fs:0x28   ; TLS의 원본 카나리</text>
+  <text x="375" y="88" class="small mono">mov [rbp-8], rax   ; 스택에 복사</text>
+  <rect class="box" x="360" y="114" width="300" height="100" rx="6"/>
+  <text x="510" y="138" text-anchor="middle" class="small bold">함수 끝 (에필로그)</text>
+  <text x="375" y="162" class="small mono">mov rax, [rbp-8]</text>
+  <text x="375" y="182" class="small mono">xor rax, fs:0x28   ; 바뀌었나?</text>
+  <text x="375" y="202" class="small mono warn-t">jne __stack_chk_fail ; 중단</text>
+  <text x="340" y="250" text-anchor="middle" class="small">리턴 주소에 닿으려면 카나리를 먼저 덮어야 하므로, ret 전에 변조가 발각된다</text>
+</svg>
+<figcaption>그림 22-7 스택 카나리(-fstack-protector) — 탄광의 카나리아처럼 위험을 먼저 알려 준다</figcaption>
+</figure>
+
+<div class="tbl"><table>
+<thead><tr><th>기법</th><th>빌드/설정</th><th>막는 것</th><th>한계</th></tr></thead>
+<tbody>
+<tr><td>스택 카나리</td><td><code>-fstack-protector-strong</code></td><td>스택 오버플로로 리턴 주소 덮기</td><td>카나리 유출 시 우회, 다른 지역변수 덮기(인증 플래그)는 못 막음</td></tr>
+<tr><td>FORTIFY_SOURCE</td><td><code>-O2 -D_FORTIFY_SOURCE=2</code> (gcc 12+/glibc 2.34+는 <code>=3</code>)</td><td>크기를 아는 버퍼에 대한 <code>memcpy</code>/<code>strcpy</code>/<code>sprintf</code> 오버플로를 실행 시 검사, <code>%n</code> 제한</td><td>컴파일 시 크기를 알 수 있는 경우만, 최적화 필수</td></tr>
+<tr><td>NX / DEP</td><td>기본(링커 <code>-z noexecstack</code>)</td><td>스택·힙에 넣은 코드 실행</td><td>ROP로 우회 가능</td></tr>
+<tr><td>ASLR + PIE</td><td><code>-fPIE -pie</code> (최근 배포판 기본), OS 설정</td><td>코드·스택·힙·라이브러리 주소 예측</td><td>주소 유출(포맷 스트링 등) 시 우회</td></tr>
+<tr><td>RELRO</td><td><code>-Wl,-z,relro,-z,now</code></td><td>GOT(동적 링크 함수 주소표) 덮어쓰기</td><td>시작 시간 약간 증가(<code>now</code>)</td></tr>
+<tr><td>CFI 계열</td><td><code>-fcf-protection</code>(x86 CET), clang <code>-fsanitize=cfi</code></td><td>간접 분기·리턴 주소 변조</td><td>하드웨어·OS 지원 필요</td></tr>
+<tr><td>경고를 오류로</td><td><code>-Wall -Wextra -Wformat=2 -Wconversion -Werror</code></td><td>위험 코드의 유입 자체</td><td>레거시 코드에는 단계적 적용</td></tr>
+</tbody></table></div>
+
+<figure class="code"><figcaption>Makefile 일부 — 운영 빌드 보안 옵션 예</figcaption>
+<pre><code class="language-bash">CFLAGS  = -std=c11 -O2 -g \
+          -Wall -Wextra -Wformat=2 -Wformat-security -Wconversion -Wsign-conversion \
+          -Werror=format-security -Werror=implicit-function-declaration \
+          -fstack-protector-strong -D_FORTIFY_SOURCE=2 \
+          -fPIE -fcf-protection
+LDFLAGS = -pie -Wl,-z,relro,-z,now -Wl,-z,noexecstack
+
+# 테스트 빌드 (운영 빌드와 분리)
+CFLAGS_TEST = -std=c11 -O1 -g -fno-omit-frame-pointer \
+              -fsanitize=address,undefined -fno-sanitize-recover=all</code></pre></figure>
+
+<p>빌드 결과물에 보호 기법이 실제로 적용되었는지는 <code>checksec</code> 같은 도구나 <code>readelf -l</code>(GNU_STACK, GNU_RELRO 세그먼트), <code>readelf -h</code>(Type: DYN = PIE)로 확인합니다. 보안 점검에서 "운영 바이너리에 PIE와 RELRO가 적용되어 있는가"를 묻는 경우가 많으므로, 빌드 파이프라인에서 자동 확인하도록 해 둡니다.</p>
+
+<div class="box key"><p class="box-title" data-tag="핵심">한 줄 요약</p>
+<p>컴파일러·OS 보호 기법은 공격의 <strong>비용을 올릴 뿐</strong> 버그를 고치지 않습니다. 카나리는 "인증 플래그 덮기" 같은 논리 공격을, ASLR은 정보 유출이 있으면, NX는 ROP를 막지 못합니다. 안전한 코드 + 보호 기법 + 분석 도구를 겹겹이 쌓는 것이 정답입니다.</p>
+</div>
+
+<h3 id="s22-2-8">정적·동적 분석 도구와 개발 파이프라인</h3>
+
+<p>사람의 코드 리뷰만으로는 모든 메모리 오류를 찾을 수 없습니다. 도구는 크게 두 종류입니다.</p>
+
+<div class="tbl"><table>
+<thead><tr><th>종류</th><th>원리</th><th>도구 예</th><th>장점 / 단점</th></tr></thead>
+<tbody>
+<tr><td>정적 분석(SAST)</td><td>실행하지 않고 소스·중간 표현을 분석</td><td>컴파일러 경고, <code>gcc -fanalyzer</code>, clang-tidy, Clang Static Analyzer, cppcheck, 국내외 상용 보안약점 진단 도구</td><td>모든 경로를 볼 수 있고 개발 초기에 적용 / 오탐이 많고 실행 시 값에 의존하는 버그는 놓침</td></tr>
+<tr><td>동적 분석</td><td>계측된 프로그램을 실행하며 감시</td><td>AddressSanitizer, UndefinedBehaviorSanitizer, MemorySanitizer, ThreadSanitizer, Valgrind(memcheck)</td><td>오탐이 거의 없고 정확한 위치 보고 / 실행된 경로만 검사, 느림(ASan 약 2배, Valgrind 수십 배)</td></tr>
+<tr><td>퍼징(fuzzing)</td><td>자동 생성한 비정상 입력을 대량 주입</td><td>libFuzzer, AFL++</td><td>전문 파서처럼 입력 처리 코드에 매우 효과적 / 하네스 작성 필요</td></tr>
+</tbody></table></div>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 200" width="700" role="img" aria-label="커밋부터 배포까지 보안 검사가 들어가는 개발 파이프라인">
+  <rect class="box" x="10" y="60" width="100" height="56" rx="6"/>
+  <text x="60" y="84" text-anchor="middle" class="small bold">커밋</text>
+  <text x="60" y="102" text-anchor="middle" class="small mute">pre-commit</text>
+  <path class="arrow" d="M110 88 H 140"/>
+  <rect class="hl" x="140" y="60" width="120" height="56" rx="6"/>
+  <text x="200" y="84" text-anchor="middle" class="small bold">빌드</text>
+  <text x="200" y="102" text-anchor="middle" class="small mute">-Werror, 보안 옵션</text>
+  <path class="arrow" d="M260 88 H 290"/>
+  <rect class="hl" x="290" y="60" width="120" height="56" rx="6"/>
+  <text x="350" y="84" text-anchor="middle" class="small bold">정적 분석</text>
+  <text x="350" y="102" text-anchor="middle" class="small mute">신규 지적 0건</text>
+  <path class="arrow" d="M410 88 H 440"/>
+  <rect class="hl" x="440" y="60" width="120" height="56" rx="6"/>
+  <text x="500" y="84" text-anchor="middle" class="small bold">테스트</text>
+  <text x="500" y="102" text-anchor="middle" class="small mute">ASan/UBSan, 퍼징</text>
+  <path class="arrow" d="M560 88 H 590"/>
+  <rect class="hl2" x="590" y="60" width="100" height="56" rx="6"/>
+  <text x="640" y="84" text-anchor="middle" class="small bold">배포</text>
+  <text x="640" y="102" text-anchor="middle" class="small mute">checksec 확인</text>
+  <path class="arrow-m" d="M350 116 C 350 170, 60 170, 60 118"/>
+  <text x="205" y="166" text-anchor="middle" class="small warn-t">실패 시 병합 차단 → 개발자에게 즉시 피드백</text>
+  <text x="350" y="36" text-anchor="middle" class="small mute">"막바지 일괄 진단"보다 "매 커밋 자동 진단"이 훨씬 싸다</text>
+</svg>
+<figcaption>그림 22-8 보안 검사를 내장한 개발 파이프라인 — 문제를 만든 사람이 만든 직후에 고치게 한다</figcaption>
+</figure>
+
+<figure class="code"><figcaption>fuzz_parse_amount.c — libFuzzer 하네스 예 (21장 parse_amount 퍼징)</figcaption>
+<pre><code class="language-c">#include &lt;stdint.h&gt;
+#include &lt;stddef.h&gt;
+#include &lt;string.h&gt;
+#include &lt;stdlib.h&gt;
+
+int parse_amount(const char *s, int64_t *out);   /* 21장의 함수 */
+
+/* clang -g -O1 -fsanitize=fuzzer,address,undefined fuzz_parse_amount.c amount_str.c */
+int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
+{
+    char *s = malloc(size + 1);          /* 퍼저 입력은 NUL 종료가 아니므로 복사 */
+    if (!s) return 0;
+    memcpy(s, data, size);
+    s[size] = '\0';
+    int64_t v;
+    (void)parse_amount(s, &amp;v);           /* 크래시·UB·누수가 나면 퍼저가 입력을 저장 */
+    free(s);
+    return 0;
+}</code></pre></figure>
+
+<div class="box fin"><p class="box-title" data-tag="금융 실무">은행 시스템에서는 — 퍼저가 찾아 준 전문 파서 버그</p>
+<p>한 결제 대행 시스템은 가맹점에서 오는 가변 길이 전문을 파싱하는 C 모듈을 운영하고 있었습니다. 수년간 문제가 없었지만, 신규 개발자가 위와 같은 퍼징 하네스를 만들어 하룻밤 돌리자 수십 개의 크래시 입력이 나왔습니다. 대부분은 "길이 필드가 실제 데이터보다 큰 경우" 범위 밖 읽기였고, 하나는 "반복부 건수 × 항목 길이"의 정수 오버플로였습니다. 정상 가맹점은 그런 전문을 보내지 않았기에 드러나지 않았을 뿐, 악의적 입력에는 무방비였던 것입니다. 이후 그 팀은 외부 입력을 다루는 모든 파서에 퍼징을 상시 적용(CI에서 매일 일정 시간)하는 규칙을 만들었습니다.</p>
+</div>
+
+<div class="ex"><p class="ex-title">예제 22-2 <span class="lv">난이도 ★★☆</span></p>
+<p>다음 중 "<code>-fstack-protector-strong</code>을 켜면 막힌다"고 할 수 <strong>없는</strong> 것을 모두 고르고 이유를 쓰십시오. ① 스택 버퍼 오버플로로 리턴 주소 변조 ② 스택 버퍼 오버플로로 같은 프레임의 인증 플래그 변조 ③ 힙 버퍼 오버플로 ④ 포맷 스트링으로 카나리 값 유출 후 오버플로 ⑤ use-after-free</p>
+<details><summary>정답과 해설 보기</summary>
+<p>막는다고 할 수 없는 것: <strong>②③④⑤</strong>. 카나리는 리턴 주소 바로 아래에 놓여 "리턴 직전"에 검사하므로 ①만 막습니다(그것도 함수가 반환해야 감지). ② 카나리보다 아래(낮은 주소)에 있는 다른 지역 변수는 카나리를 건드리지 않고도 덮을 수 있습니다. gcc는 배열을 다른 지역 변수보다 높은 주소로 재배치해 이를 완화하지만, 배열 여러 개나 구조체 내부 배치에서는 한계가 있습니다. ③⑤ 힙에는 카나리가 없습니다(힙 관리자의 무결성 검사·ASan이 담당). ④ 카나리 값을 알면 같은 값으로 덮어 검사를 통과합니다.</p>
+</details></div>
+
+<h2 id="summary">핵심 정리</h2>
+<ul class="summary-list">
+<li>스택에서 배열은 높은 주소 쪽으로 채워지고 그 위에 저장된 rbp와 리턴 주소가 있습니다. 경계 검사 없는 복사는 인접 변수(인증 플래그)와 리턴 주소를 덮어 인증 우회·제어 흐름 탈취로 이어집니다.</li>
+<li><code>gets</code>(C11에서 삭제), <code>strcpy</code>, <code>strcat</code>, <code>sprintf</code>, <code>scanf("%s")</code>는 목적지 크기를 모릅니다. 길이를 먼저 확정하고 <code>memcpy</code>/<code>snprintf</code>/<code>fgets</code>를 쓰며, 잘림은 오류로 처리합니다. <code>strncpy</code>는 NUL을 보장하지 않습니다.</li>
+<li>사용자 입력을 포맷 문자열로 쓰면 <code>%p</code>로 메모리 유출, <code>%n</code>으로 메모리 쓰기가 가능합니다. 포맷은 항상 상수, 입력은 <code>"%s"</code>의 인자로 넘기고 <code>-Wformat-security</code>를 켭니다.</li>
+<li>외부에서 온 개수 × 크기 계산이 넘치면 작은 버퍼가 할당되어 힙 오버플로가 됩니다. 업무 상한, 실제 길이 대조, <code>calloc</code>/나눗셈 검사의 세 겹으로 막습니다.</li>
+<li>off-by-one은 버퍼를 "길이 + 1"로, 반복을 [0, N)으로, 길이 검사를 <code>&gt;=</code>로 쓰는 습관으로 막습니다.</li>
+<li>use-after-free는 해제된 메모리가 재사용되며 남은 포인터가 남의 데이터를 가리키는 문제입니다. 소유권 규칙, 해제 후 NULL, 단일 정리 경로, ASan으로 대응합니다.</li>
+<li>입력은 정규화 → 길이 → 문자 집합 → 형식 → 업무 규칙 순으로 화이트리스트 검증하고, 검증된 정규화 값만 이후에 사용합니다. 서버는 클라이언트 검증을 믿지 않습니다.</li>
+<li>보안약점 진단가이드의 7개 분류와 CERT C 규칙(STR31, INT32, MEM30, FIO30, ERR33, MSC30 등)을 공통 라이브러리와 코딩 표준에 반영합니다.</li>
+<li>계좌·카드·주민번호·이름은 표시 단계에서 마스킹합니다(카드 앞6·뒤4 이내). 이름은 UTF-8 글자 단위로 처리합니다.</li>
+<li>민감정보 소거용 <code>memset</code>은 최적화로 제거될 수 있으므로 <code>explicit_bzero</code>/<code>SecureZeroMemory</code>/<code>memset_explicit</code>(C23)를 씁니다. 사본과 realloc 잔재까지 지웁니다.</li>
+<li>로그에는 비밀번호·PIN·CVC·키를 절대 남기지 않고, 전문 레이아웃 메타데이터로 공통 로그 함수가 자동 마스킹하게 합니다. DEBUG 레벨에서도 마찬가지입니다.</li>
+<li>보안 난수는 <code>rand()</code>가 아니라 <code>getrandom</code>/<code>BCryptGenRandom</code> 같은 OS CSPRNG를 쓰고, 범위 변환은 거부 표본추출로 편향을 제거하며, 실패 시 대체하지 말고 중단합니다.</li>
+<li>스택 카나리, FORTIFY_SOURCE, NX, ASLR/PIE, RELRO, CET는 공격 비용을 올리는 2차 방어입니다. 정적 분석·Sanitizer·퍼징을 CI 파이프라인에 넣어 매 커밋마다 검사합니다.</li>
+</ul>
+
+<h2 id="interview">CS 면접 단골 질문</h2>
+<div class="box iv"><p class="box-title" data-tag="면접">이 장에서 나오는 면접 질문</p>
+<details><summary>Q1. 버퍼 오버플로가 무엇이고 어떻게 공격에 이용되며, 어떻게 방어합니까?</summary>
+<p>버퍼 오버플로는 할당된 버퍼의 경계를 넘어 쓰는 오류입니다. 스택에서는 배열이 높은 주소로 채워지고 그 위에 리턴 주소가 있어, 넘친 데이터가 리턴 주소를 덮으면 함수 반환 시 공격자가 정한 주소로 실행이 이동합니다. 근본 방어는 길이를 검사하고 크기를 받는 함수를 쓰는 것이고, 보조 방어로 스택 카나리, NX, ASLR, FORTIFY_SOURCE가 있습니다.</p>
+<p><strong>꼬리 질문 대비:</strong> "NX가 있는데 어떻게 공격하나?" → 기존 코드 조각을 이어 붙이는 ROP를 쓰며, ASLR이 이를 어렵게 하지만 주소 유출이 있으면 우회됩니다.</p>
+</details>
+<details><summary>Q2. 스택 카나리와 ASLR의 원리를 설명해 주십시오.</summary>
+<p>스택 카나리는 함수 시작 시 리턴 주소와 지역 버퍼 사이에 무작위 값을 넣고, 반환 직전에 값이 바뀌었는지 확인해 바뀌었으면 프로세스를 종료합니다. 리턴 주소까지 덮으려면 카나리를 반드시 지나야 하기 때문입니다. ASLR은 실행할 때마다 스택·힙·라이브러리·(PIE이면) 실행 파일의 주소를 무작위로 배치해 공격자가 점프할 주소를 예측하지 못하게 합니다.</p>
+<p><strong>꼬리 질문 대비:</strong> "카나리의 첫 바이트가 0인 이유?" → 문자열 함수가 NUL에서 멈추므로 문자열 기반 오버플로로 카나리를 읽거나 그대로 재현하기 어렵게 하려는 것입니다.</p>
+</details>
+<details><summary>Q3. 포맷 스트링 취약점이란?</summary>
+<p><code>printf(user_input)</code>처럼 외부 입력을 포맷 문자열로 쓰면, printf가 <code>%</code> 지시자마다 존재하지 않는 인자를 레지스터와 스택에서 꺼내 읽으므로 <code>%p</code>, <code>%s</code>로 메모리 내용이 유출되고, <code>%n</code>으로 임의 주소에 값을 쓸 수 있는 취약점입니다. 포맷을 항상 상수로 두고 <code>printf("%s", s)</code>로 쓰면 해결되며, 컴파일러의 <code>-Wformat-security</code>가 탐지합니다.</p>
+</details>
+<details><summary>Q4. use-after-free와 메모리 누수의 차이, 각각의 위험은?</summary>
+<p>메모리 누수는 할당한 메모리를 해제하지 않아 사용 가능한 메모리가 점점 줄어드는 문제로, 장시간 실행되는 서버에서 결국 할당 실패나 OOM 종료를 일으킵니다(가용성 문제). use-after-free는 해제한 메모리를 계속 사용하는 문제로, 그 메모리가 다른 객체에 재사용되면 데이터 오염이나 공격자가 제어하는 데이터로의 접근이 일어나 코드 실행까지 가능합니다(무결성·기밀성 문제). 누수는 Valgrind·LeakSanitizer로, UAF는 ASan으로 탐지합니다.</p>
+</details>
+<details><summary>Q5. 민감정보를 지울 때 memset만으로 부족한 이유는?</summary>
+<p>컴파일러는 이후에 읽히지 않는 메모리에 대한 쓰기를 "관찰 불가능한 동작"으로 보고 최적화로 제거할 수 있습니다(dead store elimination). 함수 끝이나 free 직전의 memset이 그 대상입니다. 그래서 <code>explicit_bzero</code>, <code>SecureZeroMemory</code>, C23의 <code>memset_explicit</code>처럼 제거되지 않음이 보장된 함수를 쓰거나, volatile 포인터를 통해 씁니다.</p>
+<p><strong>꼬리 질문 대비:</strong> "그것만으로 충분한가?" → 레지스터·다른 스택 위치에 남은 사본, realloc 이전 영역, 스왑·코어 덤프도 고려해야 하며, 가능하면 HSM에서 처리해 평문 키를 메모리에 두지 않습니다.</p>
+</details>
+<details><summary>Q6. 보안 용도에 rand()를 쓰면 안 되는 이유는?</summary>
+<p><code>rand()</code>는 통계적 용도의 단순한 의사난수 생성기라 출력 몇 개로 내부 상태를 추정해 다음 값을 예측할 수 있고, 시드가 현재 시각이면 탐색 공간이 매우 작습니다. RAND_MAX도 32767까지만 보장됩니다. 세션 ID, 인증번호, 키에는 OS의 암호학적 난수 생성기(getrandom, /dev/urandom, BCryptGenRandom)를 써야 하며, 범위를 줄일 때는 나머지 편향이 없도록 거부 표본추출을 합니다.</p>
+</details>
+<details><summary>Q7. strncpy가 안전하지 않은 이유는?</summary>
+<p>원본 길이가 n 이상이면 목적지에 NUL 종료 문자를 넣지 않아, 이후 문자열 함수가 버퍼 끝을 넘어 읽게 됩니다. 또한 잘림이 일어났는지 알려 주지 않으며, 원본이 짧으면 남은 공간을 모두 0으로 채워 비효율적입니다. 원래 고정 길이 필드용 함수이므로, 문자열 복사에는 길이 검사 후 memcpy나 snprintf를 쓰고 잘림을 오류로 처리합니다.</p>
+</details>
+<details><summary>Q8. 입력 검증에서 화이트리스트와 블랙리스트의 차이는?</summary>
+<p>블랙리스트는 위험한 것으로 알려진 패턴을 거부하거나 제거하고, 화이트리스트는 허용할 형식을 정의해 그 외를 모두 거부합니다. 블랙리스트는 새로운 우회 패턴·인코딩 변형을 막지 못하고 제거 후 위험 문자열이 재조합되기도 하므로, 보안 검증은 화이트리스트가 원칙입니다. 또한 검증 전에 정규화해서 같은 값의 여러 표현을 하나로 만들어야 합니다.</p>
+</details>
+<details><summary>Q9. 정적 분석과 동적 분석의 차이는?</summary>
+<p>정적 분석은 실행하지 않고 코드를 분석해 모든 경로를 볼 수 있고 개발 초기에 적용할 수 있지만, 실행 시 값에 의존하는 버그를 놓치거나 오탐이 많습니다. 동적 분석은 계측된 프로그램을 실행하면서 실제로 일어나는 오류를 정확히 잡지만, 실행된 경로만 검사하고 느립니다. 그래서 둘을 함께 쓰고, 테스트 입력의 다양성을 퍼징으로 보완합니다.</p>
+</details>
+<details><summary>Q10. 정수 오버플로가 어떻게 메모리 취약점으로 이어집니까?</summary>
+<p>외부 입력으로 받은 개수와 원소 크기를 곱해 할당 크기를 계산할 때 곱셈이 넘치면 실제보다 훨씬 작은 버퍼가 할당되고, 이후 원래 개수만큼 쓰면서 힙 버퍼 오버플로가 일어납니다. 길이 계산의 뺄셈이 unsigned에서 순환해 거대한 복사 길이가 되는 경우도 있습니다. 업무 상한 검사, 실제 데이터 길이와의 대조, <code>calloc</code>이나 나눗셈 기반 사전 검사로 막습니다.</p>
+</details>
+</div>
+
+<h2 id="exercises">연습문제</h2>
+
+<div class="ex"><p class="ex-title">연습문제 22-1 <span class="lv">난이도 ★☆☆</span> 버그 찾기</p>
+<pre><code class="language-c">char cmd[16];
+printf("메뉴 선택: ");
+gets(cmd);</code></pre>
+<details><summary>정답과 해설 보기</summary>
+<p><code>gets</code>는 입력 길이 제한이 전혀 없어 16바이트를 넘는 입력이 스택을 덮습니다. C11에서 표준에서 삭제되었습니다. <code>if (!fgets(cmd, sizeof cmd, stdin)) { /* EOF/오류 */ }</code>로 바꾸고, 개행 제거와 너무 긴 입력(개행이 없으면 잘림) 처리를 추가합니다(본문의 <code>read_line</code>).</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 22-2 <span class="lv">난이도 ★☆☆</span> 버그 찾기</p>
+<pre><code class="language-c">void audit(const char *user, const char *action)
+{
+    char line[128];
+    snprintf(line, sizeof line, "user=%s action=%s", user, action);
+    fprintf(audit_fp, line);
+}</code></pre>
+<details><summary>정답과 해설 보기</summary>
+<p>① <code>fprintf(audit_fp, line)</code>은 포맷 스트링 취약점입니다. user나 action에 <code>%</code>가 들어가면 그대로 해석됩니다. <code>fputs(line, audit_fp)</code> 또는 <code>fprintf(audit_fp, "%s\n", line)</code>로 고칩니다. ② <code>snprintf</code>의 잘림을 검사하지 않아 감사 로그가 조용히 잘릴 수 있습니다. 감사 로그는 완전성이 중요하므로 잘림 시 별도 표시나 오류 처리를 합니다. ③ user에 개행이 들어가면 가짜 로그 줄을 만들 수 있습니다(로그 인젝션). 제어 문자를 이스케이프합니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 22-3 <span class="lv">난이도 ★★☆</span> 버그 찾기 — off-by-one</p>
+<pre><code class="language-c">#define NAME_MAX_LEN 20
+int set_name(char dst[NAME_MAX_LEN], const char *src)
+{
+    if (strlen(src) &gt; NAME_MAX_LEN) return -1;
+    strcpy(dst, src);
+    return 0;
+}</code></pre>
+<details><summary>정답과 해설 보기</summary>
+<p>strlen(src)가 정확히 20이면 검사를 통과하지만 NUL까지 21바이트가 필요하므로 1바이트 넘칩니다. 또한 함수 매개변수의 배열 크기 <code>[NAME_MAX_LEN]</code>는 장식일 뿐 포인터로 바뀌므로 보장이 없습니다. 고친 코드:</p>
+<figure class="code good"><figcaption>정답 코드</figcaption>
+<pre><code class="language-c">int set_name(char *dst, size_t dsz, const char *src)
+{
+    size_t n = strnlen(src, dsz);
+    if (n &gt;= dsz) return -1;            /* NUL 자리까지 고려 */
+    memcpy(dst, src, n + 1);
+    return 0;
+}</code></pre></figure>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 22-4 <span class="lv">난이도 ★★☆</span> 버그 찾기 — 길이 계산</p>
+<pre><code class="language-c">/* 전문: [2바이트 길이 L][본문 L바이트]. 본문에서 헤더 10바이트를 뺀 데이터부 복사 */
+void copy_data(const uint8_t *msg, uint8_t *out, size_t out_sz)
+{
+    uint16_t L = (uint16_t)(msg[0] &lt;&lt; 8 | msg[1]);
+    size_t data_len = L - 10;
+    memcpy(out, msg + 2 + 10, data_len);
+}</code></pre>
+<details><summary>정답과 해설 보기</summary>
+<p>① L이 10보다 작으면 <code>L - 10</code>은 int로 승격되어 음수가 되고, size_t로 변환되며 거대한 값(예: L=4 → 18446744073709551610)이 되어 memcpy가 메모리를 대량으로 덮습니다. ② out_sz를 전혀 검사하지 않습니다. ③ 실제로 수신한 msg 길이와 L을 대조하지 않아 범위 밖 읽기가 됩니다.</p>
+<figure class="code good"><figcaption>정답 코드</figcaption>
+<pre><code class="language-c">int copy_data(const uint8_t *msg, size_t msg_len, uint8_t *out, size_t out_sz)
+{
+    if (msg_len &lt; 2) return -1;
+    size_t L = ((size_t)msg[0] &lt;&lt; 8) | msg[1];
+    if (L &lt; 10 || L &gt; msg_len - 2) return -1;   /* 헤더 미만 / 실제 수신 길이 초과 */
+    size_t data_len = L - 10;
+    if (data_len &gt; out_sz) return -1;
+    memcpy(out, msg + 12, data_len);
+    return (int)data_len;
+}</code></pre></figure>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 22-5 <span class="lv">난이도 ★★☆</span> 버그 찾기 — double free</p>
+<pre><code class="language-c">int process(void)
+{
+    char *a = malloc(100), *b = malloc(100);
+    if (!a || !b) { free(a); free(b); return -1; }
+    if (step1(a) &lt; 0) { free(a); goto fail; }
+    if (step2(b) &lt; 0) goto fail;
+    free(a); free(b);
+    return 0;
+fail:
+    free(a); free(b);
+    return -1;
+}</code></pre>
+<details><summary>정답과 해설 보기</summary>
+<p>step1이 실패하면 <code>a</code>를 해제한 뒤 <code>fail</code>로 가서 다시 <code>free(a)</code>를 하므로 double free입니다. 해제 경로를 한 곳으로 모으는 것이 원칙입니다.</p>
+<figure class="code good"><figcaption>정답 코드</figcaption>
+<pre><code class="language-c">int process(void)
+{
+    int rc = -1;
+    char *a = malloc(100), *b = malloc(100);
+    if (!a || !b) goto out;
+    if (step1(a) &lt; 0) goto out;
+    if (step2(b) &lt; 0) goto out;
+    rc = 0;
+out:
+    free(a);            /* free(NULL)은 안전 */
+    free(b);
+    return rc;
+}</code></pre></figure>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 22-6 <span class="lv">난이도 ★★☆</span> 코드 작성 — 전화번호 검증</p>
+<p>휴대전화 번호를 받아 "010-1234-5678", "01012345678" 형식만 허용하고 숫자 11자리로 정규화하는 함수를 작성하십시오. 하이픈을 쓴다면 3-4-4 위치에만 허용합니다.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>길이가 11(하이픈 없음) 또는 13(하이픈 있음)인 경우만 허용하고, 13이면 인덱스 3과 8이 하이픈이어야 합니다. 나머지 자리는 모두 숫자여야 하고, 앞 세 자리는 업무 규칙(예: 010)으로 검사합니다.</p>
+<figure class="code good"><figcaption>정답 코드</figcaption>
+<pre><code class="language-c">int normalize_mobile(const char *in, char out[12])
+{
+    size_t n = strnlen(in, 14);
+    size_t k = 0;
+    if (n != 11 &amp;&amp; n != 13) return -1;
+    for (size_t i = 0; i &lt; n; i++) {
+        char c = in[i];
+        if (n == 13 &amp;&amp; (i == 3 || i == 8)) {
+            if (c != '-') return -1;
+            continue;
+        }
+        if (c &lt; '0' || c &gt; '9') return -1;
+        out[k++] = c;
+    }
+    out[k] = '\0';                               /* k == 11 */
+    if (memcmp(out, "010", 3) != 0) return -2;   /* 업무 규칙 */
+    return 0;
+}</code></pre></figure>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 22-7 <span class="lv">난이도 ★★☆</span> 출력 예측 — 마스킹</p>
+<p>본문의 <code>mask_digits</code>로 다음을 마스킹한 결과를 쓰십시오. (1) <code>("1002-345-678901", 4, 3)</code> (2) <code>("5409-12**", 6, 4)</code> (3) <code>("123", 3, 4)</code></p>
+<details><summary>정답과 해설 보기</summary>
+<p>(1) 숫자 13개. 앞 4개(1002), 뒤 3개(901)만 표시 → <strong>1002-***-***901</strong>. (2) 숫자 6개(540912), '*'는 숫자가 아니므로 그대로. front=6이라 숫자 전부 표시 → <strong>5409-12**</strong>. 이미 마스킹된 입력이 들어오는 경우를 대비해 비숫자 보존 규칙이 유용합니다. (3) 숫자 3개, 모두 앞 3개 또는 뒤 4개 범위에 포함 → <strong>123</strong>(마스킹 없음). 짧은 입력에서 아무것도 가려지지 않는 것이 정책상 허용되는지 검토가 필요합니다(최소 마스킹 개수 규칙 추가).</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 22-8 <span class="lv">난이도 ★★☆</span> 코드 작성 — 세션 ID</p>
+<p>16바이트 난수로 32자리 16진수 세션 ID 문자열을 만드는 함수 <code>bool make_session_id(char out[33])</code>를 본문의 <code>rand_bytes</code>를 이용해 작성하십시오.</p>
+<details><summary>정답과 해설 보기</summary>
+<figure class="code good"><figcaption>정답 코드</figcaption>
+<pre><code class="language-c">bool make_session_id(char out[33])
+{
+    static const char HEX[] = "0123456789abcdef";
+    uint8_t raw[16];
+    if (!rand_bytes(raw, sizeof raw)) return false;   /* 실패 시 발급 중단 */
+    for (size_t i = 0; i &lt; 16; i++) {
+        out[2 * i]     = HEX[raw[i] &gt;&gt; 4];
+        out[2 * i + 1] = HEX[raw[i] &amp; 0x0F];
+    }
+    out[32] = '\0';
+    secure_zero(raw, sizeof raw);                      /* 원본 난수도 지움 */
+    return true;
+}</code></pre></figure>
+<p>128비트(2<sup>128</sup>가지)라 추측이 사실상 불가능합니다. 바이트를 16진수로 바꿀 때는 편향 문제가 없습니다(256 = 16 × 16). 시간이나 일련번호를 섞어 "고유성"을 만들려는 시도는 예측 가능성을 높이므로, 고유성은 서버 저장소의 중복 검사로 보장합니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 22-9 <span class="lv">난이도 ★★☆</span> 서술 — 편향 계산</p>
+<p>8비트 난수(0~255)를 <code>r % 10</code>으로 0~9 숫자로 바꾸면 각 숫자의 확률은 얼마입니까? 거부 표본추출의 경계값은?</p>
+<details><summary>정답과 해설 보기</summary>
+<p>256 = 10 × 25 + 6이므로 0~5는 26번(26/256 ≈ 10.16%), 6~9는 25번(25/256 ≈ 9.77%) 나옵니다. 4자리 PIN을 이렇게 만들면 0~5가 많은 PIN이 더 자주 생깁니다. 경계는 250(= 256 − 256 % 10)이며, r ≥ 250이면 버리고 다시 뽑습니다. 버려질 확률은 6/256 ≈ 2.3%입니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 22-10 <span class="lv">난이도 ★★☆</span> 코드 리뷰 — system()</p>
+<pre><code class="language-c">void archive_log(const char *date)      /* date: 운영자가 화면에서 입력 */
+{
+    char cmd[256];
+    snprintf(cmd, sizeof cmd, "gzip /app/log/tx_%s.log", date);
+    system(cmd);
+}</code></pre>
+<details><summary>정답과 해설 보기</summary>
+<p>date에 <code>20260101.log; rm -rf /app</code> 같은 값이 들어가면 셸이 세미콜론 뒤를 별도 명령으로 실행합니다(운영체제 명령어 삽입, CERT ENV33-C). 경로 조작(<code>../../</code>)도 가능합니다. 해결: ① date를 <code>YYYYMMDD</code> 8자리 숫자와 유효 날짜로 화이트리스트 검증, ② <code>system()</code> 대신 셸을 거치지 않는 <code>fork</code> + <code>execv("/usr/bin/gzip", argv)</code>로 인자를 배열로 전달, ③ 가능하면 외부 명령 대신 라이브러리(zlib)로 직접 압축, ④ 프로그램은 최소 권한 계정으로 실행합니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 22-11 <span class="lv">난이도 ★★★</span> 설계 — 하드코딩된 비밀</p>
+<p>배치 프로그램 소스에 DB 비밀번호가 <code>#define DB_PW "Bank!2026"</code>로 들어 있습니다. 무엇이 문제이고, 어떻게 바꿔야 합니까?</p>
+<details><summary>정답과 해설 보기</summary>
+<p>문제: ① 소스 저장소, 빌드 산출물(실행 파일에 문자열로 남음, <code>strings</code> 명령으로 추출 가능), 백업에 비밀번호가 퍼집니다. ② 비밀번호를 바꾸려면 재빌드·재배포가 필요해 주기적 변경이 사실상 불가능합니다. ③ 개발·테스트·운영이 같은 값을 쓰게 되기 쉽습니다. (CERT MSC41-C, 보안약점 "하드코드된 중요정보")</p>
+<p>개선: 기관의 비밀 관리 체계(키 관리 시스템, 암호화된 설정 파일 + 접근 통제, 볼트 서비스)에서 실행 시 조회하고, 조회한 값은 사용 후 <code>secure_zero</code>로 지우며, 로그·오류 메시지에 출력하지 않습니다. 환경별로 다른 계정과 최소 권한을 쓰고, 변경 이력을 관리합니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 22-12 <span class="lv">난이도 ★★★</span> 종합 — 보안 코드 리뷰</p>
+<p>다음 이체 요청 처리 함수에서 보안·안정성 문제를 5가지 이상 찾으십시오.</p>
+<pre><code class="language-c">int handle_transfer(char *req)          /* "계좌|금액|비밀번호|메모" */
+{
+    char acct[14], memo[32];
+    char *p = strtok(req, "|");  strcpy(acct, p);
+    int amount = atoi(strtok(NULL, "|"));
+    char *pw = strtok(NULL, "|");
+    strcpy(memo, strtok(NULL, "|"));
+    log_printf("transfer %s %d pw=%s memo=", acct, amount, pw);
+    log_printf(memo);
+    if (check_pw(acct, pw) &amp;&amp; amount &gt; 0) return do_transfer(acct, amount, memo);
+    return -1;
+}</code></pre>
+<details><summary>정답과 해설 보기</summary>
+<ol>
+<li><code>strtok</code> 반환값이 NULL일 수 있는데 검사 없이 사용 → NULL 역참조(필드 누락 시 크래시).</li>
+<li><code>strcpy(acct, p)</code>: 14자리 계좌번호면 NUL 자리가 없어 off-by-one, 더 길면 스택 오버플로. 형식 검증도 없음.</li>
+<li><code>atoi</code>: 오류 검출 불가, 범위 초과 UB, 금액이 <code>int</code>라 21억 원 이상 표현 불가. 21장의 <code>parse_amount</code>와 <code>int64_t</code> 사용.</li>
+<li><code>strcpy(memo, …)</code>: 길이 검사 없는 스택 오버플로.</li>
+<li>로그에 비밀번호 평문 기록(<code>pw=%s</code>), 계좌번호 비마스킹.</li>
+<li><code>log_printf(memo)</code>: 포맷 스트링 취약점.</li>
+<li>비밀번호를 평문으로 받아 비교하고 사용 후 지우지 않음(<code>req</code> 버퍼에 남음) → 소거 필요, 실제로는 암호화 채널·검증 모듈 사용.</li>
+<li><code>strtok</code>은 내부 정적 상태를 써서 스레드 안전하지 않음(<code>strtok_r</code> 사용).</li>
+<li>비밀번호 오류 횟수 제한 등 인증 실패 처리 부재(업무 규칙).</li>
+</ol>
+</details></div>
+
+</main>
+<aside class="rail" aria-label="이 페이지 목차"></aside>
+</div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-c.min.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>

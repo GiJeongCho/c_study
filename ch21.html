@@ -1,0 +1,1401 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ch21 금융 계산과 정밀도 · C언어 금융 IT 마스터</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+KR:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-ch="ch21">
+<header class="topbar">
+  <button class="menu-btn" type="button" aria-expanded="false" aria-controls="sidebar">목차</button>
+  <a class="brand" href="index.html"><b>C</b>금융 IT 마스터</a>
+  <span class="where"></span>
+  <span class="progress"></span>
+</header>
+<div class="layout">
+<nav id="sidebar" class="sidebar" aria-label="과정 목차"></nav>
+<div class="page">
+<main class="content">
+
+<header class="ch-head">
+  <p class="eyebrow">PART 2 · 금융 IT 베테랑 트랙 · CHAPTER</p>
+  <div class="bignum">21</div>
+  <h1>금융 계산과 정밀도</h1>
+  <p class="lede">은행에서 1원의 오차는 "작은 오차"가 아니라 "장애"입니다. 하루 수백만 건의 이자·수수료 계산에서 1원씩만 어긋나도 원장과 대사가 맞지 않고, 고객 민원과 감독기관 보고로 이어집니다. 이 장에서는 왜 <code>double</code>로 돈을 계산하면 안 되는지 비트 수준에서 확인하고, 정수 기반 금액 계산과 반올림·끝전 처리 규칙을 실무 코드로 구현합니다.</p>
+  <div class="goals"><p class="goals-title">이 장에서 배울 것</p><ul>
+    <li>IEEE 754 부동소수점의 부호·지수·가수 구조를 그림으로 이해합니다.</li>
+    <li><code>0.1 + 0.2 != 0.3</code>이 되는 이유를 2진 무한소수와 반올림으로 설명합니다.</li>
+    <li>누적 오차, 큰 금액에서의 정밀도 손실, <code>(int)(x * 100)</code> 버그를 실험으로 확인합니다.</li>
+    <li>부동소수점을 <code>==</code>로 비교하면 안 되는 이유와 올바른 비교법, float/double의 유효자리를 압니다.</li>
+    <li>금액은 원 단위 <code>int64_t</code>, 금리는 0.0001% 단위 고정소수점 정수로 표현합니다.</li>
+    <li>절사·절상·사사오입·은행가 반올림(HALF_EVEN)을 정수 나눗셈만으로 구현합니다.</li>
+    <li>일할 이자, 원천징수 세금, 원리금 균등 상환 스케줄을 1원 오차 없이 계산합니다.</li>
+    <li>이자 분배 시 끝전을 최대잔여법으로 처리하고, 곱셈 오버플로를 128비트 중간값으로 막습니다.</li>
+    <li>금액 문자열(콤마 포함) ↔ 정수 변환 함수를 엄격한 검증과 함께 구현합니다.</li>
+  </ul></div>
+</header>
+
+<h2 id="s21-1"><span class="num">21-1</span>부동소수점의 함정</h2>
+
+<p>PART 1에서 실수는 <code>float</code>와 <code>double</code>로 표현한다고 배웠고, "금액은 정수로"라는 말도 들었습니다. 이번 절에서는 그 이유를 끝까지 파고듭니다. 부동소수점은 "틀린" 것이 아니라 <strong>2진수로 근사하도록 설계된</strong> 표현입니다. 과학 계산에는 훌륭하지만, 10진수로 정확히 떨어져야 하는 돈 계산과는 근본적으로 맞지 않습니다.</p>
+
+<h3 id="s21-1-1">IEEE 754 부동소수점의 구조</h3>
+
+<p>부동소수점(floating point)은 수를 <strong>과학적 표기법</strong>처럼 저장합니다. 10진수에서 6250 = 6.25 × 10<sup>3</sup>이라고 쓰듯, 2진수에서는 수를 <strong>(−1)<sup>부호</sup> × 1.가수 × 2<sup>지수</sup></strong> 형태로 씁니다. 소수점의 위치가 지수에 따라 "떠다닌다(floating)"고 해서 부동(浮動)소수점입니다. 현대의 거의 모든 CPU는 IEEE 754 표준을 따릅니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 250" width="700" role="img" aria-label="IEEE 754 단정밀도 float의 비트 구조와 -6.25 예시">
+  <text x="350" y="22" text-anchor="middle" class="small bold">float (32비트) = 부호 1 + 지수 8 + 가수 23</text>
+  <rect class="bad" x="20" y="36" width="40" height="44"/>
+  <text x="40" y="63" text-anchor="middle" class="mono">1</text>
+  <rect class="hl2" x="60" y="36" width="200" height="44"/>
+  <text x="160" y="63" text-anchor="middle" class="mono">1000 0001</text>
+  <rect class="hl" x="260" y="36" width="420" height="44"/>
+  <text x="470" y="63" text-anchor="middle" class="mono">100 1000 0000 0000 0000 0000</text>
+  <text x="40" y="100" text-anchor="middle" class="small">부호</text>
+  <text x="160" y="100" text-anchor="middle" class="small">지수(바이어스 127)</text>
+  <text x="470" y="100" text-anchor="middle" class="small">가수(앞의 "1."은 저장 안 함)</text>
+  <text x="40" y="122" text-anchor="middle" class="small mute">음수</text>
+  <text x="160" y="122" text-anchor="middle" class="small mute mono">129 - 127 = 2</text>
+  <text x="470" y="122" text-anchor="middle" class="small mute mono">1.1001(2) = 1 + 0.5 + 0.0625 = 1.5625</text>
+  <path class="line" d="M20 140 H 680"/>
+  <text x="350" y="170" text-anchor="middle" class="bold">값 = (-1)¹ × 1.5625 × 2² = -6.25</text>
+  <text x="350" y="196" text-anchor="middle" class="mono small acc">비트 패턴 0xC0C80000</text>
+  <text x="350" y="226" text-anchor="middle" class="small mute">double (64비트) = 부호 1 + 지수 11(바이어스 1023) + 가수 52</text>
+</svg>
+<figcaption>그림 21-1 IEEE 754 float의 구조 — -6.25는 부호 1, 지수 129, 가수 0x480000으로 저장된다</figcaption>
+</figure>
+
+<div class="tbl"><table>
+<thead><tr><th>항목</th><th><code>float</code> (binary32)</th><th><code>double</code> (binary64)</th></tr></thead>
+<tbody>
+<tr><td>전체 비트</td><td>32</td><td>64</td></tr>
+<tr><td>부호 / 지수 / 가수</td><td>1 / 8 / 23</td><td>1 / 11 / 52</td></tr>
+<tr><td>유효 2진 자릿수(숨은 1 포함)</td><td>24비트</td><td>53비트</td></tr>
+<tr><td>10진 유효자리(<code>FLT_DIG</code>/<code>DBL_DIG</code>)</td><td>6자리 보장 (대략 7)</td><td>15자리 보장 (대략 15~17)</td></tr>
+<tr><td>정확히 표현되는 최대 연속 정수</td><td>2<sup>24</sup> = 16,777,216</td><td>2<sup>53</sup> = 9,007,199,254,740,992</td></tr>
+<tr><td>최대값 (<code>FLT_MAX</code>/<code>DBL_MAX</code>)</td><td>약 3.4 × 10<sup>38</sup></td><td>약 1.8 × 10<sup>308</sup></td></tr>
+<tr><td>머신 엡실론 (<code>FLT_EPSILON</code>/<code>DBL_EPSILON</code>)</td><td>약 1.19 × 10<sup>−7</sup></td><td>약 2.22 × 10<sup>−16</sup></td></tr>
+</tbody></table></div>
+
+<p>지수에는 <strong>바이어스(bias)</strong>가 더해져 저장됩니다. float의 바이어스는 127이라서 실제 지수 2는 129(<code>1000 0001</code>)로 저장됩니다. 이렇게 하면 지수를 부호 없는 정수처럼 비교할 수 있어서, 같은 부호의 부동소수점 두 개를 정수 비교 회로로 대소 비교할 수 있습니다. 가수(mantissa, significand)는 정규화하면 항상 "1.xxx"이므로 맨 앞의 1은 저장하지 않고(숨은 비트, hidden bit) 소수 부분만 저장해 1비트를 법니다.</p>
+
+<p>지수 비트가 모두 0이거나 모두 1인 경우는 특수 값입니다.</p>
+<ul>
+<li>지수 전부 0, 가수 0: <strong>±0</strong> (+0과 −0이 따로 있지만 <code>==</code>로는 같음)</li>
+<li>지수 전부 0, 가수 ≠ 0: <strong>비정규수(subnormal)</strong> — 0 근처의 아주 작은 수</li>
+<li>지수 전부 1, 가수 0: <strong>±무한대(inf)</strong> — 1.0/0.0 등</li>
+<li>지수 전부 1, 가수 ≠ 0: <strong>NaN(Not a Number)</strong> — 0.0/0.0, sqrt(−1) 등. NaN은 자기 자신과도 같지 않습니다(<code>x != x</code>가 참).</li>
+</ul>
+
+<figure class="code"><figcaption>ex21-1.c — float의 비트를 들여다보기</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stdint.h&gt;
+#include &lt;string.h&gt;
+
+static void dump_float(float f)
+{
+    uint32_t u;
+    memcpy(&amp;u, &amp;f, sizeof u);        /* 비트 그대로 복사 (포인터 캐스팅은 엄격한 별칭 규칙 위반) */
+    unsigned sign = u &gt;&gt; 31;
+    unsigned expo = (u &gt;&gt; 23) &amp; 0xFFu;
+    unsigned mant = u &amp; 0x7FFFFFu;
+    printf("%-12g = 0x%08X  부호=%u 지수=%3u(%+4d) 가수=0x%06X\n",
+           f, u, sign, expo, (int)expo - 127, mant);
+}
+
+int main(void)
+{
+    dump_float(-6.25f);
+    dump_float(1.0f);
+    dump_float(0.1f);
+    dump_float(16777216.0f);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>-6.25        = 0xC0C80000  부호=1 지수=129(  +2) 가수=0x480000
+1            = 0x3F800000  부호=0 지수=127(  +0) 가수=0x000000
+0.1          = 0x3DCCCCCD  부호=0 지수=123(  -4) 가수=0x4CCCCD
+1.67772e+07  = 0x4B800000  부호=0 지수=151( +24) 가수=0x000000</pre></figure>
+
+<p>0.1의 가수가 <code>0x4CCCCD</code>로, <code>CCCC</code>가 반복되다가 마지막에 <code>D</code>로 끝났습니다. 반복되던 패턴이 23비트에서 잘리면서 <strong>반올림</strong>된 흔적입니다. 다음 절에서 이것이 무엇을 뜻하는지 봅니다.</p>
+
+<h3 id="s21-1-2">0.1 + 0.2 != 0.3인 이유</h3>
+
+<p>10진수에서 1/3 = 0.3333…이 끝나지 않듯이, 2진수에서는 <strong>분모가 2의 거듭제곱이 아닌 분수</strong>가 모두 무한소수가 됩니다. 0.1 = 1/10이고 10 = 2 × 5이므로, 5라는 인수 때문에 2진수로는 끝나지 않습니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 230" width="700" role="img" aria-label="0.1을 2진수로 바꾸면 0011이 무한 반복되고 유한 비트에서 반올림된다">
+  <text x="20" y="28" class="small bold">0.1을 2진수로: 2를 곱해 정수 부분을 차례로 뽑는다</text>
+  <text x="30" y="56" class="mono small">0.1×2=0.2 → 0</text>
+  <text x="30" y="76" class="mono small">0.2×2=0.4 → 0</text>
+  <text x="30" y="96" class="mono small">0.4×2=0.8 → 0</text>
+  <text x="30" y="116" class="mono small acc">0.8×2=1.6 → 1</text>
+  <text x="30" y="136" class="mono small acc">0.6×2=1.2 → 1</text>
+  <text x="30" y="156" class="mono small">0.2×2=0.4 → 0  ← 다시 0.2!</text>
+  <path class="arrow-m" d="M250 152 C 300 140, 300 70, 250 60"/>
+  <text x="310" y="104" class="small mute">순환</text>
+  <rect class="hl2" x="360" y="44" width="320" height="40" rx="4"/>
+  <text x="520" y="69" text-anchor="middle" class="mono small">0.0 0011 0011 0011 0011 0011 …(2)</text>
+  <text x="520" y="106" text-anchor="middle" class="small">무한히 반복 → 52비트(double)에서 잘라 반올림</text>
+  <rect class="bad" x="360" y="124" width="320" height="40" rx="4"/>
+  <text x="520" y="149" text-anchor="middle" class="mono small">실제 저장값 0.1000000000000000055511…</text>
+  <text x="350" y="200" text-anchor="middle" class="small">0.1 → 약간 큼, 0.2 → 약간 큼, 0.3 → 약간 작음</text>
+  <text x="350" y="220" text-anchor="middle" class="small warn-t">그래서 0.1 + 0.2 = 0.30000000000000004 ≠ 0.29999999999999999</text>
+</svg>
+<figcaption>그림 21-2 0.1은 2진수로 무한 순환소수 — 유한한 비트에 담는 순간 오차가 생긴다</figcaption>
+</figure>
+
+<figure class="code"><figcaption>ex21-2.c — 0.1 + 0.2 실험</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+int main(void)
+{
+    double a = 0.1, b = 0.2, c = 0.3;
+    printf("a       = %.20f\n", a);
+    printf("a + b   = %.17g\n", a + b);
+    printf("c       = %.17g\n", c);
+    printf("a+b==c ? %s\n", (a + b == c) ? "같다" : "다르다");
+    printf("%%.2f로 출력하면: %.2f, %.2f\n", a + b, c);    /* 보기엔 같다 */
+
+    double s = 0.0;
+    for (int i = 0; i &lt; 10; i++)
+        s += 0.1;
+    printf("0.1을 10번 더하면 %.17g, 1.0과 같은가? %s\n", s, s == 1.0 ? "예" : "아니오");
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>a       = 0.10000000000000000555
+a + b   = 0.30000000000000004
+c       = 0.29999999999999999
+a+b==c ? 다르다
+%.2f로 출력하면: 0.30, 0.30
+0.1을 10번 더하면 0.99999999999999989, 1.0과 같은가? 아니오</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — 세 번의 반올림</p>
+<p><code>0.1 + 0.2</code>에는 반올림이 세 번 들어갑니다. ① 0.1을 double로 저장할 때(약간 커짐), ② 0.2를 저장할 때(약간 커짐), ③ 두 값의 정확한 합을 다시 53비트에 맞출 때. 반면 <code>0.3</code>은 저장할 때 한 번만 반올림되는데, 하필 약간 작은 쪽으로 반올림됩니다. 결과적으로 두 값은 마지막 1비트(1 ULP, unit in the last place)만큼 차이가 납니다.</p>
+<p>중요한 것은 IEEE 754 연산 하나하나는 <strong>"정확한 결과를 가장 가까운 표현 가능한 값으로 반올림"</strong>하도록 정확하게 정의되어 있다는 점입니다. 부동소수점이 엉터리인 것이 아니라, 10진 소수를 2진으로 정확히 표현할 수 없는 것이 근본 원인입니다. 그리고 <code>%.2f</code> 출력은 이 차이를 숨겨 버려서, 화면만 보는 개발자는 문제를 눈치채지 못합니다.</p>
+</div>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 — (int)(x * 100) 으로 원/전 변환</p>
+<p>달러·외화처럼 소수 둘째 자리가 있는 금액을 센트 단위 정수로 바꿀 때 흔히 <code>cents = (int)(price * 100);</code>이라고 씁니다. 그러나 <code>1.15 * 100</code>은 114.99999999999999이고, <code>(int)</code> 변환은 0쪽으로 <strong>절사</strong>하므로 114가 됩니다. <code>0.29 * 100</code>도 28.999999999999996 → 28입니다. 1센트가 사라졌습니다. 외화 금액은 처음부터 <strong>문자열에서 정수로</strong> 파싱해야 하며(21-2절), 불가피하게 double에서 바꿀 때는 <code>llround(price * 100)</code>처럼 반올림 함수를 쓰고 범위를 검사합니다.</p>
+</div>
+
+<figure class="code bad"><figcaption>잘못된 예 — 1센트가 사라진다</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;math.h&gt;
+
+int main(void)
+{
+    double usd[] = { 1.15, 0.29, 4.35, 19.99 };
+    for (int i = 0; i &lt; 4; i++)
+        printf("%.2f달러 → (int)절사 %d센트, llround %lld센트\n",
+               usd[i], (int)(usd[i] * 100), llround(usd[i] * 100));
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과 (gcc -lm)</figcaption><pre>1.15달러 → (int)절사 114센트, llround 115센트
+0.29달러 → (int)절사 28센트, llround 29센트
+4.35달러 → (int)절사 434센트, llround 435센트
+19.99달러 → (int)절사 1998센트, llround 1999센트</pre></figure>
+
+<div class="ex"><p class="ex-title">예제 21-1 <span class="lv">난이도 ★☆☆</span></p>
+<p>다음 중 <code>double</code>로 <strong>정확히</strong> 표현되는 수를 모두 고르십시오: 0.5, 0.25, 0.1, 0.75, 0.2, 1/3, 1024.125, 0.3</p>
+<details><summary>정답과 해설 보기</summary>
+<p>정확히 표현되는 수: <strong>0.5(=1/2), 0.25(=1/4), 0.75(=3/4), 1024.125(=1024 + 1/8)</strong>. 기약분수로 썼을 때 분모가 2의 거듭제곱이고, 유효 비트가 53비트 안에 들어가면 정확히 표현됩니다. 0.1(1/10), 0.2(1/5), 0.3(3/10), 1/3은 분모에 2 이외의 소인수가 있어서 근삿값만 저장됩니다. 금액에서 자주 쓰는 0.01(1/100)도 정확히 표현되지 않습니다.</p>
+</details></div>
+
+<h3 id="s21-1-3">누적 오차 실험</h3>
+
+<p>한 번의 오차는 10<sup>−17</sup> 수준이라 무시할 만해 보입니다. 하지만 금융 배치는 같은 계산을 수백만 번 반복합니다. 오차가 어떻게 쌓이는지 실험해 보겠습니다.</p>
+
+<figure class="code"><figcaption>ex21-3.c — 0.1원을 백만 번 더하기</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stdint.h&gt;
+
+int main(void)
+{
+    float   f = 0.0f;
+    double  d = 0.0;
+    int64_t i = 0;                   /* 0.1원 = 1단위(전)로 정수화 */
+
+    for (int k = 0; k &lt; 1000000; k++) {
+        f += 0.1f;
+        d += 0.1;
+        i += 1;
+    }
+    printf("기대값   : 100000.0\n");
+    printf("float    : %.6f\n", f);
+    printf("double   : %.10f\n", d);
+    printf("정수(전) : %lld.%lld\n", (long long)(i / 10), (long long)(i % 10));
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과 (x86-64, SSE 연산)</figcaption><pre>기대값   : 100000.0
+float    : 100958.343750
+double   : 100000.0000013329
+정수(전) : 100000.0</pre></figure>
+
+<figure class="diagram">
+<svg viewBox="0 0 680 220" width="680" role="img" aria-label="float, double, 정수의 누적 오차 비교 막대">
+  <text x="20" y="26" class="small bold">0.1을 1,000,000번 더한 결과의 오차</text>
+  <text x="20" y="66" class="small">float</text>
+  <rect class="bad" x="100" y="48" width="520" height="30"/>
+  <text x="630" y="68" class="small mono warn-t">+958.34</text>
+  <text x="20" y="116" class="small">double</text>
+  <rect class="hl2" x="100" y="98" width="3" height="30"/>
+  <text x="112" y="118" class="small mono">+0.0000013 (float 오차의 약 7억분의 1이지만 0은 아님)</text>
+  <text x="20" y="166" class="small">정수</text>
+  <rect class="hl" x="100" y="148" width="1" height="30"/>
+  <text x="112" y="168" class="small mono acc">0 (정확)</text>
+  <text x="340" y="206" text-anchor="middle" class="small mute">float은 합이 커질수록 0.1이 ULP보다 작아져 더할 때마다 크게 반올림된다</text>
+</svg>
+<figcaption>그림 21-3 누적 오차 — float은 약 1% 오차, double도 0이 아니며, 정수만 정확하다</figcaption>
+</figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">float의 오차는 왜 이렇게 클까?</p>
+<p>부동소수점의 간격(ULP)은 값의 크기에 비례합니다. float에서 65536(2<sup>16</sup>) 근처의 간격은 2<sup>16−23</sup> = 1/128 ≈ 0.0078입니다. 합계가 커질수록 0.1을 더한 결과가 "가장 가까운 표현 가능한 값"으로 반올림될 때 상대적으로 큰 오차가 생기고, 그 오차가 매번 같은 방향(여기서는 위쪽)으로 쌓였습니다. 합계가 2<sup>24</sup>(약 1677만)를 넘으면 0.1은 커녕 1을 더해도 값이 바뀌지 않는 구간에 들어갑니다. 큰 수에 작은 수를 반복해서 더하는 "누적 합계" 패턴은 부동소수점에서 가장 위험한 패턴입니다(Kahan 합산 같은 보정 기법이 있지만, 금융에서는 정수로 해결합니다).</p>
+</div>
+
+<div class="box fin"><p class="box-title" data-tag="금융 실무">은행 시스템에서는 — "화면은 맞는데 합계가 안 맞는다"</p>
+<p>한 카드사의 포인트 적립 모듈은 결제 금액 × 적립률(0.1%~1.5%)을 <code>double</code>로 계산해 고객별로 누적하고, 화면과 명세서에는 소수점 이하를 버린 값을 보여 주었습니다. 개별 고객 화면은 문제가 없어 보였지만, 월말에 "고객별 포인트 합계"와 "가맹점별 적립 비용 합계"를 대사하자 수십만 포인트 차이가 났습니다. 원인은 계산 경로마다 반올림 시점이 달랐고(건별 절사 vs 합계 후 절사), double 누적 오차가 경계값(예: 99.99999999)을 만들어 절사 결과를 1씩 바꿨기 때문입니다.</p>
+<p>개선 작업은 ① 적립률을 정수(0.01% 단위)로 바꾸고, ② "건별로 계산하고 건별로 절사한다"는 규칙을 명문화해 모든 경로가 같은 함수를 호출하게 하고, ③ 일 단위로 두 합계를 대사하는 검증 배치를 추가하는 것이었습니다. <strong>반올림 규칙과 시점은 업무 규칙</strong>이며, 코드 여기저기서 제각각 정하면 안 됩니다.</p>
+</div>
+
+<h3 id="s21-1-4">부동소수점 비교: == 금지와 올바른 비교법</h3>
+
+<p>지금까지 본 것처럼 같은 값을 다른 경로로 계산하면 마지막 비트가 다를 수 있습니다. 그래서 부동소수점을 <code>==</code>로 비교하는 것은 거의 항상 버그입니다. gcc는 <code>-Wfloat-equal</code> 옵션으로 이를 경고해 줍니다. 그렇다면 어떻게 비교해야 할까요?</p>
+
+<ol class="steps">
+<li><strong>절대 오차 비교</strong>: <code>fabs(a - b) &lt;= eps</code>. 값의 크기가 대략 정해져 있을 때만 씁니다. 1e-9 같은 고정 eps는 1e12 근처의 값에서는 ULP(약 1.2e-4)보다 작아서 무의미하고, 1e-12 근처의 값에서는 너무 커서 모든 값이 같다고 판정됩니다.</li>
+<li><strong>상대 오차 비교</strong>: <code>fabs(a - b) &lt;= rel * fmax(fabs(a), fabs(b))</code>. 값의 크기에 비례한 허용 오차를 씁니다. 0 근처에서는 무너지므로 절대 오차와 함께 씁니다.</li>
+<li><strong>결합</strong>: <code>fabs(a - b) &lt;= fmax(abs_eps, rel * fmax(fabs(a), fabs(b)))</code>. 실무 라이브러리 대부분이 이 형태입니다.</li>
+</ol>
+
+<figure class="code good"><figcaption>fcmp.c — 결합 오차 비교 함수</figcaption>
+<pre><code class="language-c">#include &lt;math.h&gt;
+#include &lt;stdbool.h&gt;
+#include &lt;stdio.h&gt;
+
+/* abs_eps: 0 근처 허용 오차, rel: 상대 허용 오차 (예: 1e-12) */
+static bool almost_equal(double a, double b, double abs_eps, double rel)
+{
+    if (isnan(a) || isnan(b)) return false;        /* NaN은 무엇과도 같지 않다 */
+    if (a == b) return true;                       /* 무한대끼리, 정확히 같은 경우 */
+    double diff = fabs(a - b);
+    double scale = fmax(fabs(a), fabs(b));
+    return diff &lt;= fmax(abs_eps, rel * scale);
+}
+
+int main(void)
+{
+    printf("%d\n", almost_equal(0.1 + 0.2, 0.3, 1e-12, 1e-12));          /* 1 */
+    printf("%d\n", almost_equal(1e15 + 0.3, 1e15, 1e-12, 1e-12));        /* 1: 상대적으로 같음 */
+    printf("%d\n", almost_equal(1e-20, 2e-20, 1e-12, 1e-12));            /* 1: 0 근처 */
+    printf("%d\n", almost_equal(1.0, 1.0001, 1e-12, 1e-12));             /* 0 */
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>1
+1
+1
+0</pre></figure>
+
+<p>두 번째 줄을 보십시오. 1e15 + 0.3과 1e15는 "상대적으로" 같다고 판정되었습니다. 과학 계산에서는 올바른 판단이지만, <strong>금액이라면 0.3원 차이를 같다고 하는 것</strong>입니다. 바로 이 지점이 "금액에는 부동소수점 비교 자체를 쓰지 말라"는 결론으로 이어집니다. 금액 비교는 정수 <code>==</code>로 정확하게 해야 합니다.</p>
+
+<div class="box tip"><p class="box-title" data-tag="잠깐">NaN의 전염성</p>
+<p>NaN이 한 번 생기면 이후 모든 산술 결과가 NaN이 되고, 모든 비교(<code>&lt;</code>, <code>&gt;</code>, <code>==</code>)가 거짓이 됩니다. 그래서 <code>if (amount &gt; limit) reject();</code> 같은 검사에 NaN이 들어가면 <strong>검사를 통과</strong>해 버립니다. 부동소수점을 써야 하는 위험 지표 계산 등에서는 <code>isnan</code>/<code>isfinite</code>로 입력과 결과를 반드시 검사하고, 비교는 "통과 조건"이 아니라 "거부 조건이 아닌 것"을 명시적으로 확인하도록(예: <code>if (!(amount &lt;= limit)) reject();</code>) 작성하는 기법도 씁니다.</p>
+</div>
+
+<h3 id="s21-1-5">float vs double: 유효자리와 큰 금액의 정밀도 손실</h3>
+
+<p>float의 유효 2진 자릿수는 24비트이므로 2<sup>24</sup> = 16,777,216보다 큰 정수부터는 모든 정수를 표현하지 못합니다. 1천7백만 원도 안 되는 금액부터 1원 단위가 깨진다는 뜻입니다. double은 2<sup>53</sup> ≈ 9천조까지 정수를 정확히 표현하지만, <strong>소수점 이하</strong>까지 고려하면 이야기가 달라집니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 240" width="700" role="img" aria-label="값이 커질수록 부동소수점 간격 ULP가 커지는 모습">
+  <text x="20" y="26" class="small bold">수직선 위의 표현 가능한 값(눈금) — 지수 구간마다 개수는 같고 간격은 2배씩</text>
+  <path class="line" d="M20 80 H 680"/>
+  <g class="line">
+  <path class="line" d="M20 70 V 90"/><path class="line" d="M30 70 V 90"/><path class="line" d="M40 70 V 90"/><path class="line" d="M50 70 V 90"/>
+  <path class="line" d="M60 70 V 90"/><path class="line" d="M70 70 V 90"/><path class="line" d="M80 70 V 90"/><path class="line" d="M90 70 V 90"/>
+  <path class="line" d="M100 70 V 90"/><path class="line" d="M120 70 V 90"/><path class="line" d="M140 70 V 90"/><path class="line" d="M160 70 V 90"/>
+  <path class="line" d="M180 70 V 90"/><path class="line" d="M200 70 V 90"/><path class="line" d="M220 70 V 90"/><path class="line" d="M240 70 V 90"/>
+  <path class="line" d="M260 70 V 90"/><path class="line" d="M300 70 V 90"/><path class="line" d="M340 70 V 90"/><path class="line" d="M380 70 V 90"/>
+  <path class="line" d="M420 70 V 90"/><path class="line" d="M460 70 V 90"/><path class="line" d="M500 70 V 90"/><path class="line" d="M540 70 V 90"/>
+  <path class="line" d="M580 70 V 90"/><path class="line" d="M680 70 V 90"/>
+  </g>
+  <text x="60" y="114" text-anchor="middle" class="small mute">간격 h</text>
+  <text x="180" y="114" text-anchor="middle" class="small mute">간격 2h</text>
+  <text x="420" y="114" text-anchor="middle" class="small mute">간격 4h</text>
+  <text x="630" y="114" text-anchor="middle" class="small mute">8h …</text>
+  <rect class="hl2" x="20" y="140" width="660" height="80" rx="4"/>
+  <text x="40" y="164" class="small mono">double의 ULP: 1억 근처 ≈ 0.0000000149  /  1조 근처 ≈ 0.000122</text>
+  <text x="40" y="186" class="small mono">             1000조 근처 = 0.125     /  1경 근처 = 2</text>
+  <text x="40" y="208" class="small warn-t">→ 1000조 원대 합계에서는 0.01원 단위가 이미 표현 불가, 1경 원대에서는 1원도 불가</text>
+</svg>
+<figcaption>그림 21-4 부동소수점 간격(ULP)은 값의 크기에 비례해 커진다 — 큰 금액일수록 작은 단위를 잃는다</figcaption>
+</figure>
+
+<figure class="code"><figcaption>ex21-4.c — 큰 금액에서 정밀도 손실 실험</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+int main(void)
+{
+    /* float: 2^24 넘으면 1원 단위가 깨진다 */
+    float f1 = 16777217.0f;
+    float f2 = 123456789.0f;
+    float f3 = 1000000000000.0f;          /* 1조 원 */
+    printf("float  16,777,217     → %.1f\n", f1);
+    printf("float  123,456,789    → %.1f\n", f2);
+    printf("float  1조            → %.1f\n", f3);
+    printf("float  1234567.89     → %.2f\n", 1234567.89f);
+    printf("float  12345678.9     → %.2f\n", 12345678.9f);
+
+    /* double: 큰 합계에서 소수점 이하가 사라진다 */
+    double big = 1e15;                    /* 1000조 */
+    printf("double 1000조 + 0.01  → %.3f\n", big + 0.01);
+    printf("double 1000조 + 0.3   → %.3f\n", big + 0.3);
+    printf("double 1경 + 1        → %.1f\n", 1e16 + 1);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>float  16,777,217     → 16777216.0
+float  123,456,789    → 123456792.0
+float  1조            → 999999995904.0
+float  1234567.89     → 1234567.88
+float  12345678.9     → 12345679.00
+double 1000조 + 0.01  → 1000000000000000.000
+double 1000조 + 0.3   → 1000000000000000.250
+double 1경 + 1        → 10000000000000000.0</pre></figure>
+
+<p>float에 1조 원을 넣었더니 999,999,995,904원이 되었습니다. 저장하는 것만으로 <strong>4,096원</strong>이 사라졌습니다. double도 1000조 근처에서는 0.01원을 더해도 변화가 없고, 0.3원을 더하면 0.25원이 더해집니다. 은행의 총수신·총여신 잔액은 수백조 원 단위이므로, 전행 합계를 double로 내면 원 미만 단위가 이미 신뢰할 수 없습니다.</p>
+
+<div class="box key"><p class="box-title" data-tag="핵심">한 줄 요약</p>
+<p>부동소수점은 "유효숫자 약 7자리(float)/15자리(double)의 2진 근삿값"입니다. 금액처럼 <strong>10진수로 정확해야 하고, 크기가 크며, 합계가 대사되어야 하는 값</strong>에는 쓰지 않습니다. 금액은 정수(최소 화폐 단위), 비율은 고정소수점 정수로 표현합니다.</p>
+</div>
+
+<div class="box fin"><p class="box-title" data-tag="금융 실무">은행 시스템에서는 — 그럼 부동소수점은 아예 안 쓰나?</p>
+<p>쓰는 곳도 있습니다. 리스크 관리의 VaR(Value at Risk) 계산, 파생상품 가격 결정 모델, 신용평가 모형, 통계 리포트처럼 <strong>본질적으로 근사이고 결과가 원장에 기표되지 않는</strong> 계산에는 double을 씁니다. 반면 계정계(원장)의 잔액·거래금액·이자·수수료·세금처럼 장부에 기록되는 값은 정수 또는 10진 고정소수점을 씁니다. 메인프레임 COBOL 시스템이 금융권에서 오래 살아남은 이유 중 하나도 <code>PIC S9(13)V99 COMP-3</code> 같은 <strong>10진 고정소수점(packed decimal)</strong>을 언어와 하드웨어 차원에서 지원했기 때문입니다. C에는 이것이 없으므로 정수로 직접 구현합니다. 원장 계산 결과가 모형 계산의 입력으로 갈 때만 double로 변환하고, 반대 방향(double → 원장)은 반드시 명시적 반올림 규칙을 거칩니다.</p>
+</div>
+
+<div class="box tip"><p class="box-title" data-tag="잠깐">printf의 %.2f도 반올림을 한다</p>
+<p><code>printf("%.2f", 2.675)</code>는 2.68이 아니라 <strong>2.67</strong>을 출력합니다. 2.675는 실제로 2.67499999999999982236431605997495353221893310546875로 저장되어 있기 때문입니다. <code>printf("%.2f", 0.125)</code>는 0.125가 정확히 표현되는데도 glibc에서 <strong>0.12</strong>가 나옵니다. glibc는 정확한 값을 기준으로 현재 반올림 모드(기본: 가장 가까운 짝수)로 반올림하기 때문입니다. 즉 출력 함수로 "반올림 처리"를 대신하면 규칙이 플랫폼마다 달라집니다. 금액의 반올림은 반드시 직접 작성한 정수 함수로 하고, 출력은 결과를 그대로 찍기만 하십시오.</p>
+</div>
+
+<div class="ex"><p class="ex-title">예제 21-2 <span class="lv">난이도 ★★☆</span></p>
+<p>다음 코드의 문제를 설명하고, 정수 기반으로 고치십시오.</p>
+<pre><code class="language-c">float total = 0;
+for (int i = 0; i &lt; n; i++)
+    total += tx[i].amount;          /* amount: 원 단위 거래금액, float */
+if (total == ledger_total)          /* 원장 합계와 대사 */
+    puts("대사 일치");</code></pre>
+<details><summary>정답과 해설 보기</summary>
+<p>① 금액이 float이라 16,777,216원을 넘는 거래부터 1원 단위가 깨집니다. ② 합계가 커질수록 더할 때마다 반올림 오차가 쌓입니다. ③ <code>==</code> 비교는 거의 항상 실패합니다. ④ 오버플로 검사도 없습니다.</p>
+<figure class="code good"><figcaption>정답 코드</figcaption>
+<pre><code class="language-c">int64_t total = 0;
+for (size_t i = 0; i &lt; n; i++) {
+    if (__builtin_add_overflow(total, tx[i].amount, &amp;total)) {  /* amount: int64_t */
+        log_error("합계 오버플로 at %zu", i);
+        return ERR_OVERFLOW;
+    }
+}
+if (total == ledger_total)          /* 정수 비교는 정확하다 */
+    puts("대사 일치");
+else
+    log_error("대사 불일치: 거래합 %" PRId64 ", 원장 %" PRId64, total, ledger_total);</code></pre></figure>
+</details></div>
+
+<h2 id="s21-2"><span class="num">21-2</span>정수 기반 금액 계산과 반올림 규칙</h2>
+
+<p>앞 절의 결론은 "금액과 비율은 정수로"였습니다. 하지만 이자율 3.5%, 세율 15.4%, 일수 92/365처럼 금융 계산에는 소수가 끊임없이 등장합니다. 이 절에서는 소수를 <strong>정수 두 개(값과 단위)</strong>로 표현하는 고정소수점 기법, 나눗셈 결과를 규칙대로 반올림하는 함수, 중간 계산의 오버플로를 막는 128비트 기법을 차례로 만들고, 이를 조립해 일할 이자·세금·원리금 균등 상환·이자 분배를 1원 오차 없이 계산합니다.</p>
+
+<h3 id="s21-2-1">금액은 원 단위 정수, 금리는 고정소수점 정수</h3>
+
+<p>원화는 최소 단위가 1원이므로 금액은 <strong>원 단위 <code>int64_t</code></strong>로 저장합니다. <code>int64_t</code>의 최대값은 약 922경 원이므로 어떤 은행의 총자산도 충분히 담습니다. 외화는 통화마다 최소 단위(소수 자릿수)가 다르므로 "금액 정수 + 통화 코드"로 저장하고, 통화별 소수 자릿수 표(USD 2, JPY 0, KWD 3 등)를 따로 둡니다.</p>
+
+<p>금리처럼 소수점 이하가 필요한 값은 <strong>고정소수점(fixed-point)</strong>으로 표현합니다. 아이디어는 간단합니다. "단위"를 아주 작게 정하고 그 단위의 개수를 정수로 저장합니다. 예를 들어 금리의 단위를 <strong>0.0001%(= 1/1,000,000 = 1ppm)</strong>로 정하면,</p>
+
+<div class="tbl"><table>
+<thead><tr><th>실제 금리</th><th>비율</th><th>저장 정수 (단위 0.0001%)</th></tr></thead>
+<tbody>
+<tr><td>3.5%</td><td>0.035</td><td>35,000</td></tr>
+<tr><td>15.4% (이자소득 원천징수 합계 세율)</td><td>0.154</td><td>154,000</td></tr>
+<tr><td>0.0001%</td><td>0.000001</td><td>1</td></tr>
+<tr><td>19.9% (법정 최고금리 수준의 예)</td><td>0.199</td><td>199,000</td></tr>
+<tr><td>100%</td><td>1</td><td>1,000,000</td></tr>
+</tbody></table></div>
+
+<p>계산할 때는 <code>금액 × 금리정수 / 1,000,000</code>처럼 곱한 뒤 단위로 나눕니다. 곱셈과 덧셈은 정확하고, <strong>오차가 생기는 곳은 오직 나눗셈 한 곳</strong>이 되며, 그 나눗셈의 나머지를 어떻게 처리할지를 우리가 명시적으로 정합니다. 이것이 정수 기반 금융 계산의 핵심 원리입니다.</p>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 고정소수점은 정확할까?</p>
+<p>고정소수점 정수 35000은 정확히 35000/1000000 = 0.035를 뜻합니다. 분모가 10의 거듭제곱이므로 사람이 쓰는 10진 소수(소수점 이하 6자리까지)를 <strong>오차 없이</strong> 표현합니다. 부동소수점은 분모가 2의 거듭제곱이라 0.035를 정확히 담지 못하지만, 고정소수점은 분모를 우리가 10<sup>6</sup>으로 고정했기 때문입니다. 대신 표현 범위와 정밀도를 설계 시점에 정해야 하므로, "금리는 소수점 이하 몇 자리까지 필요한가?"를 업무 규칙에서 확인해 단위를 정합니다. 금리 소수점 넷째 자리(0.0001%)까지면 대부분의 상품을 커버합니다.</p>
+</div>
+
+<figure class="code"><figcaption>money.h — 금액·금리 기본 타입</figcaption>
+<pre><code class="language-c">#ifndef MONEY_H
+#define MONEY_H
+#include &lt;stdint.h&gt;
+
+typedef int64_t won_t;          /* 원 단위 금액 (음수 허용: 취소, 차액) */
+typedef int64_t rate_t;         /* 0.0001% 단위 금리: 3.5% == 35000 */
+
+#define RATE_ONE   INT64_C(1000000)      /* 100% */
+#define RATE_PCT(int_part, frac4) \
+        ((rate_t)(int_part) * 10000 + (frac4))   /* RATE_PCT(3, 5000) == 3.5% */
+
+/* 도메인 상한: 이 범위를 넘는 금액은 입력 단계에서 거부 */
+#define WON_MAX    INT64_C(999999999999999)      /* 999조 9999억... (15자리) */
+#define WON_MIN    (-WON_MAX)
+
+#endif</code></pre></figure>
+
+<p><code>WON_MAX</code>처럼 <strong>도메인 상한</strong>을 두는 것은 중요한 실무 기법입니다. 전문 금액 필드가 15자리라면 그보다 큰 값은 애초에 들어올 수 없으므로, 입력 단계에서 범위를 검사하면 이후 계산에서 "15자리 × 금리(최대 7자리) × 일수(최대 5자리)"처럼 <strong>중간값의 최대 크기를 미리 계산</strong>할 수 있습니다. 이 경우 최대 27자리라 <code>int64_t</code>(19자리)는 부족하고 128비트가 필요하다는 것을 설계 단계에서 알 수 있습니다.</p>
+
+<h3 id="s21-2-2">반올림·절사·절상: 정수 나눗셈으로 구현</h3>
+
+<p>나눗셈의 나머지를 처리하는 방법(반올림 모드)은 업무마다 다릅니다. 예금 이자는 보통 원 미만 절사, 세금은 10원 미만 절사, 대출 이자는 상품에 따라 절사 또는 반올림, 외화 환산은 은행가 반올림 등 <strong>상품 약관과 법령에 정해진 규칙</strong>을 따릅니다. 먼저 용어를 정리합니다.</p>
+
+<div class="tbl"><table>
+<thead><tr><th>모드</th><th>우리말</th><th>규칙</th><th>2.5</th><th>3.5</th><th>−2.5</th><th>2.4</th><th>2.6</th><th>−2.6</th></tr></thead>
+<tbody>
+<tr><td>DOWN</td><td>절사(버림)</td><td>0 쪽으로</td><td>2</td><td>3</td><td>−2</td><td>2</td><td>2</td><td>−2</td></tr>
+<tr><td>UP</td><td>절상(올림)</td><td>0에서 먼 쪽으로</td><td>3</td><td>4</td><td>−3</td><td>3</td><td>3</td><td>−3</td></tr>
+<tr><td>FLOOR</td><td>내림</td><td>−∞ 쪽으로</td><td>2</td><td>3</td><td>−3</td><td>2</td><td>2</td><td>−3</td></tr>
+<tr><td>CEIL</td><td>천장</td><td>+∞ 쪽으로</td><td>3</td><td>4</td><td>−2</td><td>3</td><td>3</td><td>−2</td></tr>
+<tr><td>HALF_UP</td><td>사사오입</td><td>가까운 쪽, 정확히 .5면 0에서 먼 쪽</td><td>3</td><td>4</td><td>−3</td><td>2</td><td>3</td><td>−3</td></tr>
+<tr><td>HALF_EVEN</td><td>은행가 반올림</td><td>가까운 쪽, 정확히 .5면 짝수 쪽</td><td>2</td><td>4</td><td>−2</td><td>2</td><td>3</td><td>−3</td></tr>
+</tbody></table></div>
+
+<figure class="diagram">
+<svg viewBox="0 0 680 230" width="680" role="img" aria-label="반올림 모드별로 2.5와 -2.5가 이동하는 방향">
+  <path class="line" d="M40 90 H 640"/>
+  <path class="line" d="M100 82 V 98"/><path class="line" d="M200 82 V 98"/><path class="line" d="M300 82 V 98"/>
+  <path class="line" d="M340 78 V 102"/>
+  <path class="line" d="M380 82 V 98"/><path class="line" d="M480 82 V 98"/><path class="line" d="M580 82 V 98"/>
+  <text x="100" y="118" text-anchor="middle" class="mono small">-3</text>
+  <text x="200" y="118" text-anchor="middle" class="mono small">-2.5</text>
+  <text x="300" y="118" text-anchor="middle" class="mono small">-2</text>
+  <text x="340" y="118" text-anchor="middle" class="mono small mute">0 근처(생략)</text>
+  <text x="380" y="118" text-anchor="middle" class="mono small">2</text>
+  <text x="480" y="118" text-anchor="middle" class="mono small">2.5</text>
+  <text x="580" y="118" text-anchor="middle" class="mono small">3</text>
+  <path class="arrow" d="M480 76 C 520 50, 560 50, 580 76"/>
+  <text x="530" y="40" text-anchor="middle" class="small acc">UP, HALF_UP, CEIL</text>
+  <path class="arrow-m" d="M480 76 C 440 50, 400 50, 380 76"/>
+  <text x="430" y="40" text-anchor="middle" class="small mute">DOWN, FLOOR, HALF_EVEN</text>
+  <path class="arrow" d="M200 76 C 160 50, 120 50, 100 76"/>
+  <text x="150" y="40" text-anchor="middle" class="small acc">UP, HALF_UP, FLOOR</text>
+  <path class="arrow-m" d="M200 76 C 240 50, 280 50, 300 76"/>
+  <text x="250" y="62" text-anchor="middle" class="small mute">DOWN, CEIL, HALF_EVEN</text>
+  <rect class="hl2" x="40" y="150" width="600" height="64" rx="4"/>
+  <text x="340" y="176" text-anchor="middle" class="small">HALF_UP은 .5를 항상 "크기가 커지는" 쪽으로 보내 합계가 위로 치우친다</text>
+  <text x="340" y="200" text-anchor="middle" class="small">HALF_EVEN은 .5를 짝수 쪽으로 보내 올림/내림이 반반 → 치우침 없음</text>
+</svg>
+<figcaption>그림 21-5 반올림 모드별 2.5와 -2.5의 행방 — 같은 값이 규칙에 따라 다른 정수가 된다</figcaption>
+</figure>
+
+<p>이제 이 여섯 가지 모드를 <strong>부동소수점 없이</strong>, 정수 나눗셈의 몫과 나머지만으로 구현합니다. C99부터 정수 나눗셈 <code>/</code>는 0쪽으로 절사하고, <code>%</code>의 부호는 피제수(왼쪽)와 같습니다(<code>-25 / 10 == -2</code>, <code>-25 % 10 == -5</code>). 이 성질을 이용합니다.</p>
+
+<figure class="code"><figcaption>rounding.c — 정수 나눗셈 반올림 함수</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stdint.h&gt;
+
+typedef enum {
+    RND_DOWN,        /* 절사: 0 방향            */
+    RND_UP,          /* 절상: 0에서 먼 방향     */
+    RND_FLOOR,       /* 내림: 음의 무한대 방향  */
+    RND_CEIL,        /* 천장: 양의 무한대 방향  */
+    RND_HALF_UP,     /* 사사오입               */
+    RND_HALF_EVEN    /* 은행가 반올림           */
+} round_mode_t;
+
+/* num / den 을 mode에 따라 정수로 반올림. 전제: den &gt; 0 */
+int64_t div_round(int64_t num, int64_t den, round_mode_t mode)
+{
+    int64_t q = num / den;                 /* 0쪽 절사된 몫 */
+    int64_t r = num % den;                 /* 부호는 num과 같음, |r| &lt; den */
+    if (r == 0)
+        return q;                          /* 나누어떨어지면 모든 모드가 같다 */
+
+    int64_t sign = (num &lt; 0) ? -1 : 1;     /* 0에서 멀어지는 방향 */
+    int64_t ar   = (r &lt; 0) ? -r : r;       /* |r|: den보다 작으므로 부호 반전 안전 */
+
+    switch (mode) {
+    case RND_DOWN:  return q;
+    case RND_UP:    return q + sign;
+    case RND_FLOOR: return (num &lt; 0) ? q - 1 : q;
+    case RND_CEIL:  return (num &gt; 0) ? q + 1 : q;
+    case RND_HALF_UP:
+        /* 2|r| &gt;= den 이면 0에서 먼 쪽. 2*ar는 넘칠 수 있으므로 ar &gt;= den-ar 로 비교 */
+        return (ar &gt;= den - ar) ? q + sign : q;
+    case RND_HALF_EVEN:
+        if (ar &gt; den - ar) return q + sign;            /* 절반 초과 */
+        if (ar &lt; den - ar) return q;                   /* 절반 미만 */
+        return (q % 2 != 0) ? q + sign : q;            /* 정확히 절반: 짝수 쪽 */
+    }
+    return q;
+}
+
+int main(void)
+{
+    const int64_t nums[] = { 25, 35, -25, 24, 26, -26, -35 };
+    printf("%8s%6s%6s%6s%6s%8s%10s\n",
+           "num/den", "DOWN", "UP", "FLOOR", "CEIL", "HALF_UP", "HALF_EVEN");
+    for (size_t i = 0; i &lt; sizeof nums / sizeof nums[0]; i++) {
+        int64_t n = nums[i], d = 10;
+        printf("%4lld/%-3lld%6lld%6lld%6lld%6lld%8lld%10lld\n",
+               (long long)n, (long long)d,
+               (long long)div_round(n, d, RND_DOWN),  (long long)div_round(n, d, RND_UP),
+               (long long)div_round(n, d, RND_FLOOR), (long long)div_round(n, d, RND_CEIL),
+               (long long)div_round(n, d, RND_HALF_UP),
+               (long long)div_round(n, d, RND_HALF_EVEN));
+    }
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre> num/den  DOWN    UP FLOOR  CEIL HALF_UP HALF_EVEN
+  25/10      2     3     2     3       3         2
+  35/10      3     4     3     4       4         4
+ -25/10     -2    -3    -3    -2      -3        -2
+  24/10      2     3     2     3       2         2
+  26/10      2     3     2     3       3         3
+ -26/10     -2    -3    -3    -2      -3        -3
+ -35/10     -3    -4    -4    -3      -4        -4</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 <code>2 * ar &gt;= den</code> 대신 <code>ar &gt;= den - ar</code>일까?</p>
+<p>둘은 수학적으로 같습니다. 그러나 <code>den</code>이 <code>INT64_MAX</code>에 가까우면 <code>2 * ar</code>가 오버플로할 수 있습니다. <code>den - ar</code>는 <code>0 &lt; ar &lt; den</code>이므로 항상 양수이고 절대 넘치지 않습니다. 또 하나, 흔히 보는 반올림 관용구 <code>(num + den / 2) / den</code>은 ① num이 음수면 틀리고(−25+5 = −20, −20/10 = −2로 HALF_UP이 아님), ② <code>num + den/2</code>가 넘칠 수 있고, ③ den이 홀수면 절반 판정이 어긋납니다. "양수만, 범위가 작을 때만" 쓸 수 있는 지름길이므로 범용 함수에는 쓰지 않습니다.</p>
+</div>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 — 10원 단위 절사를 나눗셈 한 번으로</p>
+<p>"10원 미만 절사"는 <code>div_round(x, 10, RND_DOWN) * 10</code>입니다. 원 단위로 먼저 절사한 뒤 다시 10원 단위로 절사하는 것과 처음부터 10원 단위로 절사하는 것은 양수에서는 같지만, 반올림 모드라면 결과가 달라질 수 있습니다(이중 반올림 문제: 14.46 → 14.5 → 15 vs 14.46 → 14). 규정이 "원 미만 절사 후 10원 미만 절사"인지, "10원 미만 반올림"인지 정확히 읽고 <strong>한 번의 나눗셈으로</strong> 구현하는 것이 원칙입니다.</p>
+</div>
+
+<h3 id="s21-2-3">은행가 반올림(HALF_EVEN)</h3>
+
+<p>사사오입(HALF_UP)은 정확히 절반인 .5를 항상 올립니다. 0.1~0.9 중 .1~.4는 내림, .5~.9는 올림이니 공평해 보이지만, 나머지가 0인 경우(.0)는 반올림이 필요 없으므로 실제로 "판정"이 일어나는 9가지 중 5가지가 올림, 4가지가 내림입니다. 데이터가 균일하게 분포하면 합계가 <strong>체계적으로 위로 치우칩니다(bias)</strong>. 은행가 반올림은 .5일 때 결과가 짝수가 되는 쪽을 택해 올림과 내림을 반반으로 맞춥니다.</p>
+
+<figure class="code"><figcaption>ex21-5.c — 0.5원, 1.5원, …, 9.5원을 반올림해서 더하기</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stdint.h&gt;
+/* div_round, round_mode_t 는 rounding.c 와 같음 */
+
+int main(void)
+{
+    int64_t sum_true10 = 0, sum_hu = 0, sum_he = 0;
+    for (int64_t v = 5; v &lt; 100; v += 10) {        /* 0.1원 단위: 5=0.5원, 15=1.5원, ... */
+        sum_true10 += v;
+        sum_hu += div_round(v, 10, RND_HALF_UP);
+        sum_he += div_round(v, 10, RND_HALF_EVEN);
+    }
+    printf("정확한 합계 : %lld.%lld원\n", (long long)(sum_true10 / 10), (long long)(sum_true10 % 10));
+    printf("HALF_UP     : %lld원\n", (long long)sum_hu);
+    printf("HALF_EVEN   : %lld원\n", (long long)sum_he);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>정확한 합계 : 50.0원
+HALF_UP     : 55원
+HALF_EVEN   : 50원</pre></figure>
+
+<p>10건 모두 정확히 .5인 극단적 예이긴 하지만, HALF_UP은 5원(10%)을 더 계산했고 HALF_EVEN은 정확한 합계와 같습니다. 실제 데이터에서 .5가 나오는 비율은 낮지만, 하루 수백만 건이면 치우침이 누적되어 무시할 수 없는 금액이 됩니다.</p>
+
+<div class="box fin"><p class="box-title" data-tag="금융 실무">은행 시스템에서는 — 반올림 규칙은 "코드 테이블"이다</p>
+<p>은행가 반올림이라는 이름 때문에 "은행은 모두 HALF_EVEN을 쓴다"고 오해하기 쉽지만, 실제로는 업무마다 다릅니다. 한국 원화 예금 이자는 원 미만 절사가 많고, 외환 환산·국제 결제·일부 증권 정산에서는 HALF_EVEN이나 HALF_UP을 계약과 표준에 따라 씁니다. IEEE 754 부동소수점의 기본 반올림 모드도 HALF_EVEN입니다(앞에서 <code>printf("%.2f", 0.125)</code>가 0.12를 출력한 이유).</p>
+<p>잘 설계된 시스템은 반올림 규칙을 소스 코드에 박아 두지 않고 <strong>상품 기준 정보(코드 테이블)</strong>에 "이자 계산 반올림 모드 = DOWN, 단위 = 1원", "세금 = DOWN, 단위 = 10원"처럼 등록하고, 계산 엔진은 이 값을 읽어 <code>div_round</code>를 호출합니다. 신상품 출시나 규정 변경 시 코드를 고치지 않고 기준 정보만 바꾸면 되고, 감사 시 "이 상품은 어떤 규칙으로 계산했는가"를 데이터로 증명할 수 있습니다.</p>
+</div>
+
+<h3 id="s21-2-4">곱셈 오버플로 검사와 128비트 중간값</h3>
+
+<p>이자 계산은 "원금 × 금리 × 일수 ÷ (365 × 1,000,000)" 형태입니다. 원금 999조(15자리) × 금리 1,000,000(7자리) × 일수 36,500(5자리)이면 중간값이 약 3.6 × 10<sup>25</sup>로 <code>int64_t</code>(약 9.2 × 10<sup>18</sup>)를 한참 넘습니다. 해결 방법은 세 가지입니다.</p>
+
+<ol class="steps">
+<li><strong>128비트 정수</strong>: gcc/clang은 64비트 플랫폼에서 <code>__int128</code>을 제공합니다. 64비트 × 64비트 곱은 128비트에 반드시 들어가므로 곱셈 단계의 오버플로가 원천적으로 사라집니다. 표준이 아니므로 MSVC에서는 <code>_mul128</code>/<code>_div128</code> 내장 함수나 직접 구현이 필요합니다.</li>
+<li><strong>나누기 먼저 + 나머지 보정</strong>: <code>a × b / c = (a / c) × b + (a % c) × b / c</code>. <code>a % c</code>는 c보다 작으므로 두 번째 항의 곱셈이 훨씬 작아집니다. 다만 그 곱도 넘칠 수 있어서 범위 분석이 필요합니다.</li>
+<li><strong>도메인 범위 제한 + 사전 검사</strong>: 입력 범위를 제한하고 <code>__builtin_mul_overflow</code>로 검사해 넘치면 오류로 처리합니다.</li>
+</ol>
+
+<p>실무에서는 1번을 기본으로 쓰고, 최종 결과가 <code>int64_t</code>에 들어가는지 마지막에 검사합니다.</p>
+
+<figure class="code"><figcaption>muldiv.c — 128비트 중간값을 쓰는 a × b ÷ c (반올림 모드 적용)</figcaption>
+<pre><code class="language-c">#include &lt;stdint.h&gt;
+#include &lt;stdbool.h&gt;
+
+typedef __int128 i128;           /* gcc/clang, 64비트 타깃 */
+
+/* num / den (den &gt; 0) 의 128비트 판 반올림 — 논리는 div_round와 같다 */
+static i128 div_round128(i128 num, i128 den, round_mode_t mode)
+{
+    i128 q = num / den, r = num % den;
+    if (r == 0) return q;
+    i128 sign = (num &lt; 0) ? -1 : 1;
+    i128 ar   = (r &lt; 0) ? -r : r;
+    switch (mode) {
+    case RND_DOWN:      return q;
+    case RND_UP:        return q + sign;
+    case RND_FLOOR:     return (num &lt; 0) ? q - 1 : q;
+    case RND_CEIL:      return (num &gt; 0) ? q + 1 : q;
+    case RND_HALF_UP:   return (ar &gt;= den - ar) ? q + sign : q;
+    case RND_HALF_EVEN:
+        if (ar != den - ar) return (ar &gt; den - ar) ? q + sign : q;
+        return (q % 2 != 0) ? q + sign : q;
+    }
+    return q;
+}
+
+/* *out = round(a * b * c / d). d &gt; 0. 결과가 int64 범위를 넘으면 false */
+bool muldiv3(int64_t a, int64_t b, int64_t c, int64_t d,
+             round_mode_t mode, int64_t *out)
+{
+    if (d &lt;= 0) return false;
+    i128 ab = (i128)a * b;                         /* 64x64: 128비트에 반드시 들어감 */
+    /* ab * c 는 128비트도 넘을 수 있으므로 검사 */
+    i128 abc;
+    if (__builtin_mul_overflow(ab, (i128)c, &amp;abc)) return false;
+    i128 res = div_round128(abc, d, mode);
+    if (res &gt; INT64_MAX || res &lt; INT64_MIN) return false;
+    *out = (int64_t)res;
+    return true;
+}</code></pre></figure>
+
+<div class="box tip"><p class="box-title" data-tag="잠깐">long double로 하면 안 될까?</p>
+<p>x86-64 리눅스의 <code>long double</code>은 80비트 확장 정밀도(가수 64비트)라서 double보다 정밀하지만, 여전히 2진 부동소수점이라 0.035 같은 10진 소수를 정확히 담지 못합니다. 게다가 MSVC에서는 <code>long double</code>이 double과 같고, ARM64 리눅스에서는 128비트 4배 정밀도라서 플랫폼마다 결과가 달라집니다. "더 정밀한 부동소수점"은 해결책이 아닙니다.</p>
+</div>
+
+<h3 id="s21-2-5">일할 이자 계산과 원천징수 세금</h3>
+
+<p>예금 이자는 보통 <strong>원금 × 연이율 × 예치일수 ÷ 365</strong>로 계산합니다. 여기서 "일수를 어떻게 세는가"와 "1년을 며칠로 보는가"를 <strong>일수 계산 관행(day count convention)</strong>이라고 하며, 상품과 시장에 따라 다릅니다.</p>
+
+<div class="tbl"><table>
+<thead><tr><th>관행</th><th>분자(일수)</th><th>분모</th><th>주로 쓰이는 곳(일반적 경향)</th></tr></thead>
+<tbody>
+<tr><td>ACT/365 (Fixed)</td><td>실제 일수</td><td>항상 365</td><td>원화 예금·대출 다수</td></tr>
+<tr><td>ACT/360</td><td>실제 일수</td><td>360</td><td>외화 단기 금리, 일부 해외 시장</td></tr>
+<tr><td>30/360</td><td>매월 30일로 간주</td><td>360</td><td>일부 채권</td></tr>
+<tr><td>ACT/ACT</td><td>실제 일수</td><td>실제 연일수(365/366)</td><td>일부 국채</td></tr>
+</tbody></table></div>
+
+<p>또 시작일과 종료일 중 하나만 넣는 <strong>한편넣기</strong>(일반적, 예: 1월 15일 입금 → 4월 17일 해지 = 92일)와 둘 다 넣는 <strong>양편넣기</strong>(93일)가 있습니다. 날짜 차이는 날짜를 "기준일로부터의 일련 일수"로 바꿔 빼면 정확히 구할 수 있습니다.</p>
+
+<figure class="code"><figcaption>interest.c — 날짜 일수와 일할 이자, 원천징수</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stdint.h&gt;
+#include &lt;stdbool.h&gt;
+/* round_mode_t, div_round, muldiv3 는 앞의 코드와 같음 */
+
+/* 그레고리력 날짜 → 1970-01-01 기준 일련 일수 (윤년 자동 처리) */
+static int64_t days_from_civil(int64_t y, unsigned m, unsigned d)
+{
+    y -= (m &lt;= 2);
+    const int64_t era = (y &gt;= 0 ? y : y - 399) / 400;
+    const unsigned yoe = (unsigned)(y - era * 400);                     /* [0, 399]    */
+    const unsigned doy = (153 * (m + (m &gt; 2 ? -3 : 9)) + 2) / 5 + d - 1; /* [0, 365]    */
+    const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;         /* [0, 146096] */
+    return era * 146097 + (int64_t)doe - 719468;
+}
+
+typedef struct {
+    int64_t interest;     /* 세전 이자 */
+    int64_t income_tax;   /* 이자소득세 14% (10원 미만 절사) */
+    int64_t local_tax;    /* 지방소득세 = 소득세의 10% (10원 미만 절사) */
+    int64_t net;          /* 세후 지급액 */
+} interest_result_t;
+
+/* principal: 원, rate: 0.0001% 단위, days: 일수, ACT/365, 원 미만 절사 */
+static bool calc_deposit_interest(int64_t principal, int64_t rate, int64_t days,
+                                  interest_result_t *res)
+{
+    if (principal &lt; 0 || rate &lt; 0 || days &lt; 0) return false;
+    int64_t it;
+    if (!muldiv3(principal, rate, days, INT64_C(365) * 1000000, RND_DOWN, &amp;it))
+        return false;
+    int64_t tax = div_round(it * 14, 100, RND_DOWN);          /* 원 단위 */
+    tax = div_round(tax, 10, RND_DOWN) * 10;                  /* 10원 미만 절사 */
+    int64_t loc = div_round(tax * 10, 100, RND_DOWN);
+    loc = div_round(loc, 10, RND_DOWN) * 10;
+    res-&gt;interest = it;
+    res-&gt;income_tax = tax;
+    res-&gt;local_tax = loc;
+    res-&gt;net = it - tax - loc;
+    return true;
+}
+
+int main(void)
+{
+    int64_t d1 = days_from_civil(2026, 1, 15);
+    int64_t d2 = days_from_civil(2026, 4, 17);
+    int64_t days = d2 - d1;                                   /* 한편넣기 */
+    printf("예치일수: %lld일 (양편넣기면 %lld일)\n", (long long)days, (long long)(days + 1));
+
+    interest_result_t r;
+    if (calc_deposit_interest(10000000, 35000, days, &amp;r)) {   /* 1천만 원, 연 3.5% */
+        printf("세전 이자   : %lld원\n", (long long)r.interest);
+        printf("이자소득세  : %lld원\n", (long long)r.income_tax);
+        printf("지방소득세  : %lld원\n", (long long)r.local_tax);
+        printf("세후 지급액 : %lld원\n", (long long)r.net);
+    }
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>예치일수: 92일 (양편넣기면 93일)
+세전 이자   : 88219원
+이자소득세  : 12350원
+지방소득세  : 1230원
+세후 지급액 : 74639원</pre></figure>
+
+<p>손으로 검산해 보겠습니다. 10,000,000 × 0.035 × 92 / 365 = 88,219.178…원 → 원 미만 절사 88,219원. 소득세 88,219 × 14% = 12,350.66 → 12,350원(원 미만 절사 후 10원 미만 절사). 지방소득세 12,350 × 10% = 1,235 → 1,230원. 세후 88,219 − 12,350 − 1,230 = 74,639원. 세율과 끝전 규칙은 예시이며 실제는 상품과 세법(비과세·세금우대 등)에 따라 달라지므로 기준 정보로 관리합니다.</p>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 "곱하고 나중에 한 번 나누기"일까?</p>
+<p>같은 계산을 <code>principal * rate / 1000000 * days / 365</code>처럼 중간에 나누면 첫 나눗셈에서 원 미만이 버려진 뒤 일수가 곱해져 오차가 증폭됩니다. 1천만 원 × 3.5% = 350,000원(나누어떨어짐)이라 이 예에서는 운 좋게 같지만, 원금이 10,000,001원이면 연 이자 350,000.035원의 .035가 버려진 채 92/365가 곱해집니다. 규칙은 <strong>"모든 곱셈을 먼저, 나눗셈과 반올림은 마지막에 단 한 번"</strong>입니다. 그래서 중간값이 커지고, 그래서 128비트가 필요한 것입니다.</p>
+</div>
+
+<div class="ex"><p class="ex-title">예제 21-3 <span class="lv">난이도 ★★☆</span></p>
+<p>원금 5,000,000원, 연 4.2%, 2026-03-01 ~ 2026-08-31(한편넣기), ACT/365, 원 미만 절사일 때 세전 이자를 손으로 계산하십시오.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>일수: 3월 1일부터 8월 31일까지 한편넣기는 3월 31 + 4월 30 + 5월 31 + 6월 30 + 7월 31 + 8월 31 − 1 = 183일입니다(<code>days_from_civil(2026,8,31) - days_from_civil(2026,3,1)</code> = 183).</p>
+<p>이자 = 5,000,000 × 42,000 × 183 / 365,000,000 = 38,430,000,000,000 / 365,000,000 = 105,287.67… → 절사 <strong>105,287원</strong>.</p>
+</details></div>
+
+<h3 id="s21-2-6">원리금 균등 상환 스케줄</h3>
+
+<p>대출의 <strong>원리금 균등 상환</strong>은 매달 같은 금액(원금 + 이자)을 내는 방식입니다. 월 납입액 A는 대출 원금 P, 월 이율 r, 기간 n개월일 때 다음 공식으로 구합니다.</p>
+<p style="text-align:center"><strong>A = P × r / (1 − (1 + r)<sup>−n</sup>)</strong></p>
+<p>거듭제곱이 들어가 정수만으로 계산하기 어렵기 때문에, 실무에서는 흔히 다음 절차를 씁니다.</p>
+<ol class="steps">
+<li>월 납입액 A만 double로 계산한 뒤 약관 규칙(예: 원 미만 반올림)으로 <strong>정수화</strong>합니다. A는 계약서에 찍히는 "약정 값"이 됩니다.</li>
+<li>이후 매 회차의 이자(잔액 × 월이율)와 원금(A − 이자), 잔액은 모두 <strong>정수 연산</strong>으로 계산합니다.</li>
+<li>A의 반올림 때문에 마지막 회차에 잔액이 정확히 0이 되지 않으므로, <strong>마지막 회차는 남은 원금 전액 + 이자</strong>로 조정합니다.</li>
+</ol>
+
+<figure class="code"><figcaption>amortize.c — 원리금 균등 상환 스케줄</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stdint.h&gt;
+#include &lt;math.h&gt;
+/* div_round, round_mode_t 는 앞의 코드와 같음 */
+
+int main(void)
+{
+    const int64_t P = 12000000;          /* 대출 원금 1,200만 원 */
+    const int64_t annual_rate = 60000;   /* 연 6.0% (0.0001% 단위) */
+    const int     n = 12;                /* 12개월 */
+
+    /* 1) 약정 월 납입액: 공식은 double, 결과는 원 단위 정수로 확정 */
+    double r = (double)annual_rate / 1e6 / 12.0;
+    int64_t pay = llround(P * r / (1.0 - pow(1.0 + r, -n)));
+
+    /* 2) 스케줄은 전부 정수 */
+    int64_t bal = P, tot_pay = 0, tot_int = 0;
+    printf("회차      납입액      원금      이자       잔액\n");
+    for (int k = 1; k &lt;= n; k++) {
+        /* 월 이자 = 잔액 x 연이율 / 12 / 1,000,000 (원 미만 반올림) */
+        int64_t intr = div_round(bal * annual_rate, INT64_C(12) * 1000000, RND_HALF_UP);
+        int64_t prin = (k == n) ? bal : pay - intr;   /* 마지막 회차는 잔액 정리 */
+        int64_t this_pay = prin + intr;
+        bal -= prin;
+        tot_pay += this_pay;
+        tot_int += intr;
+        printf("%4d %11lld %9lld %9lld %10lld\n", k,
+               (long long)this_pay, (long long)prin, (long long)intr, (long long)bal);
+    }
+    printf("합계 %11lld %9lld %9lld\n", (long long)tot_pay, (long long)P, (long long)tot_int);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과 (gcc ... -lm)</figcaption><pre>회차      납입액      원금      이자       잔액
+   1     1032797    972797     60000   11027203
+   2     1032797    977661     55136   10049542
+   3     1032797    982549     50248    9066993
+   4     1032797    987462     45335    8079531
+   5     1032797    992399     40398    7087132
+   6     1032797    997361     35436    6089771
+   7     1032797   1002348     30449    5087423
+   8     1032797   1007360     25437    4080063
+   9     1032797   1012397     20400    3067666
+  10     1032797   1017459     15338    2050207
+  11     1032797   1022546     10251    1027661
+  12     1032799   1027661      5138          0
+합계    12393566  12000000    393566</pre></figure>
+
+<figure class="diagram">
+<svg viewBox="0 0 680 250" width="680" role="img" aria-label="원리금 균등 상환에서 회차별 이자는 줄고 원금 상환분은 늘어나는 모습">
+  <text x="20" y="24" class="small bold">회차별 이자(막대) — 매달 납입액은 같고, 이자가 줄어든 만큼 원금 상환이 늘어난다</text>
+  <path class="line" d="M50 200 H 660"/>
+  <rect class="hl2" x="60"  y="80"  width="34" height="120"/>
+  <rect class="hl2" x="110" y="90"  width="34" height="110"/>
+  <rect class="hl2" x="160" y="100" width="34" height="100"/>
+  <rect class="hl2" x="210" y="109" width="34" height="91"/>
+  <rect class="hl2" x="260" y="119" width="34" height="81"/>
+  <rect class="hl2" x="310" y="129" width="34" height="71"/>
+  <rect class="hl2" x="360" y="139" width="34" height="61"/>
+  <rect class="hl2" x="410" y="149" width="34" height="51"/>
+  <rect class="hl2" x="460" y="159" width="34" height="41"/>
+  <rect class="hl2" x="510" y="169" width="34" height="31"/>
+  <rect class="hl2" x="560" y="180" width="34" height="20"/>
+  <rect class="hl2" x="610" y="190" width="34" height="10"/>
+  <text x="77" y="72" text-anchor="middle" class="small mono">60,000</text>
+  <text x="627" y="182" text-anchor="middle" class="small mono">5,138</text>
+  <text x="77" y="218" text-anchor="middle" class="small mono">1</text>
+  <text x="327" y="218" text-anchor="middle" class="small mono">6</text>
+  <text x="627" y="218" text-anchor="middle" class="small mono">12</text>
+  <text x="350" y="242" text-anchor="middle" class="small mute">원금 상환분 = 1,032,797 - 이자 (972,797 → 1,027,661), 12회차만 1,032,799로 2원 조정</text>
+</svg>
+<figcaption>그림 21-6 원리금 균등 상환 — 이자는 잔액에 비례해 줄고, 마지막 회차가 끝전을 흡수한다</figcaption>
+</figure>
+
+<p>마지막 회차 납입액이 1,032,799원으로 다른 회차보다 2원 많습니다. 월 납입액 1,032,797.16원을 1,032,797원으로 반올림하면서 매달 0.16원씩 원금이 덜 갚아졌고, 이자 반올림 효과까지 더해진 차이가 마지막에 정리된 것입니다. <strong>"끝전은 반드시 어딘가에서 흡수되어야 하며, 그 위치는 규칙으로 정한다"</strong>는 것이 핵심입니다. 전체 합계(원금 합 = 12,000,000원)가 정확히 맞는 것을 반드시 검증합니다.</p>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 — 스케줄 전체를 double로 계산</p>
+<p>잔액을 double로 들고 매달 빼 나가면 회차가 길어질수록(30년 = 360회차) 오차가 쌓이고, 출력할 때만 반올림하면 "화면의 원금 합계 ≠ 대출 원금"이 됩니다. double은 약정 납입액을 정하는 <strong>공식 계산 한 번</strong>에만 쓰고, 그 결과를 정수로 확정한 다음부터는 정수만 씁니다. 또한 같은 입력에 대해 플랫폼이 바뀌어도 같은 약정 금액이 나오도록, 공식 결과를 저장해 두고 재계산하지 않는 것이 안전합니다.</p>
+</div>
+
+<h3 id="s21-2-7">이자 분배와 끝전 처리</h3>
+
+<p>공동 명의 계좌의 이자를 지분대로 나누거나, 펀드 수익을 수익자에게 배분하거나, 수수료를 여러 기관이 나눌 때는 <strong>"나눈 금액의 합 = 원래 총액"</strong>이 반드시 성립해야 합니다. 각자 몫을 반올림하면 이 조건이 깨집니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 680 250" width="680" role="img" aria-label="10원을 6명에게 균등 분배할 때 개별 반올림과 최대잔여법 비교">
+  <text x="20" y="24" class="small bold">10원을 6명에게 1:1:1:1:1:1로 분배 (각자 정확한 몫 1.666…원)</text>
+  <text x="20" y="64" class="small">개별 반올림</text>
+  <rect class="bad" x="140" y="46" width="60" height="30"/><text x="170" y="66" text-anchor="middle" class="mono">2</text>
+  <rect class="bad" x="210" y="46" width="60" height="30"/><text x="240" y="66" text-anchor="middle" class="mono">2</text>
+  <rect class="bad" x="280" y="46" width="60" height="30"/><text x="310" y="66" text-anchor="middle" class="mono">2</text>
+  <rect class="bad" x="350" y="46" width="60" height="30"/><text x="380" y="66" text-anchor="middle" class="mono">2</text>
+  <rect class="bad" x="420" y="46" width="60" height="30"/><text x="450" y="66" text-anchor="middle" class="mono">2</text>
+  <rect class="bad" x="490" y="46" width="60" height="30"/><text x="520" y="66" text-anchor="middle" class="mono">2</text>
+  <text x="570" y="66" class="small warn-t">합 12 (2원 과지급)</text>
+  <text x="20" y="124" class="small">① 모두 절사</text>
+  <rect class="box" x="140" y="106" width="60" height="30"/><text x="170" y="126" text-anchor="middle" class="mono">1</text>
+  <rect class="box" x="210" y="106" width="60" height="30"/><text x="240" y="126" text-anchor="middle" class="mono">1</text>
+  <rect class="box" x="280" y="106" width="60" height="30"/><text x="310" y="126" text-anchor="middle" class="mono">1</text>
+  <rect class="box" x="350" y="106" width="60" height="30"/><text x="380" y="126" text-anchor="middle" class="mono">1</text>
+  <rect class="box" x="420" y="106" width="60" height="30"/><text x="450" y="126" text-anchor="middle" class="mono">1</text>
+  <rect class="box" x="490" y="106" width="60" height="30"/><text x="520" y="126" text-anchor="middle" class="mono">1</text>
+  <text x="570" y="126" class="small mute">합 6, 남은 4원</text>
+  <text x="20" y="184" class="small">② 나머지 큰 순</text>
+  <text x="20" y="200" class="small">으로 1원씩</text>
+  <rect class="hl" x="140" y="166" width="60" height="30"/><text x="170" y="186" text-anchor="middle" class="mono">2</text>
+  <rect class="hl" x="210" y="166" width="60" height="30"/><text x="240" y="186" text-anchor="middle" class="mono">2</text>
+  <rect class="hl" x="280" y="166" width="60" height="30"/><text x="310" y="186" text-anchor="middle" class="mono">2</text>
+  <rect class="hl" x="350" y="166" width="60" height="30"/><text x="380" y="186" text-anchor="middle" class="mono">2</text>
+  <rect class="box" x="420" y="166" width="60" height="30"/><text x="450" y="186" text-anchor="middle" class="mono">1</text>
+  <rect class="box" x="490" y="166" width="60" height="30"/><text x="520" y="186" text-anchor="middle" class="mono">1</text>
+  <text x="570" y="186" class="small acc">합 10 (정확)</text>
+  <text x="340" y="232" text-anchor="middle" class="small mute">나머지가 같으면 사전에 정한 순서(지분 큰 순, 계좌번호 순 등)로 결정</text>
+</svg>
+<figcaption>그림 21-7 최대잔여법(largest remainder) — 절사 후 남은 끝전을 나머지가 큰 순서로 1원씩 배분한다</figcaption>
+</figure>
+
+<figure class="code"><figcaption>distribute.c — 최대잔여법 분배 (합계 보존 보장)</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stdint.h&gt;
+#include &lt;stdbool.h&gt;
+
+#define DIST_MAX 64
+
+/* total(원)을 w[i] 비율로 n명에게 분배. 성공 시 sum(out) == total 보장 */
+static bool distribute(int64_t total, const int64_t *w, size_t n, int64_t *out)
+{
+    if (total &lt; 0 || n == 0 || n &gt; DIST_MAX) return false;
+    int64_t wsum = 0;
+    for (size_t i = 0; i &lt; n; i++) {
+        if (w[i] &lt; 0 || __builtin_add_overflow(wsum, w[i], &amp;wsum)) return false;
+    }
+    if (wsum == 0) return false;
+
+    int64_t rem[DIST_MAX];
+    int64_t given = 0;
+    for (size_t i = 0; i &lt; n; i++) {
+        __int128 p = (__int128)total * w[i];       /* 곱셈은 128비트 */
+        out[i] = (int64_t)(p / wsum);              /* 절사한 몫: total 이하이므로 안전 */
+        rem[i] = (int64_t)(p % wsum);              /* 나머지: wsum 미만 */
+        given += out[i];
+    }
+    int64_t left = total - given;                  /* 0 &lt;= left &lt; n */
+    while (left-- &gt; 0) {
+        size_t best = 0;
+        for (size_t i = 1; i &lt; n; i++)
+            if (rem[i] &gt; rem[best]) best = i;      /* 같으면 앞 번호 우선(규칙) */
+        out[best] += 1;
+        rem[best] = -1;                            /* 한 사람에 두 번 주지 않음 */
+    }
+    return true;
+}
+
+static void show(const char *title, int64_t total, const int64_t *w, size_t n)
+{
+    int64_t out[DIST_MAX], naive_sum = 0, sum = 0;
+    int64_t wsum = 0;
+    for (size_t i = 0; i &lt; n; i++) wsum += w[i];
+    printf("%s\n  개별 반올림:", title);
+    for (size_t i = 0; i &lt; n; i++) {
+        int64_t v = (total * w[i] * 2 + wsum) / (2 * wsum);   /* 양수 HALF_UP (작은 값 전용) */
+        naive_sum += v;
+        printf(" %lld", (long long)v);
+    }
+    printf("  (합 %lld)\n  최대잔여법 :", (long long)naive_sum);
+    if (distribute(total, w, n, out)) {
+        for (size_t i = 0; i &lt; n; i++) { printf(" %lld", (long long)out[i]); sum += out[i]; }
+        printf("  (합 %lld)\n", (long long)sum);
+    }
+}
+
+int main(void)
+{
+    const int64_t w1[] = { 1, 1, 1, 1, 1, 1 };
+    const int64_t w2[] = { 1, 1, 1 };
+    const int64_t w3[] = { 7, 11, 13 };
+    show("[1] 10원을 6명 균등", 10, w1, 6);
+    show("[2] 100원을 3명 균등", 100, w2, 3);
+    show("[3] 10,000원을 7:11:13", 10000, w3, 3);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>[1] 10원을 6명 균등
+  개별 반올림: 2 2 2 2 2 2  (합 12)
+  최대잔여법 : 2 2 2 2 1 1  (합 10)
+[2] 100원을 3명 균등
+  개별 반올림: 33 33 33  (합 99)
+  최대잔여법 : 34 33 33  (합 100)
+[3] 10,000원을 7:11:13
+  개별 반올림: 2258 3548 4194  (합 10000)
+  최대잔여법 : 2258 3548 4194  (합 10000)</pre></figure>
+
+<p>[1]은 2원 과지급, [2]는 1원 미지급입니다. [3]은 우연히 맞았지만 우연에 기대서는 안 됩니다. 최대잔여법은 항상 합계를 보존하며, 각자의 몫이 정확한 비율 값과 1원 이상 차이 나지 않습니다. 끝전을 누구에게 줄지(나머지 큰 순, 지분 큰 순, 대표자 몰아주기, 은행 귀속)는 <strong>업무 규칙</strong>이므로 반드시 문서화하고, 동률 처리 순서까지 정해 두어야 재처리 시 같은 결과가 나옵니다.</p>
+
+<div class="box fin"><p class="box-title" data-tag="금융 실무">은행 시스템에서는 — 1원이 안 맞아 밤을 새운 날</p>
+<p>어느 자산운용 관련 배치에서 펀드 결산 분배금을 수익자 수만 명에게 나누는데, 각자의 몫을 사사오입한 뒤 합계를 확인하지 않고 지급 파일을 만들었습니다. 결과적으로 총 분배금보다 수십 원이 더 지급 요청되었고, 수탁 계좌 잔액 검증 단계에서 오류가 나 지급 배치가 중단되었습니다. 담당자들은 새벽까지 원인을 찾았고, 결국 "개별 반올림 → 합계 차이를 대표 수익자(지분 최대)에게 조정"하는 로직을 추가해 재처리했습니다.</p>
+<p>이후 그 팀은 모든 분배 로직에 <strong>사후 검증(assert: 분배 합계 == 총액)</strong>을 의무화했고, 분배 함수는 공통 라이브러리 하나로 통일했습니다. 금융 코드에서 "합계 보존"은 테스트가 아니라 <strong>런타임 불변식(invariant)</strong>으로 검사합니다.</p>
+</div>
+
+<h3 id="s21-2-8">금액 문자열 ↔ 정수 안전 변환</h3>
+
+<p>금액은 화면 입력, CSV 파일, 전문 필드, 외부 API처럼 <strong>문자열</strong>로 들어오는 경우가 대부분입니다. 이 경계에서 검증이 허술하면 지금까지 공들인 정수 계산이 모두 무의미해집니다. <code>atoi</code>/<code>atoll</code>은 오류를 알려 주지 않고(오버플로 시 UB), <code>strtoll</code>은 안전하지만 사용법이 까다롭습니다.</p>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 — strtoll을 대충 쓰기</p>
+<ul>
+<li><code>strtoll("12abc", NULL, 10)</code>은 12를 돌려줍니다. 뒤의 쓰레기 문자를 검사하려면 <code>endptr</code>을 받아 <code>*endptr == '\0'</code>인지 확인해야 합니다.</li>
+<li>숫자가 하나도 없으면 0을 돌려주므로, <code>endptr == str</code>인지 검사하지 않으면 빈 문자열이 "0원"이 됩니다.</li>
+<li>범위를 넘으면 <code>LLONG_MAX</code>/<code>LLONG_MIN</code>을 돌려주고 <code>errno = ERANGE</code>를 설정합니다. 호출 <strong>전에</strong> <code>errno = 0</code>으로 초기화하지 않으면 이전 오류가 남아 있을 수 있습니다.</li>
+<li>기수(base)에 0을 주면 <code>"0x1F"</code>(16진), <code>"010"</code>(8진 = 8)도 받아들입니다. 금액 <code>"010000"</code>이 4096이 될 수 있습니다. 금액은 반드시 base 10입니다.</li>
+<li>앞쪽 공백과 <code>+</code>/<code>-</code> 부호는 허용되며, 콤마는 허용되지 않습니다. 로케일 설정에 따라 동작이 달라질 수도 있습니다.</li>
+</ul>
+</div>
+
+<p>금융 시스템에서는 허용하는 형식을 명확히 정의하고, 그 형식만 받아들이는 <strong>화이트리스트 방식</strong>의 전용 파서를 만듭니다. 여기서는 다음 형식을 허용하겠습니다: 앞뒤 공백, 선택적 부호(<code>+</code>/<code>-</code>), 숫자, 그리고 3자리마다의 콤마(쓰려면 일관되게). 상태 기계로 그리면 다음과 같습니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 230" width="700" role="img" aria-label="금액 문자열 파서의 상태 전이">
+  <rect class="box" x="10" y="80" width="80" height="40" rx="20"/>
+  <text x="50" y="105" text-anchor="middle" class="small">시작</text>
+  <path class="arrow" d="M90 100 H 130"/>
+  <text x="110" y="92" text-anchor="middle" class="small mute">공백*</text>
+  <rect class="box" x="130" y="80" width="80" height="40" rx="6"/>
+  <text x="170" y="105" text-anchor="middle" class="small">부호?</text>
+  <path class="arrow" d="M210 100 H 250"/>
+  <rect class="hl" x="250" y="80" width="120" height="40" rx="6"/>
+  <text x="310" y="98" text-anchor="middle" class="small">첫 그룹</text>
+  <text x="310" y="113" text-anchor="middle" class="small mono">숫자 1~∞</text>
+  <path class="arrow" d="M370 100 H 420"/>
+  <text x="395" y="92" text-anchor="middle" class="mono small acc">,</text>
+  <rect class="hl" x="420" y="80" width="120" height="40" rx="6"/>
+  <text x="480" y="98" text-anchor="middle" class="small">다음 그룹</text>
+  <text x="480" y="113" text-anchor="middle" class="small mono">숫자 정확히 3</text>
+  <path class="arrow-m" d="M480 80 C 480 40, 530 40, 530 78"/>
+  <text x="520" y="34" class="mono small acc">, (3자리 후)</text>
+  <path class="arrow" d="M540 100 H 590"/>
+  <rect class="hl2" x="590" y="80" width="100" height="40" rx="20"/>
+  <text x="640" y="98" text-anchor="middle" class="small">공백* → 끝</text>
+  <text x="640" y="113" text-anchor="middle" class="small mute">범위 검사</text>
+  <path class="arrow-m" d="M310 120 C 310 170, 640 170, 640 122"/>
+  <text x="470" y="166" text-anchor="middle" class="small mute">콤마 없이 끝</text>
+  <rect class="bad" x="160" y="186" width="380" height="34" rx="4"/>
+  <text x="350" y="208" text-anchor="middle" class="small">그 외 모든 문자·위치 → 즉시 거부 (오류 코드 반환)</text>
+  <text x="310" y="70" text-anchor="middle" class="small mute">첫 그룹은 콤마 앞이면 1~3자리</text>
+</svg>
+<figcaption>그림 21-8 금액 문자열 파서의 상태 전이 — 허용 형식만 통과시키는 화이트리스트 방식</figcaption>
+</figure>
+
+<figure class="code"><figcaption>amount_str.c — 금액·금리 문자열 변환 라이브러리</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stdint.h&gt;
+#include &lt;stdbool.h&gt;
+#include &lt;string.h&gt;
+
+typedef enum {
+    AMT_OK = 0, AMT_EMPTY, AMT_BAD_CHAR, AMT_BAD_COMMA, AMT_RANGE, AMT_PRECISION
+} amt_err_t;
+
+static const char *const AMT_MSG[] = {
+    "OK", "숫자 없음", "허용되지 않는 문자", "콤마 위치 오류", "범위 초과", "소수 자릿수 초과"
+};
+
+/* "  -1,234,567 " → -1234567. 콤마는 생략 가능하나, 쓰면 3자리마다 정확히 */
+amt_err_t parse_amount(const char *s, int64_t *out)
+{
+    const char *p = s;
+    bool neg = false, seen_comma = false;
+    int group = 0, ndigits = 0;
+    uint64_t mag = 0;                         /* 크기는 unsigned로 누적 (INT64_MIN 처리용) */
+
+    while (*p == ' ') p++;
+    if (*p == '+' || *p == '-') { neg = (*p == '-'); p++; }
+    const uint64_t limit = neg ? (uint64_t)INT64_MAX + 1u : (uint64_t)INT64_MAX;
+
+    for (; *p != '\0' &amp;&amp; *p != ' '; p++) {
+        if (*p &gt;= '0' &amp;&amp; *p &lt;= '9') {        /* isdigit는 로케일 영향 + char 부호 문제 */
+            unsigned d = (unsigned)(*p - '0');
+            if (mag &gt; (limit - d) / 10)       /* mag*10 + d &gt; limit 를 넘치지 않게 검사 */
+                return AMT_RANGE;
+            mag = mag * 10 + d;
+            ndigits++;
+            group++;
+            if (seen_comma &amp;&amp; group &gt; 3) return AMT_BAD_COMMA;
+        } else if (*p == ',') {
+            if (group == 0) return AMT_BAD_COMMA;                 /* ",1" 또는 "1,,0" */
+            if (seen_comma ? (group != 3) : (group &gt; 3)) return AMT_BAD_COMMA;
+            seen_comma = true;
+            group = 0;
+        } else {
+            return AMT_BAD_CHAR;
+        }
+    }
+    while (*p == ' ') p++;
+    if (*p != '\0')                 return AMT_BAD_CHAR;      /* "12 34" */
+    if (ndigits == 0)               return AMT_EMPTY;
+    if (seen_comma &amp;&amp; group != 3)   return AMT_BAD_COMMA;     /* "1,000," "12,34" */
+
+    if (!neg)                                  *out = (int64_t)mag;
+    else if (mag == (uint64_t)INT64_MAX + 1u)  *out = INT64_MIN;  /* -mag 는 표현 불가 */
+    else                                       *out = -(int64_t)mag;
+    return AMT_OK;
+}
+
+/* -1234567 → "-1,234,567". 버퍼 부족 시 -1, 성공 시 길이 */
+int format_amount(int64_t v, char *buf, size_t sz)
+{
+    char tmp[32];                                  /* 최대 "-9,223,372,036,854,775,808" 26자 */
+    size_t n = 0;
+    uint64_t mag = (v &lt; 0) ? (uint64_t)0 - (uint64_t)v : (uint64_t)v;  /* INT64_MIN도 안전 */
+    int cnt = 0;
+    do {
+        if (cnt &gt; 0 &amp;&amp; cnt % 3 == 0) tmp[n++] = ',';
+        tmp[n++] = (char)('0' + (int)(mag % 10));
+        mag /= 10;
+        cnt++;
+    } while (mag != 0);
+    if (v &lt; 0) tmp[n++] = '-';
+    if (sz == 0 || n + 1 &gt; sz) return -1;
+    for (size_t i = 0; i &lt; n; i++) buf[i] = tmp[n - 1 - i];   /* 뒤집어 복사 */
+    buf[n] = '\0';
+    return (int)n;
+}
+
+/* 금리 문자열(%) "3.5" → 35000 (0.0001% 단위). 소수 4자리까지, 0~100% */
+amt_err_t parse_rate(const char *s, int64_t *out)
+{
+    const char *p = s;
+    int64_t ip = 0, fp = 0;
+    int idig = 0, fdig = 0;
+    while (*p &gt;= '0' &amp;&amp; *p &lt;= '9') {
+        if (++idig &gt; 3) return AMT_RANGE;
+        ip = ip * 10 + (*p++ - '0');
+    }
+    if (idig == 0) return AMT_EMPTY;
+    if (*p == '.') {
+        p++;
+        while (*p &gt;= '0' &amp;&amp; *p &lt;= '9') {
+            if (++fdig &gt; 4) return AMT_PRECISION;   /* 조용히 버리지 않는다 */
+            fp = fp * 10 + (*p++ - '0');
+        }
+        if (fdig == 0) return AMT_BAD_CHAR;          /* "3." */
+    }
+    if (*p != '\0') return AMT_BAD_CHAR;
+    for (int k = fdig; k &lt; 4; k++) fp *= 10;        /* "3.5" → 5000 */
+    int64_t r = ip * 10000 + fp;
+    if (r &gt; 1000000) return AMT_RANGE;               /* 100% 초과 */
+    *out = r;
+    return AMT_OK;
+}
+
+int main(void)
+{
+    const char *tests[] = {
+        "1,234,567", "-12,345", "  1000000 ", "12,34", "1,2345", "1,000,", "12a", "", "+",
+        "9,223,372,036,854,775,807", "9223372036854775808", "-9223372036854775808"
+    };
+    for (size_t i = 0; i &lt; sizeof tests / sizeof tests[0]; i++) {
+        char q[64];
+        int64_t v;
+        snprintf(q, sizeof q, "\"%s\"", tests[i]);
+        amt_err_t e = parse_amount(tests[i], &amp;v);
+        if (e == AMT_OK) printf("%-29s -&gt; %lld\n", q, (long long)v);
+        else             printf("%-29s -&gt; 오류: %s\n", q, AMT_MSG[e]);
+    }
+    const int64_t vals[] = { 0, -1234567, 1000, INT64_MIN };
+    for (size_t i = 0; i &lt; 4; i++) {
+        char buf[32];
+        format_amount(vals[i], buf, sizeof buf);
+        printf("%lld -&gt; %s\n", (long long)vals[i], buf);
+    }
+    const char *rates[] = { "3.5", "0.0001", "100", "3.50015", "101", "3." };
+    for (size_t i = 0; i &lt; 6; i++) {
+        int64_t r;
+        amt_err_t e = parse_rate(rates[i], &amp;r);
+        if (e == AMT_OK) printf("금리 %-8s -&gt; %lld\n", rates[i], (long long)r);
+        else             printf("금리 %-8s -&gt; 오류: %s\n", rates[i], AMT_MSG[e]);
+    }
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>"1,234,567"                   -&gt; 1234567
+"-12,345"                     -&gt; -12345
+"  1000000 "                  -&gt; 1000000
+"12,34"                       -&gt; 오류: 콤마 위치 오류
+"1,2345"                      -&gt; 오류: 콤마 위치 오류
+"1,000,"                      -&gt; 오류: 콤마 위치 오류
+"12a"                         -&gt; 오류: 허용되지 않는 문자
+""                            -&gt; 오류: 숫자 없음
+"+"                           -&gt; 오류: 숫자 없음
+"9,223,372,036,854,775,807"   -&gt; 9223372036854775807
+"9223372036854775808"         -&gt; 오류: 범위 초과
+"-9223372036854775808"        -&gt; -9223372036854775808
+0 -&gt; 0
+-1234567 -&gt; -1,234,567
+1000 -&gt; 1,000
+-9223372036854775808 -&gt; -9,223,372,036,854,775,808
+금리 3.5      -&gt; 35000
+금리 0.0001   -&gt; 1
+금리 100      -&gt; 1000000
+금리 3.50015  -&gt; 오류: 소수 자릿수 초과
+금리 101      -&gt; 오류: 범위 초과
+금리 3.       -&gt; 오류: 허용되지 않는 문자</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 크기를 unsigned로 누적하고, 부호는 따로 둘까?</p>
+<p>signed로 누적하면서 마지막에 부호를 붙이면 "−9223372036854775808"을 읽을 수 없습니다. 크기 9223372036854775808은 <code>INT64_MAX</code>보다 1 크기 때문입니다. 반대로 음수로 누적하는 방법도 있지만 코드가 헷갈립니다. unsigned 64비트는 2<sup>64</sup>−1까지 담으므로 크기를 안전하게 누적할 수 있고, 마지막에 부호별 한도(<code>limit</code>)를 다르게 적용하면 양쪽 극값을 모두 정확히 처리합니다. 같은 이유로 <code>format_amount</code>에서도 <code>-v</code> 대신 <code>(uint64_t)0 - (uint64_t)v</code>로 크기를 구합니다. unsigned 뺄셈은 순환이 정의되어 있어 <code>INT64_MIN</code>에서도 UB가 없습니다.</p>
+</div>
+
+<div class="box fix"><p class="box-title" data-tag="해결">이렇게 해결합니다 — 입력 경계의 원칙</p>
+<ol>
+<li><strong>허용 형식을 문서로 정의</strong>하고 그 외는 모두 거부합니다(화이트리스트). "대충 해석해 주기"는 금지입니다. <code>"3.50015"</code>를 조용히 3.5001로 자르면 고객이 의도한 값과 다른 값으로 계약이 맺어집니다.</li>
+<li><strong>오류는 종류별 코드</strong>로 돌려주어, 화면에서 "콤마 위치가 올바르지 않습니다"처럼 구체적으로 안내합니다.</li>
+<li><strong>도메인 범위 검사</strong>(예: 1회 이체 한도, 금액 필드 자릿수)는 형식 검사 다음 단계에서 별도로 합니다.</li>
+<li>출력 함수는 <strong>버퍼 크기를 받아</strong> 넘치면 실패를 반환합니다(22장의 시큐어 코딩 원칙).</li>
+</ol>
+</div>
+
+<div class="ex"><p class="ex-title">예제 21-4 <span class="lv">난이도 ★★☆</span></p>
+<p><code>parse_amount</code>에 다음 문자열을 넣으면 각각 어떤 결과가 나옵니까? <code>"007"</code>, <code>"-0"</code>, <code>"1234,567"</code>, <code>" - 5"</code>, <code>"1,000,000"</code></p>
+<details><summary>정답과 해설 보기</summary>
+<ul>
+<li><code>"007"</code> → 7. 앞자리 0은 허용합니다(8진수로 해석하지 않음). 업무상 금지하려면 별도 규칙을 추가합니다.</li>
+<li><code>"-0"</code> → 0. 정수에는 −0이 없으므로 0입니다.</li>
+<li><code>"1234,567"</code> → 콤마 위치 오류. 첫 그룹이 4자리입니다.</li>
+<li><code>" - 5"</code> → 허용되지 않는 문자. 부호 뒤 공백에서 숫자 루프가 끝나고, 공백을 건너뛴 뒤 <code>'5'</code>가 남아 있기 때문입니다.</li>
+<li><code>"1,000,000"</code> → 1000000.</li>
+</ul>
+</details></div>
+
+<h2 id="summary">핵심 정리</h2>
+<ul class="summary-list">
+<li>IEEE 754 부동소수점은 부호·지수(바이어스)·가수(숨은 1비트)로 수를 2진 과학적 표기법으로 저장합니다. float은 유효 24비트(10진 약 7자리), double은 53비트(약 15~17자리)입니다.</li>
+<li>분모에 2 이외의 소인수가 있는 10진 소수(0.1, 0.01 등)는 2진 무한소수라서 정확히 저장되지 않습니다. 그래서 <code>0.1 + 0.2 != 0.3</code>이며, 각 연산이 "가장 가까운 값"으로 반올림하는 것은 정확히 정의된 동작입니다.</li>
+<li>부동소수점 간격(ULP)은 값의 크기에 비례합니다. float은 1,677만 원을 넘으면 1원 단위가 깨지고, double도 1000조 원대에서 원 미만이 사라집니다. 누적 합계에서 오차가 커집니다.</li>
+<li>부동소수점을 <code>==</code>로 비교하지 말고 절대·상대 오차를 결합해 비교합니다. NaN은 모든 비교가 거짓이라 검사를 통과할 수 있습니다. 금액은 애초에 정수로 다루어 <code>==</code>로 정확히 비교합니다.</li>
+<li><code>(int)(x * 100)</code>은 절사라서 1센트를 잃습니다. 외화 금액은 문자열에서 정수로 직접 파싱합니다.</li>
+<li>금액은 최소 화폐 단위 <code>int64_t</code>, 금리는 0.0001% 단위 고정소수점 정수로 표현합니다. 오차는 마지막 나눗셈 한 곳에서만 생기게 하고, 그 처리 규칙(반올림 모드)을 명시합니다.</li>
+<li>DOWN·UP·FLOOR·CEIL·HALF_UP·HALF_EVEN을 정수 몫과 나머지로 구현합니다. <code>(n + d/2) / d</code> 관용구는 음수·오버플로에 취약합니다. HALF_EVEN은 .5의 치우침을 없앱니다.</li>
+<li>"모든 곱셈 먼저, 나눗셈은 마지막 한 번". 중간값은 <code>__int128</code>로 계산하고 결과 범위를 검사합니다.</li>
+<li>일할 이자는 일수 계산 관행(ACT/365 등)과 한편/양편넣기를 따르고, 날짜 차이는 일련 일수로 구합니다. 세금은 규정된 끝전 규칙(예: 10원 미만 절사)을 적용합니다.</li>
+<li>원리금 균등 상환은 약정 납입액만 공식으로 구해 정수로 확정하고, 스케줄은 정수로 계산하며 마지막 회차에서 끝전을 정리합니다.</li>
+<li>분배는 최대잔여법으로 합계를 보존하고, "분배 합계 == 총액"을 런타임 불변식으로 검사합니다.</li>
+<li>문자열 → 금액 변환은 화이트리스트 형식의 전용 파서로, 크기는 unsigned로 누적하고 부호별 한도로 검사합니다.</li>
+</ul>
+
+<h2 id="interview">CS 면접 단골 질문</h2>
+<div class="box iv"><p class="box-title" data-tag="면접">이 장에서 나오는 면접 질문</p>
+<details><summary>Q1. 0.1 + 0.2가 0.3이 아닌 이유를 설명해 주십시오.</summary>
+<p>0.1과 0.2는 분모에 5가 있어 2진수로 무한 순환소수가 되므로, double의 52비트 가수에 맞춰 반올림되어 저장됩니다. 두 값 모두 실제보다 아주 약간 크게 저장되고, 더한 결과도 다시 반올림됩니다. 0.3은 저장 시 약간 작게 반올림되기 때문에 두 값의 마지막 비트가 달라 <code>==</code>가 거짓이 됩니다. 결과는 0.30000000000000004입니다.</p>
+<p><strong>꼬리 질문 대비:</strong> "그럼 어떤 소수가 정확히 표현되나?" → 기약분수의 분모가 2의 거듭제곱이고 유효 비트가 가수 범위 안인 수(0.5, 0.25, 0.375 등)입니다.</p>
+</details>
+<details><summary>Q2. float과 double의 차이는 무엇입니까?</summary>
+<p>float은 32비트(부호 1, 지수 8, 가수 23)로 10진 약 7자리, double은 64비트(1, 11, 52)로 약 15~17자리의 유효숫자를 가집니다. 지수 범위도 double이 훨씬 넓습니다. float은 2<sup>24</sup>(약 1,677만)보다 큰 정수를 모두 표현하지 못하므로, 금액에는 물론이고 일반 계산에서도 정밀도가 필요하면 double을 씁니다. C에서 실수 상수(<code>3.14</code>)는 double이고, 가변 인자 함수(<code>printf</code>)에 float을 넘기면 double로 승격됩니다.</p>
+</details>
+<details><summary>Q3. 금액 계산에 부동소수점을 쓰면 안 되는 이유와 대안은?</summary>
+<p>10진 소수를 정확히 표현하지 못해 오차가 생기고, 누적 시 커지며, 같은 계산도 경로에 따라 결과가 달라 대사가 맞지 않습니다. 큰 금액에서는 원 단위조차 잃습니다. 대안은 최소 화폐 단위의 64비트 정수, 금리는 고정소수점 정수, 필요하면 128비트 중간값을 쓰는 것입니다. 언어 차원에서는 Java의 BigDecimal, C#의 decimal, COBOL의 packed decimal 같은 10진 타입을 씁니다.</p>
+<p><strong>꼬리 질문 대비:</strong> "정수로 하면 오차가 아예 없나?" → 나눗셈에서는 여전히 나머지가 생기지만, 그 위치가 한 곳이고 처리 규칙(반올림 모드)을 명시적으로 정할 수 있다는 점이 다릅니다.</p>
+</details>
+<details><summary>Q4. 부동소수점 두 수를 어떻게 비교해야 합니까?</summary>
+<p><code>==</code> 대신 차이의 절댓값을 허용 오차와 비교합니다. 고정 엡실론은 값의 크기에 따라 무의미해지므로, 상대 오차(<code>rel × max(|a|,|b|)</code>)와 0 근처를 위한 절대 오차를 결합합니다. NaN이 있으면 무조건 다르다고 처리합니다. 허용 오차는 계산 과정의 오차 크기를 고려해 정해야 하며, 정확한 동등성이 필요한 값(금액)이라면 애초에 정수를 써야 합니다.</p>
+</details>
+<details><summary>Q5. 은행가 반올림(HALF_EVEN)이란 무엇이고 왜 씁니까?</summary>
+<p>정확히 절반(.5)일 때 결과가 짝수가 되는 쪽으로 반올림하는 방식입니다. 2.5는 2, 3.5는 4가 됩니다. 사사오입은 .5를 항상 올려서 대량의 데이터를 합산하면 결과가 위로 치우치는데, HALF_EVEN은 올림과 내림이 반반이 되어 통계적 편향이 없습니다. IEEE 754의 기본 반올림 모드이기도 합니다. 다만 실제 업무에서 어떤 모드를 쓸지는 상품 약관과 규정이 정합니다.</p>
+</details>
+<details><summary>Q6. 고정소수점과 부동소수점의 차이는?</summary>
+<p>고정소수점은 소수점 위치(스케일)를 미리 정해 두고 정수로 저장하는 방식이라 10진 소수를 정확히 표현하고 연산이 정수 연산이라 결정적입니다. 대신 표현 범위와 정밀도를 설계 시 정해야 하고, 곱셈 시 스케일 조정과 오버플로를 직접 관리해야 합니다. 부동소수점은 지수로 소수점이 움직여 넓은 범위를 다루지만, 2진 근삿값이고 크기에 따라 정밀도가 달라집니다.</p>
+</details>
+<details><summary>Q7. C에서 음수 정수 나눗셈과 나머지의 결과는 어떻게 됩니까?</summary>
+<p>C99부터 정수 나눗셈은 0쪽으로 절사하도록 정해졌습니다. −7 / 2 = −3이고, 나머지는 <code>(a/b)*b + a%b == a</code>를 만족하므로 −7 % 2 = −1입니다. 즉 나머지의 부호는 피제수를 따릅니다. C89에서는 구현 정의였습니다. 그래서 음수 금액을 반올림할 때 양수용 공식을 그대로 쓰면 틀리고, 부호를 고려한 반올림 함수를 써야 합니다.</p>
+<p><strong>꼬리 질문 대비:</strong> "INT_MIN / -1은?" → 결과 2<sup>31</sup>이 int로 표현되지 않아 UB이며, x86에서는 SIGFPE로 프로그램이 죽습니다.</p>
+</details>
+<details><summary>Q8. 오버플로 없이 a × b / c를 계산하는 방법은?</summary>
+<p>64비트 환경이라면 <code>__int128</code>로 곱을 계산해 넘침을 원천 차단하고, 나눈 결과가 64비트 범위인지 확인합니다. 128비트가 없으면 <code>(a / c) * b + (a % c) * b / c</code>처럼 나누기를 먼저 하고 나머지로 보정하거나, <code>__builtin_mul_overflow</code>로 검사해 오류 처리합니다. 핵심은 정밀도를 위해 곱셈을 먼저 하되 그 중간값의 크기를 설계 단계에서 분석하는 것입니다.</p>
+</details>
+<details><summary>Q9. 이자를 여러 명에게 나눌 때 1원이 남거나 모자라는 문제는 어떻게 해결합니까?</summary>
+<p>각자 몫을 개별 반올림하면 합계가 총액과 달라질 수 있습니다. 모두 절사한 뒤 남은 끝전을 나머지가 큰 순서로 1원씩 배분하는 최대잔여법을 쓰면 합계가 항상 보존됩니다. 끝전을 대표자에게 몰아주거나 기관에 귀속하는 방식도 있으며, 어떤 방식이든 업무 규칙으로 정하고 동률 처리 순서까지 정해 재현성을 보장합니다. 그리고 "분배 합계 == 총액"을 런타임에 검증합니다.</p>
+</details>
+<details><summary>Q10. NaN의 특징과 주의점은?</summary>
+<p>NaN은 0/0, 무한대 − 무한대 같은 정의되지 않은 연산의 결과입니다. 어떤 값과 비교해도 <code>==</code>, <code>&lt;</code>, <code>&gt;</code>가 모두 거짓이고 자기 자신과도 같지 않습니다(<code>x != x</code>가 참). 연산에 전파되므로 한 번 생기면 결과 전체가 NaN이 됩니다. <code>if (x &gt; limit) reject;</code> 같은 검사를 통과해 버리므로 <code>isnan</code>, <code>isfinite</code>로 명시적으로 검사해야 하고, 정렬 비교 함수에 NaN이 섞이면 비교의 일관성이 깨져 정렬 결과가 망가질 수 있습니다.</p>
+</details>
+</div>
+
+<h2 id="exercises">연습문제</h2>
+
+<div class="ex"><p class="ex-title">연습문제 21-1 <span class="lv">난이도 ★☆☆</span> 출력 예측</p>
+<pre><code class="language-c">float f = 16777216.0f;
+f = f + 1.0f;
+printf("%.1f\n", f);
+printf("%d\n", 0.1f == 0.1);
+printf("%d\n", 0.5f == 0.5);</code></pre>
+<details><summary>정답과 해설 보기</summary>
+<p><strong><code>16777216.0</code>, <code>0</code>, <code>1</code></strong></p>
+<p>16777217은 float으로 표현할 수 없어 가장 가까운 짝수 값 16777216으로 반올림됩니다(HALF_EVEN). <code>0.1f</code>는 24비트로 반올림된 값이고 <code>0.1</code>은 53비트로 반올림된 값이라, float을 double로 바꿔 비교하면 다릅니다(0.100000001490116… vs 0.1000000000000000055…). 0.5는 2진수로 정확히 표현되므로 같습니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 21-2 <span class="lv">난이도 ★☆☆</span> 반올림 모드</p>
+<p><code>div_round(n, 100, mode)</code>에서 n = 250, −250, 251, −149일 때 DOWN, FLOOR, HALF_UP, HALF_EVEN의 결과를 표로 쓰십시오.</p>
+<details><summary>정답과 해설 보기</summary>
+<div class="tbl"><table><thead><tr><th>n/100</th><th>DOWN</th><th>FLOOR</th><th>HALF_UP</th><th>HALF_EVEN</th></tr></thead>
+<tbody>
+<tr><td>2.50</td><td>2</td><td>2</td><td>3</td><td>2</td></tr>
+<tr><td>−2.50</td><td>−2</td><td>−3</td><td>−3</td><td>−2</td></tr>
+<tr><td>2.51</td><td>2</td><td>2</td><td>3</td><td>3</td></tr>
+<tr><td>−1.49</td><td>−1</td><td>−2</td><td>−1</td><td>−1</td></tr>
+</tbody></table></div>
+<p>2.51은 절반을 넘으므로 HALF_EVEN도 3입니다. 짝수 규칙은 "정확히 절반"일 때만 적용됩니다. −1.49는 절반 미만이므로 반올림 모드에서는 −1, FLOOR만 −2입니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 21-3 <span class="lv">난이도 ★★☆</span> 버그 찾기</p>
+<pre><code class="language-c">long long round_won(long long x10)     /* 0.1원 단위 → 원 단위 반올림 */
+{
+    return (x10 + 5) / 10;
+}</code></pre>
+<p>어떤 입력에서 틀립니까? 고치십시오.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>① 음수: x10 = −25(−2.5원) → (−20)/10 = −2. HALF_UP이라면 −3이어야 하고, x10 = −24 → −19/10 = −1인데 −2.4원의 반올림은 −2입니다. 음수에서 체계적으로 틀립니다. ② <code>x10 + 5</code>가 <code>LLONG_MAX</code> 근처에서 오버플로(UB)합니다. 고친 코드는 <code>return div_round(x10, 10, RND_HALF_UP);</code>입니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 21-4 <span class="lv">난이도 ★★☆</span> 계산</p>
+<p>원금 30,000,000원, 연 2.85%, 181일, ACT/365, 원 미만 절사 이자와, 이자소득세 14%·지방소득세(소득세의 10%)를 각각 10원 미만 절사했을 때 세후 이자를 구하십시오.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>이자 = 30,000,000 × 28,500 × 181 / 365,000,000 = 154,755,000,000,000 / 365,000,000 = 423,986.30… → <strong>423,986원</strong>.</p>
+<p>소득세 = 423,986 × 0.14 = 59,358.04 → 59,358 → 10원 미만 절사 <strong>59,350원</strong>. 지방소득세 = 5,935 → <strong>5,930원</strong>. 세후 = 423,986 − 59,350 − 5,930 = <strong>358,706원</strong>.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 21-5 <span class="lv">난이도 ★★☆</span> 코드 작성 — 통화별 금액 출력</p>
+<p>최소 단위 정수 금액과 소수 자릿수(0~3)를 받아 <code>"1,234.56"</code> 형식 문자열을 만드는 함수 <code>int format_minor(int64_t v, int digits, char *buf, size_t sz)</code>를 <code>format_amount</code>를 활용해 작성하십시오. 예: (123456, 2) → "1,234.56", (−5, 2) → "-0.05", (1000, 0) → "1,000".</p>
+<details><summary>정답과 해설 보기</summary>
+<p>정수부와 소수부를 나눌 때 음수를 주의해야 합니다. −5 / 100 = 0이라서 정수부만으로는 부호가 사라집니다. 크기(unsigned)로 계산하고 부호를 따로 붙입니다.</p>
+<figure class="code good"><figcaption>정답 코드</figcaption>
+<pre><code class="language-c">int format_minor(int64_t v, int digits, char *buf, size_t sz)
+{
+    static const uint64_t P10[] = { 1, 10, 100, 1000 };
+    if (digits &lt; 0 || digits &gt; 3) return -1;
+    uint64_t mag = (v &lt; 0) ? (uint64_t)0 - (uint64_t)v : (uint64_t)v;
+    uint64_t ip = mag / P10[digits], fp = mag % P10[digits];
+    char ibuf[32];
+    if (format_amount((int64_t)ip, ibuf, sizeof ibuf) &lt; 0) return -1;  /* ip &lt;= INT64_MAX */
+    int n;
+    if (digits == 0)
+        n = snprintf(buf, sz, "%s%s", v &lt; 0 ? "-" : "", ibuf);
+    else
+        n = snprintf(buf, sz, "%s%s.%0*llu", v &lt; 0 ? "-" : "", ibuf,
+                     digits, (unsigned long long)fp);
+    return (n &lt; 0 || (size_t)n &gt;= sz) ? -1 : n;   /* 잘림도 실패로 */
+}</code></pre></figure>
+<p>digits ≥ 1이면 ip ≤ 2<sup>63</sup>/10이라 int64로 안전하고, digits == 0이면서 v == INT64_MIN인 경우만 ip가 2<sup>63</sup>이 되어 범위를 넘습니다. 실무에서는 도메인 상한 검사로 그 값이 들어오지 않게 하거나, 그 경우를 별도로 처리합니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 21-6 <span class="lv">난이도 ★★☆</span> 끝전 분배</p>
+<p>이자 1,000원을 지분 5:3:2인 세 사람에게, 이자 7원을 지분 1:1:1에게 최대잔여법으로 나누면 각각 얼마입니까?</p>
+<details><summary>정답과 해설 보기</summary>
+<p>(1) 1000 × 5/10 = 500, 300, 200으로 나누어떨어져 <strong>500, 300, 200</strong>. (2) 7/3 = 2.33… → 절사 2, 2, 2(합 6), 나머지는 모두 1로 같아 앞 번호부터 1원: <strong>3, 2, 2</strong>.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 21-7 <span class="lv">난이도 ★★☆</span> 버그 찾기 — 금리 파싱</p>
+<pre><code class="language-c">rate_t parse_rate_bad(const char *s)
+{
+    double d = atof(s);                  /* "3.5" → 3.5 */
+    return (rate_t)(d * 10000);          /* → 35000 ? */
+}</code></pre>
+<details><summary>정답과 해설 보기</summary>
+<p>① <code>atof</code>는 오류를 알려 주지 않습니다. "abc"는 0%, "3.5%"는 3.5, "1e3"은 1000으로 조용히 변환됩니다. ② double 곱셈 후 <code>(rate_t)</code> 절사라서 2진 표현 오차 때문에 한 단위가 사라질 수 있습니다(예: "1.13" → 1.13 × 10000 = 11299.999999999998 → 11299, 1.13%가 1.1299%로 바뀜). ③ 범위·자릿수 검사가 없습니다. 본문의 <code>parse_rate</code>처럼 문자열에서 정수로 직접 파싱해야 합니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 21-8 <span class="lv">난이도 ★★★</span> 코드 작성 — 납입액 이진 탐색</p>
+<p>double 공식 없이, 정수 시뮬레이션만으로 원리금 균등 상환의 월 납입액을 구하려 합니다. "매달 같은 금액 A를 내고 이자는 원 미만 반올림일 때, n회차 후 잔액이 0 이하가 되는 최소 A"를 이진 탐색으로 찾는 함수를 작성하십시오.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>A가 커질수록 최종 잔액은 단조 감소하므로 이진 탐색이 가능합니다. 하한은 0, 상한은 "원금 + 전 기간 단순 최대 이자" 정도로 잡습니다. 각 후보 A에 대해 n회차를 정수로 시뮬레이션해 최종 잔액이 0 이하인지 봅니다.</p>
+<figure class="code good"><figcaption>정답 코드</figcaption>
+<pre><code class="language-c">/* 최종 잔액 (음수면 과납). 실패 시 INT64_MAX */
+static int64_t final_balance(int64_t P, int64_t annual_rate, int n, int64_t A)
+{
+    int64_t bal = P;
+    for (int k = 0; k &lt; n; k++) {
+        int64_t intr = div_round(bal * annual_rate, INT64_C(12) * 1000000, RND_HALF_UP);
+        bal = bal + intr - A;            /* 도메인 범위 내 가정 (bal*rate 128비트 권장) */
+    }
+    return bal;
+}
+
+int64_t find_payment(int64_t P, int64_t annual_rate, int n)
+{
+    int64_t lo = 0, hi = P + P / 12 * n + 1;     /* 충분히 큰 상한(연 100% 이하 가정) */
+    while (lo &lt; hi) {
+        int64_t mid = lo + (hi - lo) / 2;          /* (lo+hi)/2 오버플로 방지 */
+        if (final_balance(P, annual_rate, n, mid) &lt;= 0) hi = mid;
+        else lo = mid + 1;
+    }
+    return lo;
+}</code></pre></figure>
+<p>본문 예(1,200만 원, 6%, 12개월)에서는 1,032,798원이 나옵니다. 공식 값(1,032,797)으로 갚으면 마지막 회차에 2원을 더 내야 했으므로, 모든 회차를 같게 하려면 1원 더 큰 금액이 필요하다는 뜻이고, 이 경우 마지막에는 과납분을 돌려주거나 마지막 회차를 줄여 정리합니다. 어떤 방식을 쓸지는 상품 규칙입니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 21-9 <span class="lv">난이도 ★★☆</span> 서술 — 반올림 시점</p>
+<p>하루 거래 1만 건 각각에 0.15% 수수료를 매깁니다. "건별 계산 후 건별 절사"와 "전체 합계 후 한 번 절사"는 결과가 어떻게 다르며, 어느 쪽을 써야 합니까?</p>
+<details><summary>정답과 해설 보기</summary>
+<p>건별 절사는 건마다 0~0.999원을 버리므로, 합계 후 절사보다 최대 약 1만 원 가까이 적게 나올 수 있습니다(평균적으로 건당 약 0.5원 × 1만 건 ≈ 5천 원). 어느 쪽이 "맞다"가 아니라 <strong>약관과 고객 고지 기준이 맞는 쪽</strong>을 써야 합니다. 보통 수수료는 고객별 거래 단위로 부과·고지되므로 건별 계산이 일반적이며, 핵심은 모든 계산 경로(실시간, 배치, 명세서, 정산)가 <strong>같은 규칙과 같은 공통 함수</strong>를 쓰게 하는 것입니다. 경로마다 반올림 시점이 다르면 대사가 맞지 않습니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 21-10 <span class="lv">난이도 ★★☆</span> 코드 작성 — 환율 환산</p>
+<p>USD 센트 금액(<code>int64_t</code>)과 환율(원/달러, 소수 2자리, 예: 1385.20 → 138520)을 받아 원화 금액을 HALF_EVEN으로 반올림해 구하는 함수를 작성하고, 12,345센트(123.45달러) × 1,385.20원의 결과를 쓰십시오.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>원화 = 센트/100 × 환율정수/100 = 센트 × 환율정수 / 10,000. 12,345 × 138,520 = 1,710,029,400 → / 10,000 = 171,002.94 → <strong>171,003원</strong>(.94는 절반 초과라 올림).</p>
+<figure class="code good"><figcaption>정답 코드</figcaption>
+<pre><code class="language-c">bool usd_cents_to_krw(int64_t cents, int64_t rate_x100, int64_t *krw)
+{
+    if (rate_x100 &lt;= 0) return false;
+    return muldiv3(cents, rate_x100, 1, 10000, RND_HALF_EVEN, krw);
+}</code></pre></figure>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 21-11 <span class="lv">난이도 ★★☆</span> 출력 예측 — 이중 반올림</p>
+<p>x = 1449(0.001원 단위, 즉 1.449원)일 때 다음 두 방법의 결과는?</p>
+<pre><code class="language-c">a = div_round(div_round(1449, 10, RND_HALF_UP), 100, RND_HALF_UP);  /* 0.01원 → 1원 */
+b = div_round(1449, 1000, RND_HALF_UP);                              /* 바로 1원 */</code></pre>
+<details><summary>정답과 해설 보기</summary>
+<p>a: 1449/10 = 144.9 → 145(1.45원) → 145/100 = 1.45 → <strong>1</strong>. 이 경우는 같지만, x = 1495라면 a: 149.5 → 150 → 1.50 → <strong>2</strong>, b: 1.495 → <strong>1</strong>로 달라집니다. 단계별 반올림은 중간에서 올라간 값이 다음 단계에서 또 올라가 결과를 바꿀 수 있으므로(이중 반올림), 한 번의 나눗셈으로 최종 단위까지 가는 것이 원칙입니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 21-12 <span class="lv">난이도 ★★★</span> 설계</p>
+<p>신규 적금 상품의 이자 계산 모듈을 설계합니다. 금액·금리 타입, 반올림 규칙 관리, 중간값 오버플로 대책, 검증 방법을 포함해 설계 요점을 5가지 이상 쓰십시오.</p>
+<details><summary>정답과 해설 보기</summary>
+<ol>
+<li><strong>타입</strong>: 금액 <code>int64_t</code>(원), 금리 0.0001% 단위 <code>int64_t</code>, 일수 <code>int32_t</code>. 공통 헤더의 typedef만 사용.</li>
+<li><strong>규칙의 데이터화</strong>: 이자·세금의 반올림 모드와 단위(1원/10원), 일수 관행(ACT/365, 한편넣기), 세율을 상품 기준 정보로 관리하고 계산 엔진은 이를 읽어 공통 <code>div_round</code>를 호출.</li>
+<li><strong>계산 순서</strong>: 모든 곱셈 후 마지막에 한 번 나누기, 중간값은 <code>__int128</code>, 결과 범위 검사 실패 시 오류 반환(조용히 진행 금지).</li>
+<li><strong>입력 경계</strong>: 금액·금리 문자열은 화이트리스트 파서로 변환, 도메인 범위(최대 예치금 등) 검사.</li>
+<li><strong>검증</strong>: 수작업 검산 사례(경계값: 0원, 1일, 윤년 2월 29일 포함, 최대 금액)를 단위 테스트로 고정. 일마감 배치에서 "회차별 이자 합 = 총 이자", "세전 − 세금 = 세후" 불변식 검사, 레거시 시스템과 병행 계산(parallel run) 비교.</li>
+<li><strong>추적성</strong>: 계산 입력·규칙 버전·결과를 이력으로 남겨 민원 시 재현 가능하게.</li>
+</ol>
+</details></div>
+
+</main>
+<aside class="rail" aria-label="이 페이지 목차"></aside>
+</div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-c.min.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>

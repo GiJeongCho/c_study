@@ -1,0 +1,131 @@
+<title>C언어 금융 IT 마스터</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+KR:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="assets/style.css">
+<style>
+  .home { max-width: 1080px; margin: 0 auto; padding-block: 48px 96px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  .hero { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 40px; align-items: end;
+    padding-bottom: 36px; border-bottom: 2px solid var(--ink); }
+  .hero .eyebrow { margin: 0 0 10px; font-size: var(--fs-0); letter-spacing: .12em; color: var(--muted); font-weight: 600; }
+  .hero h1 { font-family: var(--f-display); font-weight: 400; font-size: clamp(2.4rem, 6vw, 4.4rem); line-height: 1.08; margin: 0 0 18px; text-wrap: balance; }
+  .hero h1 em { font-style: normal; color: var(--accent); }
+  .hero p.lede { font-size: var(--fs-3); line-height: 1.6; color: var(--muted); margin: 0 0 22px; max-width: 36em; }
+  .cta { display: flex; flex-wrap: wrap; gap: 10px; }
+  .btn { display: inline-block; padding: 10px 18px; border-radius: 8px; text-decoration: none; font-weight: 700; border: 1.5px solid var(--accent); }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); }
+  .btn.ghost { color: var(--accent); background: var(--surface); }
+  .ledger { font-family: var(--f-mono); font-size: var(--fs-0); background: var(--code-bg); color: var(--code-fg);
+    border-radius: 10px; padding: 16px 18px; line-height: 1.75; overflow-x: auto; box-shadow: var(--shadow); }
+  .ledger .c { color: #7f948e; }
+  .ledger .k { color: #f2a97f; }
+  .ledger .n { color: #f5d77a; }
+  .ledger .s { color: #a8dd8f; }
+  .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; margin: 28px 0 48px;
+    border: 1px solid var(--rule); border-radius: 10px; background: var(--surface); }
+  .stats div { padding: 14px 18px; border-left: 1px solid var(--rule); }
+  .stats div:first-child { border-left: 0; }
+  .stats b { display: block; font-family: var(--f-display); font-weight: 400; font-size: 2rem; color: var(--accent); line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .stats span { font-size: var(--fs-0); color: var(--muted); }
+  .how { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-bottom: 56px; }
+  .how .box { margin: 0; }
+  .part-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+    margin: 48px 0 16px; padding-bottom: 8px; border-bottom: 1px solid var(--rule); }
+  .part-head h2 { margin: 0; font-size: var(--fs-4); }
+  .part-head p { margin: 0; color: var(--muted); font-size: var(--fs-1); }
+  .toc { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 28px; }
+  .toc a.chap { display: grid; grid-template-columns: 3.2rem minmax(0, 1fr); gap: 4px 12px; padding: 14px 4px;
+    border-bottom: 1px solid var(--rule); text-decoration: none; color: var(--ink); }
+  .toc a.chap:hover { background: var(--accent-soft); }
+  .toc .no { font-family: var(--f-display); font-size: 1.9rem; line-height: 1; color: var(--accent); grid-row: span 2; }
+  .toc .tt { font-weight: 700; }
+  .toc .ss { font-size: var(--fs-0); color: var(--muted); line-height: 1.55; }
+  .resume[hidden] { display: none !important; }
+  @media (max-width: 860px) {
+    .hero { grid-template-columns: minmax(0, 1fr); }
+    .how, .toc { grid-template-columns: minmax(0, 1fr); }
+    .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .stats div:nth-child(3) { border-left: 0; }
+    .stats div:nth-child(n+3) { border-top: 1px solid var(--rule); }
+  }
+</style>
+
+<header class="topbar">
+  <a class="brand" href="index.html"><b>C</b>금융 IT 마스터</a>
+  <span class="where">과정 소개와 전체 목차</span>
+</header>
+
+<main class="home">
+  <section class="hero">
+    <div>
+      <p class="eyebrow">C 언어 강의 교안 · 입문부터 금융권 계정계 실무까지</p>
+      <h1>printf 한 줄에서<br><em>코어뱅킹</em>까지</h1>
+      <p class="lede">C를 처음 보는 사람이 은행 원장을 다루는 개발자가 되기까지 필요한 모든 것을 담았습니다. 문법마다 "왜 이렇게 동작하는가"를 메모리 그림으로 따라가고, 실수하는 지점과 해결법, 예시문제와 CS 면접 질문까지 함께 다룹니다.</p>
+      <div class="cta">
+        <a class="btn primary" href="ch01.html">1장부터 시작하기</a>
+        <a class="btn ghost resume" id="resume" href="ch01.html" hidden>이어서 보기</a>
+      </div>
+    </div>
+    <pre class="ledger" aria-label="예시 코드"><span class="c">/* 이체: 출금 계좌 → 입금 계좌 (원 단위 정수) */</span>
+<span class="k">int</span> transfer(Account *from, Account *to,
+             <span class="k">int64_t</span> amount)
+{
+    <span class="k">if</span> (amount &lt;= <span class="n">0</span>)            <span class="k">return</span> ERR_AMOUNT;
+    <span class="k">if</span> (from-&gt;balance &lt; amount) <span class="k">return</span> ERR_BALANCE;
+    lock_in_order(from, to);   <span class="c">/* 데드락 방지 */</span>
+    from-&gt;balance -= amount;
+    to-&gt;balance   += amount;
+    write_txlog(<span class="s">"TRF"</span>, from, to, amount);
+    unlock_both(from, to);
+    <span class="k">return</span> OK;
+}</pre>
+  </section>
+
+  <div class="stats" aria-label="과정 구성">
+    <div><b>19</b><span>C 기초 챕터</span></div>
+    <div><b>14</b><span>금융 IT 실무 챕터</span></div>
+    <div><b>66</b><span>절(節)</span></div>
+    <div><b>100+</b><span>CS 면접 질문</span></div>
+  </div>
+
+  <section class="how" aria-label="교안 읽는 법">
+    <div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까?</p><p>결과만 외우지 않도록, 컴파일러와 메모리 안에서 실제로 무슨 일이 일어나는지 그림으로 설명합니다.</p></div>
+    <div class="box fix"><p class="box-title" data-tag="해결">이렇게 해결합니다</p><p>초보가 꼭 겪는 버그를 먼저 보여 주고, 원인과 고친 코드를 나란히 놓습니다.</p></div>
+    <div class="box fin"><p class="box-title" data-tag="금융 실무">은행 시스템에서는</p><p>계좌·잔액·이자·전문·배치 예시로, 배운 문법이 계정계에서 어떻게 쓰이는지 연결합니다.</p></div>
+  </section>
+
+  <div id="toc"></div>
+</main>
+
+<script src="assets/app.js"></script>
+<script>
+(function () {
+  var notes = {
+    "PART 1 · C 기초 완전 정복": "국내 C 언어 교재 목차 순서. 문법을 원리부터 이해합니다.",
+    "PART 2 · 금융 IT 베테랑 트랙": "정밀도, 전문, 배치, 소켓, 동시성, 트랜잭션, 장애 대응, 면접.",
+    "부록": "아스키 코드표, 선택 정렬, 여기서 잠깐 모음, 실무 체크리스트."
+  };
+  var h = "";
+  COURSE.forEach(function (p) {
+    h += '<div class="part-head"><h2>' + p.part + "</h2><p>" + (notes[p.part] || "") + "</p></div><div class=\"toc\">";
+    p.chapters.forEach(function (c) {
+      h += '<a class="chap" href="' + c.id + '.html"><span class="no">' + (c.id === "appendix" ? "+" : c.n) + '</span><span class="tt">' + c.t + '</span><span class="ss">' +
+        c.s.map(function (s) { return s[0] + " " + s[1]; }).join("<br>") + "</span></a>";
+    });
+    h += "</div>";
+  });
+  document.getElementById("toc").innerHTML = h;
+  try {
+    var last = localStorage.getItem("c-course-last");
+    var hit = (window.COURSE_FLAT || []).filter(function (c) { return c.id === last; })[0];
+    if (hit) {
+      var r = document.getElementById("resume");
+      r.href = hit.id + ".html";
+      r.textContent = "이어서 보기 · " + hit.t;
+      r.hidden = false;
+    }
+  } catch (e) {}
+})();
+</script>

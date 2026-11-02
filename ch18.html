@@ -1,0 +1,1068 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ch18 파일 입출력 · C언어 금융 IT 마스터</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+KR:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-ch="ch18">
+<header class="topbar">
+  <button class="menu-btn" type="button" aria-expanded="false" aria-controls="sidebar">목차</button>
+  <a class="brand" href="index.html"><b>C</b>금융 IT 마스터</a>
+  <span class="where"></span>
+  <span class="progress"></span>
+</header>
+<div class="layout">
+<nav id="sidebar" class="sidebar" aria-label="과정 목차"></nav>
+<div class="page">
+<main class="content">
+
+<header class="ch-head">
+  <p class="eyebrow">PART 1 · C 기초 완전 정복 · CHAPTER</p>
+  <div class="bignum">18</div>
+  <h1>파일 입출력</h1>
+  <p class="lede">프로그램이 끝나면 메모리의 데이터는 사라집니다. 오늘의 거래 내역, 고객 원장, 일마감 결과를 남기려면 파일에 써야 합니다. 은행의 야간 배치는 사실상 "파일을 읽고, 계산하고, 파일을 쓰는" 일의 연속이므로, 파일 입출력은 금융 IT 개발자가 매일 쓰는 기술입니다.</p>
+  <div class="goals"><p class="goals-title">이 장에서 배울 것</p><ul>
+    <li>스트림과 버퍼의 개념, <code>FILE *</code>가 무엇을 가리키는지</li>
+    <li><code>fopen</code>의 모드(r, w, a, +, b, x)와 텍스트 모드·바이너리 모드의 차이(윈도우의 \r\n)</li>
+    <li><code>fclose</code>의 의미와 <code>perror</code>, <code>errno</code>를 이용한 오류 처리</li>
+    <li>문자 단위(<code>fgetc</code>/<code>fputc</code>), 줄 단위(<code>fgets</code>/<code>fputs</code>), 서식(<code>fprintf</code>/<code>fscanf</code>), 블록 단위(<code>fread</code>/<code>fwrite</code>) 입출력</li>
+    <li><code>fseek</code>/<code>ftell</code>/<code>rewind</code>로 원하는 위치의 레코드를 읽고 고치는 랜덤 접근</li>
+    <li><code>feof</code>를 반복 조건으로 쓰면 안 되는 이유, 버퍼 flush가 필요한 순간</li>
+    <li>거래 내역 CSV 저장·읽기, 고객 원장 파일 레코드 수정 실습</li>
+  </ul></div>
+</header>
+
+<h2 id="s18-1"><span class="num">18-1</span>파일 개방과 입출력</h2>
+
+<h3 id="s18-1-1">스트림과 FILE 구조체</h3>
+<p>C 프로그램은 키보드, 화면, 디스크 파일, 심지어 다른 프로그램과의 파이프까지 모두 <b>스트림(stream)</b>이라는 같은 모양으로 다룹니다. 스트림은 "바이트가 한 줄로 흘러가는 통로"라고 생각하면 됩니다. 프로그램은 통로의 한쪽 끝에서 바이트를 꺼내거나 넣기만 하고, 통로 반대편이 키보드인지 디스크인지는 운영체제와 표준 라이브러리가 알아서 처리합니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 250" width="700" role="img" aria-label="스트림과 버퍼 구조">
+  <rect class="hl" x="20" y="90" width="140" height="70" rx="8"/>
+  <text x="90" y="120" text-anchor="middle" class="bold">C 프로그램</text>
+  <text x="90" y="142" text-anchor="middle" class="small mono">fprintf(fp, ...)</text>
+  <path class="arrow" d="M160 125 H 220"/>
+  <rect class="hl2" x="220" y="80" width="170" height="90" rx="8"/>
+  <text x="305" y="104" text-anchor="middle" class="small bold">FILE 구조체</text>
+  <text x="305" y="126" text-anchor="middle" class="small mono">버퍼(보통 4KB)</text>
+  <text x="305" y="146" text-anchor="middle" class="small mono">위치, 오류/EOF 플래그</text>
+  <path class="arrow" d="M390 125 H 450"/>
+  <text x="420" y="115" text-anchor="middle" class="small mute">write()</text>
+  <rect class="box" x="450" y="90" width="110" height="70" rx="8"/>
+  <text x="505" y="120" text-anchor="middle" class="small bold">운영체제</text>
+  <text x="505" y="142" text-anchor="middle" class="small mute">커널 캐시</text>
+  <path class="arrow" d="M560 125 H 600"/>
+  <rect class="box" x="600" y="90" width="80" height="70" rx="8"/>
+  <text x="640" y="130" text-anchor="middle" class="small">디스크</text>
+  <text x="305" y="40" text-anchor="middle" class="small mute">표준 라이브러리(libc) 영역</text>
+  <path class="dash" d="M210 50 H 400 V 200 H 210 Z"/>
+  <text x="350" y="230" text-anchor="middle" class="small acc">FILE * fp 는 이 FILE 구조체를 가리키는 포인터</text>
+</svg>
+<figcaption>그림 18-1 스트림: 프로그램 → FILE 버퍼 → 운영체제 → 디스크</figcaption>
+</figure>
+
+<p><code>&lt;stdio.h&gt;</code>에 정의된 <code>FILE</code>은 스트림 하나를 관리하는 구조체입니다. 안에는 버퍼의 주소와 크기, 버퍼 안에서 현재 읽거나 쓸 위치, 운영체제가 준 파일 번호(파일 디스크립터), 오류 표시자와 파일 끝(EOF) 표시자 등이 들어 있습니다. 우리는 이 내부를 직접 건드리지 않고 <code>FILE *</code> 포인터를 받아 표준 함수에 넘기기만 합니다. 17장의 구조체 포인터를 함수에 넘기는 방식 그대로입니다.</p>
+
+<p>프로그램이 시작될 때 이미 세 개의 스트림이 열려 있습니다.</p>
+<div class="tbl"><table>
+<thead><tr><th>이름</th><th>의미</th><th>기본 연결</th><th>버퍼링(일반적 구현)</th></tr></thead>
+<tbody>
+<tr><td><code>stdin</code></td><td>표준 입력</td><td>키보드</td><td>대화형이면 줄 단위</td></tr>
+<tr><td><code>stdout</code></td><td>표준 출력</td><td>화면</td><td>터미널이면 줄 단위, 파일·파이프로 리다이렉트되면 완전 버퍼</td></tr>
+<tr><td><code>stderr</code></td><td>표준 오류</td><td>화면</td><td>버퍼 없음(즉시 출력)</td></tr>
+</tbody></table></div>
+<p>그래서 <code>printf(...)</code>는 사실 <code>fprintf(stdout, ...)</code>와 같고, 오류 메시지는 <code>fprintf(stderr, ...)</code>로 내보내는 것이 원칙입니다. 배치 프로그램을 <code>./batch &gt; result.txt</code>로 실행하면 정상 출력은 파일로 가고 오류는 여전히 화면(또는 별도 로그)에 남기 때문입니다.</p>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — 왜 굳이 버퍼를 둘까?</p>
+<p>운영체제에 데이터를 넘기는 <code>write</code> 시스템 호출은 사용자 모드에서 커널 모드로 전환해야 해서 일반 함수 호출보다 수백 배 비쌉니다. 1바이트 쓸 때마다 시스템 호출을 하면 100만 바이트를 쓰는 데 100만 번 커널을 다녀와야 합니다. 표준 라이브러리는 FILE 안의 버퍼에 데이터를 모아 두었다가 버퍼가 가득 차거나, 줄바꿈을 만나거나(줄 버퍼 모드), <code>fflush</code>/<code>fclose</code>가 호출될 때 한꺼번에 내보냅니다. 4KB 버퍼라면 시스템 호출이 약 4,000분의 1로 줄어듭니다. 대신 "썼다고 생각했는데 아직 버퍼에만 있는" 상황이 생기며, 이것이 18-2의 flush 문제로 이어집니다.</p></div>
+
+<h3 id="s18-1-2">fopen으로 파일 열기</h3>
+<p>파일을 사용하려면 먼저 <code>fopen</code>으로 열어 스트림을 만듭니다.</p>
+<figure class="code"><figcaption>fopen의 원형</figcaption>
+<pre><code class="language-c">FILE *fopen(const char *filename, const char *mode);
+/* 성공: FILE 구조체를 가리키는 포인터, 실패: NULL (errno에 원인 저장) */</code></pre></figure>
+
+<figure class="code"><figcaption>ex18-1.c 파일을 열어 한 줄 쓰기</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+int main(void)
+{
+    FILE *fp = fopen("hello.txt", "w");    /* 쓰기 모드로 열기 */
+    if (fp == NULL) {                      /* 실패 검사는 필수 */
+        perror("hello.txt");
+        return 1;
+    }
+    fprintf(fp, "거래일자: %s\n", "20261028");
+    fputs("파일 입출력 시작\n", fp);
+    fclose(fp);                            /* 버퍼를 비우고 닫기 */
+    printf("hello.txt 작성 완료\n");
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과 (화면)</figcaption><pre>hello.txt 작성 완료</pre></figure>
+<figure class="code out"><figcaption>hello.txt 내용</figcaption><pre>거래일자: 20261028
+파일 입출력 시작</pre></figure>
+
+<p>모드 문자열은 파일을 어떻게 열지 정합니다. 반드시 외워 두어야 하는 표입니다.</p>
+<div class="tbl"><table>
+<thead><tr><th>모드</th><th>용도</th><th>파일이 없으면</th><th>파일이 있으면</th><th>쓰기 위치</th></tr></thead>
+<tbody>
+<tr><td><code>"r"</code></td><td>읽기 전용</td><td>실패(NULL)</td><td>처음부터 읽기</td><td>쓰기 불가</td></tr>
+<tr><td><code>"w"</code></td><td>쓰기 전용</td><td>새로 만듦</td><td><b>내용을 모두 지움</b>(길이 0)</td><td>처음부터</td></tr>
+<tr><td><code>"a"</code></td><td>추가(append) 전용</td><td>새로 만듦</td><td>내용 유지</td><td>항상 파일 끝</td></tr>
+<tr><td><code>"r+"</code></td><td>읽기+쓰기</td><td>실패(NULL)</td><td>내용 유지</td><td>현재 위치(처음부터)</td></tr>
+<tr><td><code>"w+"</code></td><td>쓰기+읽기</td><td>새로 만듦</td><td><b>내용을 모두 지움</b></td><td>현재 위치</td></tr>
+<tr><td><code>"a+"</code></td><td>추가+읽기</td><td>새로 만듦</td><td>내용 유지</td><td>쓰기는 항상 끝, 읽기는 어디서나</td></tr>
+<tr><td><code>"wx"</code>, <code>"w+x"</code></td><td>배타적 생성(C11)</td><td>새로 만듦</td><td><b>실패(NULL)</b></td><td>처음부터</td></tr>
+</tbody></table></div>
+<p>여기에 <code>b</code>를 붙이면 바이너리 모드가 됩니다: <code>"rb"</code>, <code>"wb"</code>, <code>"r+b"</code>(또는 <code>"rb+"</code>), <code>"ab"</code> 등. b가 없으면 텍스트 모드입니다.</p>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 — "w"로 열어 원장을 날려 버리기</p>
+<p><code>"w"</code>와 <code>"w+"</code>는 파일이 존재하면 <b>열자마자 내용을 0바이트로 잘라 냅니다</b>. 아무것도 쓰지 않고 닫아도 이미 내용은 사라졌습니다. 기존 원장 파일의 일부만 고치려다 "w"로 여는 실수는 실제 운영 사고로 이어집니다. 기존 내용을 고칠 때는 <code>"r+"</code>(바이너리면 <code>"r+b"</code>), 뒤에 덧붙일 때는 <code>"a"</code>, 덮어쓰면 안 되는 새 파일을 만들 때는 C11의 <code>"wx"</code>를 씁니다.</p></div>
+
+<div class="box tip"><p class="box-title" data-tag="잠깐">여기서 잠깐 — 파일 경로와 역슬래시</p>
+<p>윈도우 경로를 C 문자열에 쓸 때 <code>"C:\data\new.txt"</code>라고 쓰면 <code>\n</code>이 줄바꿈 문자로 해석되어 엉뚱한 경로가 됩니다. <code>"C:\\data\\new.txt"</code>처럼 역슬래시를 두 번 쓰거나, 윈도우도 받아 주는 <code>"C:/data/new.txt"</code>를 씁니다. 상대 경로(<code>"hello.txt"</code>)는 실행 파일의 위치가 아니라 <b>현재 작업 디렉터리</b> 기준이라는 점도 배치 스케줄러에서 실행할 때 자주 틀리는 부분입니다.</p></div>
+
+<h3 id="s18-1-3">텍스트 모드와 바이너리 모드</h3>
+<p>텍스트 모드와 바이너리 모드의 차이는 단 하나, <b>줄바꿈 문자 변환</b>을 하느냐입니다. 리눅스와 유닉스에서는 줄바꿈이 원래 <code>\n</code>(0x0A) 한 바이트이므로 두 모드가 완전히 같습니다. 윈도우에서는 텍스트 파일의 줄바꿈이 <code>\r\n</code>(0x0D 0x0A) 두 바이트이기 때문에, 텍스트 모드에서 다음 변환이 일어납니다.</p>
+<ul>
+  <li>쓸 때: 프로그램의 <code>\n</code> → 파일에 <code>\r\n</code></li>
+  <li>읽을 때: 파일의 <code>\r\n</code> → 프로그램에 <code>\n</code></li>
+  <li>(MSVC 런타임) 텍스트 모드에서 읽을 때 0x1A(Ctrl+Z)를 파일 끝으로 취급할 수 있음</li>
+</ul>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 240" width="700" role="img" aria-label="텍스트 모드 줄바꿈 변환">
+  <text x="20" y="25" class="bold">프로그램이 쓰는 바이트: "AB\n"</text>
+  <rect class="box" x="20" y="35" width="50" height="34"/><text x="45" y="57" text-anchor="middle" class="mono small">41</text>
+  <rect class="box" x="70" y="35" width="50" height="34"/><text x="95" y="57" text-anchor="middle" class="mono small">42</text>
+  <rect class="hl" x="120" y="35" width="50" height="34"/><text x="145" y="57" text-anchor="middle" class="mono small">0A</text>
+  <text x="20" y="110" class="small bold">리눅스(텍스트/바이너리 동일)</text>
+  <rect class="box" x="20" y="120" width="50" height="34"/><text x="45" y="142" text-anchor="middle" class="mono small">41</text>
+  <rect class="box" x="70" y="120" width="50" height="34"/><text x="95" y="142" text-anchor="middle" class="mono small">42</text>
+  <rect class="hl" x="120" y="120" width="50" height="34"/><text x="145" y="142" text-anchor="middle" class="mono small">0A</text>
+  <text x="20" y="180" class="small mute">파일 크기 3바이트</text>
+  <text x="370" y="110" class="small bold">윈도우 텍스트 모드 "w"</text>
+  <rect class="box" x="370" y="120" width="50" height="34"/><text x="395" y="142" text-anchor="middle" class="mono small">41</text>
+  <rect class="box" x="420" y="120" width="50" height="34"/><text x="445" y="142" text-anchor="middle" class="mono small">42</text>
+  <rect class="hl2" x="470" y="120" width="50" height="34"/><text x="495" y="142" text-anchor="middle" class="mono small">0D</text>
+  <rect class="hl" x="520" y="120" width="50" height="34"/><text x="545" y="142" text-anchor="middle" class="mono small">0A</text>
+  <text x="370" y="180" class="small warn-t">파일 크기 4바이트: \n 앞에 \r 추가</text>
+  <path class="arrow-m" d="M120 69 L 80 118"/>
+  <path class="arrow-m" d="M170 69 L 400 118"/>
+  <text x="370" y="220" class="small mute">"wb"로 열면 윈도우에서도 3바이트 그대로</text>
+</svg>
+<figcaption>그림 18-2 텍스트 모드는 윈도우에서 \n과 \r\n을 서로 변환한다</figcaption>
+</figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — 바이너리 데이터를 텍스트 모드로 쓰면 왜 깨질까?</p>
+<p>구조체나 정수를 <code>fwrite</code>로 저장하면 그 바이트 중에 우연히 0x0A가 섞여 있을 수 있습니다. 예를 들어 정수 10은 리틀 엔디안으로 <code>0A 00 00 00</code>입니다. 윈도우 텍스트 모드라면 이 0x0A 앞에 0x0D가 끼어들어 5바이트가 되고, 그 뒤의 모든 레코드 위치가 1바이트씩 밀립니다. 읽을 때는 반대로 0D 0A가 0A로 줄어들어 데이터가 망가집니다. 그래서 <b>텍스트가 아닌 데이터는 반드시 "rb", "wb", "r+b"로</b> 열어야 합니다. 리눅스에서는 증상이 없어서 개발 서버에서는 멀쩡하다가 윈도우 도구로 옮기면 깨지는 버그가 됩니다.</p>
+<p>반대로 CSV처럼 사람이 읽는 파일도 플랫폼 간에 주고받을 때는 주의해야 합니다. 윈도우에서 만든 CSV를 리눅스에서 읽으면 줄 끝에 <code>\r</code>이 남아 마지막 필드가 "50000\r"이 됩니다. 실무에서는 읽은 줄의 끝에서 <code>\r</code>과 <code>\n</code>을 모두 제거하는 코드를 습관처럼 넣습니다.</p></div>
+
+<div class="box fin"><p class="box-title" data-tag="금융 실무">은행 시스템에서는 — 대외기관 송수신 파일</p>
+<p>은행은 매일 수많은 파일을 주고받습니다. 대량 이체(급여 이체) 의뢰 파일, 자동이체 출금 결과 파일, 카드 매입 파일, 금융 공동망 정산 파일 등입니다. 이런 파일의 규격서에는 "레코드 길이 300바이트 고정, 줄바꿈 없음" 또는 "각 레코드 끝 CR+LF" 같은 조항이 반드시 있습니다. 줄바꿈 1바이트 차이로 레코드 경계가 어긋나면 전체 파일이 "포맷 오류"로 반송되고, 마감 시각을 넘기면 고객 이체가 지연됩니다. 그래서 금융권 개발자는 파일을 <b>바이너리 모드로 열고</b> 줄바꿈 바이트까지 명시적으로 다루는 경우가 많습니다. 또한 한글 필드의 문자 인코딩(EUC-KR/CP949인지 UTF-8인지)도 규격서로 확인해야 합니다.</p></div>
+
+<h3 id="s18-1-4">fclose로 파일 닫기</h3>
+<p><code>int fclose(FILE *fp);</code>는 스트림을 닫습니다. 성공하면 0, 실패하면 <code>EOF</code>를 반환합니다. fclose가 하는 일은 세 가지입니다.</p>
+<ol class="steps">
+  <li>쓰기 버퍼에 남아 있는 데이터를 운영체제로 내보냅니다(flush).</li>
+  <li>운영체제의 파일 디스크립터를 닫아 자원을 돌려줍니다.</li>
+  <li>FILE 구조체와 버퍼 메모리를 해제합니다. 이후 fp를 사용하는 것은 미정의 동작입니다.</li>
+</ol>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — fclose를 안 하면 무슨 일이 생길까?</p>
+<p>main에서 return하거나 <code>exit()</code>를 호출하면 표준 라이브러리가 열린 스트림을 모두 flush하고 닫아 줍니다. 하지만 (1) <code>abort()</code>나 시그널로 비정상 종료되면 버퍼의 데이터는 그대로 사라집니다. (2) 오래 실행되는 서버나 배치 프로그램이 파일을 열기만 하고 닫지 않으면 <b>파일 디스크립터 누수</b>가 생겨, 프로세스당 한도(리눅스 기본 1024개 등)를 넘는 순간 모든 fopen이 "Too many open files"로 실패합니다. 메모리 누수와 같은 종류의 자원 누수입니다. (3) 디스크가 가득 차서 버퍼를 내보내지 못하는 오류는 fclose 시점에야 드러나므로, 중요한 파일은 fclose의 반환값까지 검사합니다.</p></div>
+
+<figure class="code good"><figcaption>중요한 파일을 쓸 때의 완전한 오류 검사</figcaption>
+<pre><code class="language-c">if (fprintf(fp, "%s,%lld\n", acc, amt) &lt; 0) { /* 쓰기 오류 */ }
+if (fclose(fp) == EOF) {                       /* flush 실패 가능 */
+    perror("fclose");
+    return -1;                                 /* 파일이 불완전할 수 있음 */
+}</code></pre></figure>
+
+<h3 id="s18-1-5">오류 처리: perror와 errno</h3>
+<p>fopen이 NULL을 반환했다면 <b>왜</b> 실패했는지 알아야 합니다. 파일이 없는지, 권한이 없는지, 디렉터리가 없는지에 따라 대응이 다르기 때문입니다. 표준 라이브러리 함수는 실패할 때 전역(스레드별) 변수 <code>errno</code>(<code>&lt;errno.h&gt;</code>)에 오류 번호를 넣습니다.</p>
+<ul>
+  <li><code>perror("접두어")</code>: <code>접두어: 오류 설명</code> 형식으로 stderr에 출력합니다.</li>
+  <li><code>strerror(errno)</code>(<code>&lt;string.h&gt;</code>): 오류 번호를 설명 문자열로 바꿉니다. 로그에 직접 기록할 때 씁니다.</li>
+</ul>
+
+<figure class="code"><figcaption>ex18-2.c 실패 원인 출력하기</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;errno.h&gt;
+#include &lt;string.h&gt;
+
+int main(void)
+{
+    FILE *fp = fopen("no_such_ledger.dat", "rb");
+    if (fp == NULL) {
+        int e = errno;                       /* 다른 호출 전에 즉시 보관 */
+        perror("no_such_ledger.dat");
+        fprintf(stderr, "errno=%d (%s)\n", e, strerror(e));
+        if (e == ENOENT)
+            fprintf(stderr, "파일이 없습니다. 전일 배치 결과를 확인하세요.\n");
+        return 1;
+    }
+    fclose(fp);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과 (리눅스)</figcaption><pre>no_such_ledger.dat: No such file or directory
+errno=2 (No such file or directory)
+파일이 없습니다. 전일 배치 결과를 확인하세요.</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — errno를 왜 바로 복사해 두어야 할까?</p>
+<p>errno는 "마지막으로 실패한 함수의 오류 번호"입니다. 성공한 함수는 errno를 0으로 되돌려 놓을 의무가 없지만, 그 사이에 호출한 다른 라이브러리 함수(printf 포함)가 내부적으로 실패했다가 복구하면서 errno를 바꿀 수는 있습니다. 그래서 실패 직후 지역 변수에 복사해 두는 것이 안전합니다. 또한 errno는 <b>실패가 확인된 경우에만</b> 의미가 있습니다. 반환값으로 실패를 먼저 확인하지 않고 errno만 보고 판단하면 오래된 값에 속습니다. 오류 번호 값(ENOENT=2 등)과 메시지 문구는 운영체제마다 다를 수 있으므로 숫자 대신 매크로 이름으로 비교합니다.</p></div>
+
+<div class="tbl"><table>
+<thead><tr><th>errno 매크로</th><th>의미</th><th>흔한 원인</th></tr></thead>
+<tbody>
+<tr><td><code>ENOENT</code></td><td>파일 또는 디렉터리 없음</td><td>경로 오타, 전 단계 배치 미완료, 작업 디렉터리 착각</td></tr>
+<tr><td><code>EACCES</code></td><td>권한 거부</td><td>배치 계정에 읽기/쓰기 권한 없음</td></tr>
+<tr><td><code>EEXIST</code></td><td>이미 존재</td><td><code>"wx"</code> 모드로 열었는데 파일이 있음</td></tr>
+<tr><td><code>EMFILE</code></td><td>열린 파일 수 초과</td><td>fclose 누락(디스크립터 누수)</td></tr>
+<tr><td><code>ENOSPC</code></td><td>디스크 공간 부족</td><td>로그 파일 폭증</td></tr>
+</tbody></table></div>
+
+<h3 id="s18-1-6">문자 단위 입출력: fgetc와 fputc</h3>
+<p>가장 기본이 되는 입출력은 한 문자(1바이트)씩 읽고 쓰는 것입니다.</p>
+<figure class="code"><figcaption>원형</figcaption>
+<pre><code class="language-c">int fgetc(FILE *fp);          /* 한 바이트를 읽어 unsigned char 값을 int로 반환, 끝이나 오류면 EOF */
+int fputc(int c, FILE *fp);   /* c를 unsigned char로 바꿔 한 바이트 기록, 성공 시 c, 실패 시 EOF */
+/* getc/putc는 같은 기능의 매크로 버전, getchar() == getc(stdin) */</code></pre></figure>
+
+<figure class="code"><figcaption>ex18-3.c 파일 복사와 줄 수 세기</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+int main(void)
+{
+    FILE *in, *out;
+    int ch;                          /* 반드시 int! char가 아님 */
+    long bytes = 0, lines = 0;
+
+    in = fopen("hello.txt", "rb");
+    if (in == NULL) { perror("hello.txt"); return 1; }
+    out = fopen("hello_copy.txt", "wb");
+    if (out == NULL) { perror("hello_copy.txt"); fclose(in); return 1; }
+
+    while ((ch = fgetc(in)) != EOF) { /* 읽고, 비교하고, 반복 */
+        if (fputc(ch, out) == EOF) { perror("write"); break; }
+        bytes++;
+        if (ch == '\n') lines++;
+    }
+    if (ferror(in)) perror("read");  /* EOF가 끝 때문인지 오류 때문인지 */
+
+    fclose(in);
+    fclose(out);
+    printf("%ld바이트, %ld줄 복사\n", bytes, lines);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과 (ex18-1이 만든 UTF-8 hello.txt 기준)</figcaption><pre>47바이트, 2줄 복사</pre></figure>
+
+<p>바이트 수를 확인해 봅시다. 소스 파일이 UTF-8로 저장되어 있다면 "거래일자: 20261028\n"은 한글 4글자 × 3바이트 = 12, 콜론과 공백 2, 숫자 8, 줄바꿈 1로 23바이트입니다. "파일 입출력 시작\n"은 한글 7글자 × 3바이트 = 21, 공백 2, 줄바꿈 1로 24바이트입니다. 합계 47바이트입니다. 파일을 <code>"rb"</code>/<code>"wb"</code>로 열었으므로 어느 플랫폼에서든 바이트를 변환 없이 그대로 복사합니다. 복사 프로그램이 텍스트 모드를 쓰면 윈도우에서 \r 처리 때문에 원본과 사본이 미묘하게 달라질 수 있으므로, <b>파일 복사는 항상 바이너리 모드</b>로 합니다.</p>
+
+<div class="ex"><p class="ex-title">예제 18-1 <span class="lv">난이도 ★★☆</span></p>
+<p>같은 hello.txt를 윈도우에서, 소스 코드를 CP949(한글 1글자 2바이트)로 저장해 컴파일하고 ex18-1을 실행했습니다(<code>"w"</code> 텍스트 모드). 만들어진 파일의 크기는 몇 바이트입니까? 이 파일을 ex18-3으로 복사하면 출력은 무엇입니까?</p>
+<details><summary>정답과 해설 보기</summary>
+<p>1줄 = 한글 4자 × 2 = 8 + ": " 2 + 숫자 8 + 줄바꿈 \r\n 2 = 20바이트. 2줄 = 한글 7자 × 2 = 14 + 공백 2 + \r\n 2 = 18바이트. 파일 크기는 <b>38바이트</b>입니다.</p>
+<p>ex18-3은 "rb"로 읽으므로 \r(0x0D)도 그대로 한 바이트로 셉니다. 줄 수는 '\n' 개수이므로 2입니다. 출력은 <code>38바이트, 2줄 복사</code>입니다. 같은 내용도 인코딩과 줄바꿈 방식에 따라 크기가 달라지므로, 고정 길이 파일 규격에서는 "글자 수"가 아니라 "바이트 수"로 이야기해야 합니다.</p>
+</details></div>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 — fgetc의 반환값을 char에 저장</p>
+<figure class="code bad"><figcaption>잘못된 예 — 왜 틀렸을까?</figcaption>
+<pre><code class="language-c">char ch;
+while ((ch = fgetc(fp)) != EOF) { ... }</code></pre></figure>
+<p>fgetc는 0~255의 바이트 값 <b>또는</b> EOF(보통 -1)를 돌려주기 위해 int를 반환합니다. 256가지 바이트 값과 EOF, 총 257가지를 구별해야 하므로 char(256가지)에는 다 담을 수 없습니다.</p>
+<ul>
+  <li>char가 <b>signed</b>인 플랫폼(x86 gcc 기본): 0xFF 바이트를 읽으면 ch = -1이 되어 EOF와 같아집니다. 바이너리 파일이나 일부 한글 인코딩에서 0xFF가 나오는 순간 <b>파일 중간에서 읽기가 멈춥니다</b>.</li>
+  <li>char가 <b>unsigned</b>인 플랫폼(ARM 리눅스 gcc 기본 등): EOF(-1)를 저장하면 255가 되어 EOF와 절대 같아지지 않으므로 <b>무한 루프</b>가 됩니다.</li>
+</ul></div>
+<div class="box fix"><p class="box-title" data-tag="해결">이렇게 해결합니다</p>
+<p>반환값은 항상 <code>int ch</code>에 받고 EOF와 비교한 뒤, EOF가 아니면 그때 char로 사용합니다. getchar, getc, fgetc 모두 같습니다.</p></div>
+
+<div class="ex"><p class="ex-title">예제 18-2 <span class="lv">난이도 ★★☆</span></p>
+<p>텍스트 파일을 읽어 숫자 문자('0'~'9')의 개수와 쉼표(',')의 개수를 세는 프로그램을 fgetc로 작성하십시오. 파일 이름은 명령행 인수 <code>argv[1]</code>로 받고, 인수가 없으면 사용법을 stderr에 출력합니다.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>argc를 먼저 검사하고, fopen 실패 시 perror로 원인을 출력합니다. <code>isdigit</code>는 <code>&lt;ctype.h&gt;</code>에 있으며 인자로 unsigned char 범위의 값이나 EOF를 받아야 하는데, fgetc의 반환값은 정확히 그 범위이므로 그대로 넘겨도 안전합니다.</p>
+<figure class="code good"><figcaption>정답 코드</figcaption><pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;ctype.h&gt;
+
+int main(int argc, char *argv[])
+{
+    if (argc &lt; 2) {
+        fprintf(stderr, "사용법: %s 파일이름\n", argv[0]);
+        return 2;
+    }
+    FILE *fp = fopen(argv[1], "r");
+    if (fp == NULL) { perror(argv[1]); return 1; }
+
+    int ch;
+    long digits = 0, commas = 0;
+    while ((ch = fgetc(fp)) != EOF) {
+        if (isdigit(ch)) digits++;
+        else if (ch == ',') commas++;
+    }
+    fclose(fp);
+    printf("숫자 %ld개, 쉼표 %ld개\n", digits, commas);
+    return 0;
+}</code></pre></figure>
+</details></div>
+
+<h2 id="s18-2"><span class="num">18-2</span>다양한 파일 입출력 함수</h2>
+
+<h3 id="s18-2-1">줄 단위 입출력: fgets와 fputs</h3>
+<p>텍스트 파일은 대부분 줄 단위로 의미가 있습니다. 로그 한 줄, CSV 레코드 한 줄처럼요. 줄 단위 입출력 함수는 다음과 같습니다.</p>
+<figure class="code"><figcaption>원형</figcaption>
+<pre><code class="language-c">char *fgets(char *buf, int size, FILE *fp);
+/* 최대 size-1바이트를 읽고 끝에 '\0'을 붙임. 줄바꿈('\n')을 만나면 그것까지 넣고 멈춤.
+   성공: buf, 아무것도 못 읽고 파일 끝이거나 오류: NULL */
+int fputs(const char *s, FILE *fp);
+/* 문자열 s를 그대로 기록('\n'을 자동으로 붙이지 않음!). 실패: EOF */</code></pre></figure>
+
+<figure class="code"><figcaption>ex18-4.c 줄 번호 붙여 출력하기</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+
+int main(void)
+{
+    char line[256];
+    int no = 0;
+    FILE *fp = fopen("hello.txt", "r");
+    if (fp == NULL) { perror("hello.txt"); return 1; }
+
+    while (fgets(line, sizeof line, fp) != NULL) {   /* 반환값으로 반복 제어 */
+        line[strcspn(line, "\r\n")] = '\0';          /* 줄 끝 \r, \n 제거 */
+        printf("%3d| %s (%zu바이트)\n", ++no, line, strlen(line));
+    }
+    fclose(fp);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과 (UTF-8 hello.txt)</figcaption><pre>  1| 거래일자: 20261028 (22바이트)
+  2| 파일 입출력 시작 (23바이트)</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — fgets는 왜 줄바꿈까지 넣어 줄까?</p>
+<p>fgets가 '\n'을 버퍼에 남기는 것은 "줄 전체를 다 읽었는지"를 알려 주는 신호입니다. 버퍼 끝이 '\n'이면 한 줄을 완전히 읽은 것이고, '\n' 없이 버퍼가 가득 찼다면 줄이 버퍼보다 길어서 <b>잘린</b> 것입니다(나머지는 다음 fgets 호출에서 이어서 읽힘). 파일의 마지막 줄에 줄바꿈이 없는 경우에도 '\n'이 없을 수 있습니다. 이 정보를 이용해 너무 긴 줄을 오류로 처리할 수 있습니다.</p>
+<p><code>strcspn(line, "\r\n")</code>은 line에서 \r이나 \n이 처음 나오는 위치(없으면 문자열 길이)를 돌려주므로, 그 자리에 '\0'을 넣으면 줄 끝 문자가 깔끔하게 제거됩니다. 윈도우에서 만든 파일을 리눅스에서 읽는 경우까지 한 줄로 처리하는 관용구입니다.</p></div>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 — gets 사용, 그리고 fputs와 puts 혼동</p>
+<ul>
+  <li><code>gets</code>는 버퍼 크기를 받지 않아 입력이 길면 무조건 버퍼 오버플로가 납니다. C11에서 표준에서 <b>삭제</b>되었습니다. 절대 쓰지 말고 <code>fgets(buf, sizeof buf, stdin)</code>을 씁니다.</li>
+  <li><code>puts(s)</code>는 끝에 '\n'을 붙이지만 <code>fputs(s, fp)</code>는 붙이지 않습니다. fgets로 읽은 줄(\n 포함)을 fputs로 쓰면 줄바꿈이 그대로 유지되어 딱 맞습니다.</li>
+</ul></div>
+
+<h3 id="s18-2-2">서식 입출력: fprintf와 fscanf</h3>
+<p><code>fprintf</code>와 <code>fscanf</code>는 printf, scanf와 사용법이 같고 첫 인자로 스트림을 받는다는 점만 다릅니다. 숫자를 사람이 읽을 수 있는 텍스트로 저장할 때 가장 편리합니다.</p>
+
+<figure class="code"><figcaption>ex18-5.c 잔액 파일을 쓰고 fscanf로 읽기</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+int main(void)
+{
+    FILE *fp = fopen("balance.txt", "w");
+    if (fp == NULL) { perror("balance.txt"); return 1; }
+    fprintf(fp, "%s %lld\n", "110-001", 1000000LL);
+    fprintf(fp, "%s %lld\n", "110-002", 250000LL);
+    fprintf(fp, "%s %lld\n", "110-003", 70000LL);
+    fclose(fp);
+
+    fp = fopen("balance.txt", "r");
+    if (fp == NULL) { perror("balance.txt"); return 1; }
+
+    char acc[16];
+    long long bal, total = 0;
+    int n = 0, rc;
+    while ((rc = fscanf(fp, "%15s %lld", acc, &amp;bal)) == 2) {   /* 두 항목 모두 성공 */
+        printf("%-8s %10lld\n", acc, bal);
+        total += bal;
+        n++;
+    }
+    if (rc != EOF) fprintf(stderr, "%d번째 레코드 형식 오류\n", n + 1);
+    fclose(fp);
+    printf("%d건, 합계 %lld원\n", n, total);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>110-001     1000000
+110-002      250000
+110-003       70000
+3건, 합계 1320000원</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — fscanf의 반환값을 왜 2와 비교할까?</p>
+<p>fscanf는 <b>성공적으로 변환해 저장한 항목의 개수</b>를 반환하고, 첫 변환 전에 입력이 끝나면 EOF를 반환합니다. <code>while (fscanf(...) != EOF)</code>라고 쓰면 형식이 틀린 줄(예: 금액 자리에 "ABC")을 만났을 때 0이 반환되는데, 0은 EOF가 아니므로 반복이 계속되고, fscanf는 같은 "ABC"에서 계속 실패하므로 <b>무한 루프</b>가 됩니다. 기대하는 개수(여기서는 2)와 정확히 같은지 비교해야 정상 데이터만 처리하고 이상 데이터에서 멈출 수 있습니다.</p>
+<p>또한 <code>%s</code>에는 반드시 폭(<code>%15s</code>)을 지정합니다. 폭이 없으면 공백이 나올 때까지 무한정 써서 버퍼 오버플로가 납니다. 폭은 버퍼 크기 - 1(널 문자 자리)입니다.</p></div>
+
+<div class="box tip"><p class="box-title" data-tag="잠깐">여기서 잠깐 — 실무에서는 fgets + sscanf</p>
+<p>fscanf는 줄 경계를 모릅니다. 공백과 줄바꿈을 똑같이 건너뛰므로, 한 줄에 필드가 하나 빠지면 다음 줄의 필드를 끌어와 어긋난 채로 계속 읽습니다. 그래서 실무에서는 <b>fgets로 한 줄을 읽고, sscanf나 직접 파싱으로 그 줄만 해석</b>하는 방식을 선호합니다. 오류가 나도 그 줄만 건너뛰고 줄 번호를 정확히 보고할 수 있습니다. 다음 절의 CSV 예제가 이 방식입니다.</p></div>
+
+<h3 id="s18-2-3">거래 내역 CSV 저장과 읽기</h3>
+<p>CSV(Comma-Separated Values)는 쉼표로 필드를 구분한 텍스트 형식으로, 엑셀과 데이터베이스 도구가 모두 읽을 수 있어 거래 내역 내려받기, 대사 자료, 운영 보고서에 널리 쓰입니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 220" width="700" role="img" aria-label="CSV 한 줄 파싱">
+  <text x="20" y="28" class="bold">파일의 한 줄 (fgets로 읽음)</text>
+  <rect class="box" x="20" y="40" width="660" height="40" rx="6"/>
+  <text x="35" y="66" class="mono">20261028,110-001,D,500000\n</text>
+  <path class="arrow" d="M350 80 V 115"/>
+  <text x="360" y="102" class="small mute">sscanf("%8[^,],%15[^,],%c,%lld")</text>
+  <rect class="hl" x="20" y="120" width="150" height="60" rx="6"/>
+  <text x="95" y="145" text-anchor="middle" class="small mono">date[9]</text>
+  <text x="95" y="167" text-anchor="middle" class="small mono">"20261028"</text>
+  <rect class="hl" x="190" y="120" width="150" height="60" rx="6"/>
+  <text x="265" y="145" text-anchor="middle" class="small mono">acc[16]</text>
+  <text x="265" y="167" text-anchor="middle" class="small mono">"110-001"</text>
+  <rect class="hl2" x="360" y="120" width="120" height="60" rx="6"/>
+  <text x="420" y="145" text-anchor="middle" class="small mono">type</text>
+  <text x="420" y="167" text-anchor="middle" class="small mono">'D'</text>
+  <rect class="hl2" x="500" y="120" width="180" height="60" rx="6"/>
+  <text x="590" y="145" text-anchor="middle" class="small mono">amount</text>
+  <text x="590" y="167" text-anchor="middle" class="small mono">500000LL</text>
+  <text x="350" y="208" text-anchor="middle" class="small acc">반환값 4 = 네 필드 모두 성공</text>
+</svg>
+<figcaption>그림 18-3 fgets로 한 줄을 읽고 sscanf로 필드를 나누는 CSV 파싱</figcaption>
+</figure>
+
+<figure class="code"><figcaption>ex18-6.c 거래 내역 CSV 쓰기와 읽기</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+
+struct Tx {
+    char      date[9];      /* YYYYMMDD + '\0' */
+    char      acc[16];
+    char      type;         /* 'D' 입금, 'W' 출금 */
+    long long amount;
+};
+
+int save_csv(const char *path, const struct Tx *tx, int n)
+{
+    FILE *fp = fopen(path, "w");
+    if (fp == NULL) { perror(path); return -1; }
+    fputs("date,acc_no,type,amount\n", fp);                 /* 헤더 줄 */
+    for (int i = 0; i &lt; n; i++)
+        fprintf(fp, "%s,%s,%c,%lld\n",
+                tx[i].date, tx[i].acc, tx[i].type, tx[i].amount);
+    fputs("20261028,110-004,X\n", fp);                       /* 일부러 넣은 불량 줄 */
+    if (fclose(fp) == EOF) { perror(path); return -1; }
+    return 0;
+}
+
+int load_csv(const char *path)
+{
+    char line[256];
+    int lineno = 0, ok = 0, bad = 0;
+    long long dep = 0, wd = 0;
+    FILE *fp = fopen(path, "r");
+    if (fp == NULL) { perror(path); return -1; }
+
+    while (fgets(line, sizeof line, fp) != NULL) {
+        lineno++;
+        line[strcspn(line, "\r\n")] = '\0';
+        if (lineno == 1) continue;                           /* 헤더 건너뛰기 */
+
+        struct Tx t;
+        if (sscanf(line, "%8[^,],%15[^,],%c,%lld",
+                   t.date, t.acc, &amp;t.type, &amp;t.amount) != 4
+            || (t.type != 'D' &amp;&amp; t.type != 'W') || t.amount &lt;= 0) {
+            fprintf(stderr, "%d행 형식 오류: %s\n", lineno, line);
+            bad++;
+            continue;                                        /* 이 줄만 건너뜀 */
+        }
+        if (t.type == 'D') dep += t.amount; else wd += t.amount;
+        ok++;
+    }
+    fclose(fp);
+    printf("정상 %d건, 오류 %d건\n", ok, bad);
+    printf("입금 합계 %lld, 출금 합계 %lld, 순증 %lld\n", dep, wd, dep - wd);
+    return 0;
+}
+
+int main(void)
+{
+    struct Tx tx[] = {
+        { "20261028", "110-001", 'D',  500000 },
+        { "20261028", "110-002", 'W',  120000 },
+        { "20261028", "110-001", 'W',   30000 },
+        { "20261028", "110-003", 'D', 1000000 },
+    };
+    if (save_csv("tx.csv", tx, 4) != 0) return 1;
+    return load_csv("tx.csv") == 0 ? 0 : 1;
+}</code></pre></figure>
+<figure class="code out"><figcaption>tx.csv 내용</figcaption><pre>date,acc_no,type,amount
+20261028,110-001,D,500000
+20261028,110-002,W,120000
+20261028,110-001,W,30000
+20261028,110-003,D,1000000
+20261028,110-004,X</pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>6행 형식 오류: 20261028,110-004,X
+정상 4건, 오류 1건
+입금 합계 1500000, 출금 합계 150000, 순증 1350000</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — <code>%8[^,]</code>는 무슨 뜻일까?</p>
+<p><code>%[...]</code>는 "대괄호 안의 문자 집합에 속하는 문자만 읽는" 변환이고, <code>^</code>는 부정입니다. 즉 <code>%[^,]</code>는 "쉼표가 아닌 문자를 쉼표 직전까지" 읽습니다. 앞의 8은 최대 폭이므로 date[9] 버퍼를 넘치지 않습니다. 일반 <code>%s</code>는 공백에서만 멈추므로 쉼표로 구분된 필드를 나눌 수 없습니다. 불량 줄 "20261028,110-004,X"는 type까지 3개만 변환되고 금액이 없어 sscanf가 3을 반환하므로 오류로 걸러집니다.</p>
+<p>다만 sscanf 방식은 <b>빈 필드</b>(<code>a,,c</code>)를 처리하지 못하고(<code>%[^,]</code>는 최소 1글자가 필요), 따옴표로 감싼 필드(<code>"김,철수"</code>)도 해석하지 못합니다. 이런 데이터가 있을 수 있다면 <code>strchr</code>로 쉼표 위치를 직접 찾아 자르는 파서를 작성해야 합니다.</p></div>
+
+<div class="box fin"><p class="box-title" data-tag="금융 실무">은행 시스템에서는 — 배치 파일 처리의 원칙</p>
+<p>야간 배치는 수십만~수백만 줄의 파일을 처리합니다. 실무에서 지키는 원칙은 다음과 같습니다.</p>
+<ul>
+  <li><b>한 줄 오류로 전체를 멈추지 않되, 반드시 기록한다</b>: 오류 줄은 행 번호와 함께 오류 파일(reject file)로 분리하고, 처리 건수·오류 건수·금액 합계를 결과 보고에 남깁니다.</li>
+  <li><b>건수와 합계 검증(control total)</b>: 송신 측이 파일 끝에 붙인 트레일러 레코드(총 건수, 총 금액)와 실제로 읽은 값을 비교해 파일이 잘리거나 중복되지 않았는지 확인합니다.</li>
+  <li><b>재실행 가능성</b>: 배치가 중간에 실패해도 다시 돌렸을 때 이중 처리되지 않도록 처리 완료 지점(체크포인트)이나 처리 여부 플래그를 관리합니다.</li>
+  <li><b>임시 파일 후 이름 변경</b>: 결과 파일은 <code>result.tmp</code>로 쓰고 fclose 성공을 확인한 뒤 <code>rename</code>으로 최종 이름을 붙입니다. 다음 단계 배치가 쓰다 만 파일을 읽는 사고를 막습니다.</li>
+</ul></div>
+
+<h3 id="s18-2-4">feof의 함정</h3>
+<p>파일 끝을 검사하는 <code>feof(fp)</code> 함수가 있다 보니 많은 입문서에서 다음과 같은 코드를 볼 수 있습니다. 하지만 이것은 고전적인 버그입니다.</p>
+
+<figure class="code bad"><figcaption>잘못된 예 — 왜 틀렸을까? (파일 내용: "A\nB\n")</figcaption>
+<pre><code class="language-c">char line[64];
+while (!feof(fp)) {                 /* 아직 끝이 아니면? */
+    fgets(line, sizeof line, fp);
+    printf("읽음: %s", line);
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>읽음: A
+읽음: B
+읽음: B</pre></figure>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 230" width="700" role="img" aria-label="feof 플래그가 설정되는 시점">
+  <text x="20" y="25" class="bold">파일: A \n B \n (4바이트)</text>
+  <rect class="box" x="20" y="40" width="60" height="34"/><text x="50" y="62" text-anchor="middle" class="mono small">A</text>
+  <rect class="box" x="80" y="40" width="60" height="34"/><text x="110" y="62" text-anchor="middle" class="mono small">\n</text>
+  <rect class="box" x="140" y="40" width="60" height="34"/><text x="170" y="62" text-anchor="middle" class="mono small">B</text>
+  <rect class="box" x="200" y="40" width="60" height="34"/><text x="230" y="62" text-anchor="middle" class="mono small">\n</text>
+  <rect class="dash" x="260" y="40" width="60" height="34"/><text x="290" y="62" text-anchor="middle" class="small mute">끝</text>
+  <text x="20" y="110" class="small">1회: feof=0 → fgets "A\n" 성공</text>
+  <text x="20" y="135" class="small">2회: feof=0 → fgets "B\n" 성공 (끝에 도달했지만 아직 넘어서 읽지 않음)</text>
+  <text x="20" y="160" class="small warn-t">3회: feof=0 → fgets 실패(NULL), 이제서야 EOF 표시자 설정, line은 "B\n" 그대로</text>
+  <text x="20" y="185" class="small warn-t">   → printf가 이전 내용 "B"를 한 번 더 출력</text>
+  <text x="20" y="210" class="small acc">4회: feof=1 → 반복 종료</text>
+</svg>
+<figcaption>그림 18-4 EOF 표시자는 "끝을 넘어 읽으려고 시도한 뒤"에야 켜진다</figcaption>
+</figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — feof는 미래를 예측하지 못한다</p>
+<p><code>feof</code>는 "다음 읽기가 실패할 것인가"를 알려 주는 함수가 아닙니다. "<b>이전 읽기가 파일 끝 때문에 실패했는가</b>"를 알려 주는 함수입니다. FILE 구조체의 EOF 표시자는 읽기 함수가 파일 끝을 넘어서 읽으려다 실패하는 순간 켜집니다. 마지막 줄 "B\n"을 읽은 직후에는 파일 위치가 끝에 있지만, 아직 넘어서 읽으려고 한 적이 없으므로 표시자는 꺼져 있습니다. 그래서 반복이 한 번 더 돌고, 그 fgets는 실패하며 line을 바꾸지 않아 이전 내용이 다시 출력됩니다. 키보드나 네트워크처럼 "끝인지 미리 알 수 없는" 스트림까지 같은 방식으로 다뤄야 하므로 이렇게 설계된 것입니다.</p></div>
+
+<div class="box fix"><p class="box-title" data-tag="해결">이렇게 해결합니다</p>
+<p>반복 조건은 항상 <b>읽기 함수의 반환값</b>으로 정합니다. feof와 ferror는 반복이 끝난 <b>뒤에</b> "왜 끝났는지"를 구분하는 데만 씁니다.</p>
+<figure class="code good"><figcaption>고친 코드</figcaption>
+<pre><code class="language-c">while (fgets(line, sizeof line, fp) != NULL) {
+    printf("읽음: %s", line);
+}
+if (ferror(fp))      perror("읽기 오류");     /* 디스크 오류 등 */
+else if (feof(fp))   { /* 정상 종료: 파일 끝 */ }</code></pre></figure>
+<p>함수별 "실패" 반환값: <code>fgetc</code> → EOF, <code>fgets</code> → NULL, <code>fscanf</code> → 기대 개수 미만, <code>fread</code> → 요청한 개수 미만.</p></div>
+
+<h3 id="s18-2-5">블록 단위 입출력: fread와 fwrite로 고정 길이 레코드</h3>
+<p>텍스트 형식은 사람이 읽기 좋지만, 숫자를 문자로 바꾸고 다시 파싱하는 비용이 들고, 레코드 길이가 제각각이라 "100번째 레코드"로 바로 갈 수 없습니다. <code>fread</code>와 <code>fwrite</code>는 메모리의 바이트를 <b>그대로</b> 파일에 옮깁니다. 구조체 하나를 레코드 하나로 저장하면 모든 레코드의 길이가 같아지는 <b>고정 길이 레코드 파일</b>이 됩니다.</p>
+<figure class="code"><figcaption>원형</figcaption>
+<pre><code class="language-c">size_t fwrite(const void *ptr, size_t size, size_t count, FILE *fp);
+size_t fread(void *ptr, size_t size, size_t count, FILE *fp);
+/* size바이트짜리 항목 count개를 쓰거나 읽고, 실제로 처리한 "항목 수"를 반환 */</code></pre></figure>
+
+<figure class="code"><figcaption>ex18-7.c 고객 원장 레코드 파일 만들기와 읽기</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+typedef struct {
+    char      acc_no[16];
+    char      owner[16];
+    long long balance;
+    int       status;      /* 0 정상, 1 정지 */
+    int       tx_count;
+} Rec;                     /* 16+16+8+4+4 = 48바이트, 패딩 없음 */
+
+int main(void)
+{
+    Rec recs[3] = {
+        { "110-001", "Kim",  1000000, 0, 0 },
+        { "110-002", "Lee",   250000, 0, 0 },
+        { "110-003", "Park",   70000, 1, 0 },
+    };
+
+    FILE *fp = fopen("ledger.dat", "wb");            /* 바이너리 쓰기 */
+    if (fp == NULL) { perror("ledger.dat"); return 1; }
+    size_t w = fwrite(recs, sizeof(Rec), 3, fp);     /* 배열을 한 번에 */
+    if (w != 3) perror("fwrite");
+    fclose(fp);
+    printf("sizeof(Rec)=%zu, %zu건 기록\n", sizeof(Rec), w);
+
+    fp = fopen("ledger.dat", "rb");
+    if (fp == NULL) { perror("ledger.dat"); return 1; }
+    Rec r;
+    while (fread(&amp;r, sizeof r, 1, fp) == 1)          /* 한 건씩 읽기 */
+        printf("%-8s %-5s %9lld %d\n", r.acc_no, r.owner, r.balance, r.status);
+    fclose(fp);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>sizeof(Rec)=48, 3건 기록
+110-001  Kim     1000000 0
+110-002  Lee      250000 0
+110-003  Park      70000 1</pre></figure>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 190" width="700" role="img" aria-label="고정 길이 레코드 파일 구조">
+  <text x="20" y="25" class="bold">ledger.dat (144바이트 = 48 × 3)</text>
+  <rect class="hl" x="20" y="45" width="210" height="50"/>
+  <text x="125" y="67" text-anchor="middle" class="small mono">레코드 0</text>
+  <text x="125" y="85" text-anchor="middle" class="small mono">110-001 Kim</text>
+  <rect class="hl2" x="230" y="45" width="210" height="50"/>
+  <text x="335" y="67" text-anchor="middle" class="small mono">레코드 1</text>
+  <text x="335" y="85" text-anchor="middle" class="small mono">110-002 Lee</text>
+  <rect class="hl" x="440" y="45" width="210" height="50"/>
+  <text x="545" y="67" text-anchor="middle" class="small mono">레코드 2</text>
+  <text x="545" y="85" text-anchor="middle" class="small mono">110-003 Park</text>
+  <text x="20" y="115" class="small mute mono">0</text>
+  <text x="222" y="115" class="small mute mono">48</text>
+  <text x="432" y="115" class="small mute mono">96</text>
+  <text x="640" y="115" class="small mute mono">144</text>
+  <text x="20" y="150" class="small acc">i번째 레코드의 위치 = i × sizeof(Rec)  →  계산만으로 바로 이동 가능</text>
+  <text x="20" y="175" class="small mute">텍스트 CSV는 줄 길이가 제각각이라 처음부터 세어야 함</text>
+</svg>
+<figcaption>그림 18-5 고정 길이 레코드 파일: 위치를 곱셈으로 계산할 수 있다</figcaption>
+</figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — fread는 왜 "항목 수"를 반환할까?</p>
+<p>fread는 요청한 바이트를 다 못 읽을 수 있습니다(파일 끝, 오류). 반환값은 <b>완전히 읽은 항목의 개수</b>입니다. 48바이트 레코드를 읽으려는데 파일에 30바이트만 남아 있으면 반환값은 0이고 그 30바이트는 버퍼에 들어갔을 수 있지만 불완전합니다. 그래서 <code>fread(&amp;r, sizeof r, 1, fp) == 1</code>로 검사하면 "레코드 하나를 온전히 읽었는가"를 정확히 판단할 수 있습니다. 반대로 <code>fread(&amp;r, 1, sizeof r, fp)</code>로 부르면 바이트 수가 반환되므로 <code>== sizeof r</code>과 비교해야 합니다.</p></div>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 — 구조체 바이너리 파일의 이식성</p>
+<p>17장에서 본 것처럼 구조체를 그대로 저장한 파일은 패딩, 엔디안, 자료형 크기(<code>long</code>이 리눅스 8바이트, 윈도우 4바이트)에 따라 다른 시스템에서 읽을 수 없게 될 수 있습니다. 같은 프로그램이 같은 플랫폼에서 쓰고 읽는 내부용 파일에만 사용하고, 시스템 간 교환 파일은 텍스트나 명시적으로 정의한 바이트 형식을 사용합니다. 또한 <code>char *</code> 같은 포인터 멤버는 주소값만 저장되어 의미가 없습니다. 레코드 구조체에는 고정 크기 배열을 씁니다.</p></div>
+
+<h3 id="s18-2-6">랜덤 접근: fseek, ftell, rewind</h3>
+<p>FILE 구조체는 "다음에 읽거나 쓸 위치"인 <b>파일 위치 표시자(file position indicator)</b>를 가지고 있습니다. 읽거나 쓰면 처리한 바이트만큼 자동으로 앞으로 이동합니다. 이 위치를 직접 옮기면 원하는 곳으로 바로 갈 수 있습니다.</p>
+<figure class="code"><figcaption>원형</figcaption>
+<pre><code class="language-c">int  fseek(FILE *fp, long offset, int whence);  /* 성공 0, 실패 0이 아닌 값 */
+long ftell(FILE *fp);                           /* 현재 위치(바이트), 실패 -1L */
+void rewind(FILE *fp);                          /* 처음으로 + 오류/EOF 표시자 지움 */
+/* whence: SEEK_SET(파일 처음 기준), SEEK_CUR(현재 위치 기준), SEEK_END(파일 끝 기준) */</code></pre></figure>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 210" width="700" role="img" aria-label="fseek 기준점">
+  <rect class="box" x="40" y="80" width="600" height="40"/>
+  <text x="340" y="105" text-anchor="middle" class="small mute">파일 (144바이트)</text>
+  <path class="arrow" d="M40 60 V 80"/>
+  <text x="40" y="50" text-anchor="middle" class="small mono">SEEK_SET</text>
+  <path class="arrow" d="M240 60 V 80"/>
+  <text x="240" y="50" text-anchor="middle" class="small mono">SEEK_CUR (현재 48)</text>
+  <path class="arrow" d="M640 60 V 80"/>
+  <text x="640" y="50" text-anchor="middle" class="small mono">SEEK_END</text>
+  <text x="40" y="150" class="small mono">fseek(fp, 96, SEEK_SET)  → 위치 96 (레코드 2)</text>
+  <text x="40" y="172" class="small mono">fseek(fp, -48, SEEK_CUR) → 현재에서 한 레코드 뒤로</text>
+  <text x="40" y="194" class="small mono">fseek(fp, 0, SEEK_END); ftell(fp) → 144 (파일 크기)</text>
+</svg>
+<figcaption>그림 18-6 fseek의 세 기준점과 오프셋</figcaption>
+</figure>
+
+<figure class="code"><figcaption>ex18-8.c 레코드 수 구하기와 n번째 레코드 바로 읽기</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+typedef struct {
+    char acc_no[16]; char owner[16];
+    long long balance; int status; int tx_count;
+} Rec;
+
+int main(void)
+{
+    FILE *fp = fopen("ledger.dat", "rb");
+    if (fp == NULL) { perror("ledger.dat"); return 1; }
+
+    fseek(fp, 0L, SEEK_END);                      /* 끝으로 이동 */
+    long size = ftell(fp);                        /* 끝의 위치 = 파일 크기 */
+    long count = size / (long)sizeof(Rec);
+    printf("파일 크기 %ld바이트, 레코드 %ld건\n", size, count);
+
+    Rec r;
+    long idx = 2;                                 /* 세 번째 레코드 */
+    if (fseek(fp, idx * (long)sizeof(Rec), SEEK_SET) != 0) { perror("fseek"); return 1; }
+    if (fread(&amp;r, sizeof r, 1, fp) == 1)
+        printf("[%ld] %s %s %lld\n", idx, r.acc_no, r.owner, r.balance);
+    printf("읽은 뒤 위치: %ld\n", ftell(fp));
+
+    rewind(fp);                                   /* 처음으로 */
+    if (fread(&amp;r, sizeof r, 1, fp) == 1)
+        printf("[0] %s %s %lld\n", r.acc_no, r.owner, r.balance);
+    fclose(fp);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>파일 크기 144바이트, 레코드 3건
+[2] 110-003 Park 70000
+읽은 뒤 위치: 144
+[0] 110-001 Kim 1000000</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — 텍스트 모드에서 fseek 오프셋을 계산하면 안 되는 이유</p>
+<p>C 표준은 텍스트 스트림에 대해 fseek의 오프셋으로 <b>0 또는 이전에 ftell이 돌려준 값</b>만 SEEK_SET과 함께 쓰도록 허용합니다. 윈도우 텍스트 모드처럼 \r\n 변환이 일어나면 "프로그램이 본 바이트 수"와 "파일의 실제 바이트 위치"가 다르기 때문입니다. 계산으로 위치를 정하는 랜덤 접근은 반드시 바이너리 모드에서 합니다. 또 <code>SEEK_END</code> 기준 이동은 바이너리 스트림에서 표준상 의미 있게 지원될 필요가 없다고 되어 있지만, POSIX와 윈도우의 일반 파일에서는 잘 동작해 파일 크기 구하기 관용구로 널리 쓰입니다. 2GB를 넘는 파일은 long이 4바이트인 환경에서 넘치므로 POSIX의 <code>fseeko</code>/<code>ftello</code>(off_t)나 윈도우의 <code>_fseeki64</code>를 씁니다.</p></div>
+
+<h3 id="s18-2-7">고객 원장 파일 레코드 수정하기</h3>
+<p>이제 고정 길이 레코드와 랜덤 접근을 합쳐 원장 파일의 특정 계좌 잔액을 <b>제자리에서(in-place)</b> 고쳐 보겠습니다. 파일 전체를 다시 쓰지 않고 해당 48바이트만 덮어씁니다.</p>
+
+<figure class="code"><figcaption>ex18-9.c 계좌를 찾아 입금 반영하기 ("r+b" 모드)</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+
+typedef struct {
+    char acc_no[16]; char owner[16];
+    long long balance; int status; int tx_count;
+} Rec;
+
+/* 반환: 0 성공, -1 파일 오류, -2 계좌 없음, -3 정지 계좌 */
+int ledger_deposit(const char *path, const char *acc, long long amt)
+{
+    FILE *fp = fopen(path, "r+b");                 /* 읽기+쓰기, 내용 유지 */
+    if (fp == NULL) { perror(path); return -1; }
+
+    Rec r;
+    int rc = -2;
+    while (fread(&amp;r, sizeof r, 1, fp) == 1) {
+        if (strcmp(r.acc_no, acc) != 0) continue;
+        if (r.status != 0) { rc = -3; break; }
+
+        r.balance += amt;
+        r.tx_count++;
+        /* 방금 읽은 레코드의 시작으로 되돌아가기 */
+        if (fseek(fp, -(long)sizeof r, SEEK_CUR) != 0) { perror("fseek"); rc = -1; break; }
+        if (fwrite(&amp;r, sizeof r, 1, fp) != 1)         { perror("fwrite"); rc = -1; break; }
+        rc = 0;
+        break;
+    }
+    if (fclose(fp) == EOF) { perror("fclose"); rc = -1; }
+    return rc;
+}
+
+void ledger_dump(const char *path)
+{
+    FILE *fp = fopen(path, "rb");
+    if (fp == NULL) { perror(path); return; }
+    Rec r;
+    while (fread(&amp;r, sizeof r, 1, fp) == 1)
+        printf("%-8s %-5s %9lld 상태%d 거래%d\n",
+               r.acc_no, r.owner, r.balance, r.status, r.tx_count);
+    fclose(fp);
+}
+
+int main(void)
+{
+    printf("110-002 입금: %d\n", ledger_deposit("ledger.dat", "110-002", 50000));
+    printf("110-003 입금: %d\n", ledger_deposit("ledger.dat", "110-003", 10000));
+    printf("110-009 입금: %d\n", ledger_deposit("ledger.dat", "110-009", 10000));
+    ledger_dump("ledger.dat");
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과 (ex18-7 실행 직후)</figcaption><pre>110-002 입금: 0
+110-003 입금: -3
+110-009 입금: -2
+110-001  Kim     1000000 상태0 거래0
+110-002  Lee      300000 상태0 거래1
+110-003  Park      70000 상태1 거래0</pre></figure>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 200" width="700" role="img" aria-label="레코드 제자리 수정 순서">
+  <rect class="box" x="20" y="60" width="200" height="44"/><text x="120" y="87" text-anchor="middle" class="small mono">레코드 0</text>
+  <rect class="hl2" x="220" y="60" width="200" height="44"/><text x="320" y="87" text-anchor="middle" class="small mono">레코드 1 (110-002)</text>
+  <rect class="box" x="420" y="60" width="200" height="44"/><text x="520" y="87" text-anchor="middle" class="small mono">레코드 2</text>
+  <path class="arrow" d="M220 40 H 420"/>
+  <text x="320" y="30" text-anchor="middle" class="small">① fread: 위치 48 → 96</text>
+  <path class="arrow" d="M420 125 H 220"/>
+  <text x="320" y="145" text-anchor="middle" class="small">② fseek(-48, SEEK_CUR): 96 → 48</text>
+  <text x="320" y="175" text-anchor="middle" class="small acc">③ fwrite: 48~95를 수정된 레코드로 덮어씀</text>
+</svg>
+<figcaption>그림 18-7 읽고, 되돌아가고, 덮어쓰기: 고정 길이 레코드의 제자리 수정</figcaption>
+</figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — 읽기와 쓰기 사이에 왜 fseek가 꼭 필요할까?</p>
+<p>갱신 모드("r+", "w+", "a+")에서 C 표준은 두 가지 규칙을 둡니다. (1) <b>쓰기 다음에 읽으려면</b> 그 사이에 <code>fflush</code>나 위치 지정 함수(fseek, fsetpos, rewind)를 호출해야 합니다. (2) <b>읽기 다음에 쓰려면</b> 그 사이에 위치 지정 함수를 호출해야 합니다(읽기가 파일 끝에 도달한 경우 제외). FILE은 하나의 버퍼를 읽기용과 쓰기용으로 번갈아 쓰기 때문에, 방향을 바꿀 때 버퍼 상태를 정리할 기회가 필요하기 때문입니다. 이 규칙을 어기면 미정의 동작으로, 실제로 엉뚱한 위치에 써지거나 쓴 내용이 사라지는 일이 생깁니다. 위 예제는 마침 읽기 후 되돌아가는 fseek이 필요했으므로 규칙을 자연스럽게 지켰습니다. 만약 다음 레코드를 계속 읽어야 한다면 fwrite 뒤에 <code>fseek(fp, 0L, SEEK_CUR);</code>를 한 줄 넣어 방향 전환을 알려야 합니다.</p></div>
+
+<div class="box fin"><p class="box-title" data-tag="금융 실무">은행 시스템에서는 — 파일 원장과 동시성</p>
+<p>오늘날 계정계 원장은 대부분 관계형 데이터베이스에 있지만, 메인프레임의 VSAM이나 C로 작성된 고속 처리 엔진, 카드 승인 시스템의 캐시 파일 등에서 고정 길이 레코드 파일은 여전히 쓰입니다. 실무에서 위 예제를 그대로 쓰면 안 되는 이유는 다음과 같습니다.</p>
+<ul>
+  <li><b>동시 접근</b>: 두 프로세스가 같은 레코드를 동시에 읽고 각자 더해서 쓰면 한쪽의 입금이 사라집니다(lost update). 파일 잠금(<code>fcntl</code>, <code>flock</code>)이나 데이터베이스 트랜잭션이 필요합니다.</li>
+  <li><b>장애 중 쓰기</b>: fwrite 중 전원이 나가면 레코드 절반만 바뀐 상태가 될 수 있습니다. 변경 전 이미지를 저널(로그)에 먼저 기록하는 방식(write-ahead logging)으로 복구 가능성을 확보합니다.</li>
+  <li><b>순차 검색 비용</b>: 계좌번호로 처음부터 찾으면 레코드 수에 비례하는 시간이 걸립니다. 계좌번호 → 레코드 번호 인덱스(해시, B-트리)를 둡니다.</li>
+</ul></div>
+
+<h3 id="s18-2-8">버퍼와 flush</h3>
+<p>18-1에서 본 것처럼 출력은 일단 버퍼에 쌓입니다. 표준 라이브러리는 세 가지 버퍼링 방식을 씁니다.</p>
+<div class="tbl"><table>
+<thead><tr><th>방식</th><th>상수</th><th>언제 내보내나</th><th>주 사용처</th></tr></thead>
+<tbody>
+<tr><td>완전 버퍼(full)</td><td><code>_IOFBF</code></td><td>버퍼가 가득 찰 때</td><td>디스크 파일, 리다이렉트된 stdout</td></tr>
+<tr><td>줄 버퍼(line)</td><td><code>_IOLBF</code></td><td>'\n'을 출력할 때 또는 가득 찰 때</td><td>터미널에 연결된 stdout</td></tr>
+<tr><td>버퍼 없음(none)</td><td><code>_IONBF</code></td><td>즉시</td><td>stderr</td></tr>
+</tbody></table></div>
+<p>세 경우 모두 <code>fflush(fp)</code>를 호출하거나, fclose하거나, 프로그램이 정상 종료(main의 return, exit)하면 내보냅니다. 또한 입력 요청 시 줄 버퍼 출력 스트림이 flush되는 구현이 일반적입니다(그래서 printf 뒤 scanf의 안내 문구가 보입니다).</p>
+
+<figure class="code bad"><figcaption>잘못된 예 — 왜 로그가 사라졌을까?</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+
+int main(void)
+{
+    FILE *log = fopen("batch.log", "a");
+    if (log == NULL) return 1;
+    fprintf(log, "STEP1 이자 계산 시작\n");      /* 버퍼에만 있음 */
+    fprintf(log, "STEP2 원장 반영 중\n");
+    abort();                                     /* 비정상 종료: flush 안 됨 */
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 후 batch.log 내용</figcaption><pre>(비어 있음)</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — 장애 원인을 남겨야 할 로그가 왜 비어 있을까?</p>
+<p>batch.log는 디스크 파일이므로 완전 버퍼 방식입니다. 두 줄은 수십 바이트라 4KB 버퍼를 채우지 못해 아직 메모리에만 있습니다. <code>abort()</code>, 세그멘테이션 오류(SIGSEGV), <code>kill -9</code> 같은 비정상 종료에서는 표준 라이브러리가 버퍼를 비울 기회가 없으므로 버퍼 안의 데이터는 프로세스와 함께 사라집니다. 정작 "어디까지 진행하다 죽었는가"라는 가장 중요한 정보가 로그에 남지 않습니다.</p></div>
+
+<div class="box fix"><p class="box-title" data-tag="해결">이렇게 해결합니다</p>
+<ul>
+  <li>중요한 로그는 한 줄 쓸 때마다 <code>fflush(log);</code>를 호출합니다.</li>
+  <li>또는 열자마자 <code>setvbuf(log, NULL, _IOLBF, 0);</code>로 줄 버퍼 방식으로 바꿉니다(setvbuf는 해당 스트림에 다른 입출력을 하기 전에 호출해야 함).</li>
+  <li>진행 상황 표시처럼 줄바꿈 없이 화면에 출력하는 경우 <code>fflush(stdout);</code>을 호출합니다.</li>
+  <li>fflush는 운영체제 커널까지만 보냅니다. 전원 장애에도 디스크에 남아야 하는 데이터(거래 저널 등)는 POSIX의 <code>fsync(fileno(fp))</code>로 디스크 기록까지 보장합니다.</li>
+</ul></div>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 — fflush(stdin)</p>
+<p><code>fflush</code>는 <b>출력 스트림</b>(또는 마지막 동작이 출력인 갱신 스트림)용입니다. C 표준에서 입력 스트림에 대한 fflush는 <b>미정의 동작</b>입니다. 일부 윈도우 구현이 입력 버퍼를 비워 주었던 탓에 널리 퍼졌지만, 리눅스 glibc에서는 기대대로 동작하지 않을 수 있고 최신 MSVC에서도 보장되지 않습니다. 입력에 남은 줄을 버리려면 <code>int c; while ((c = getchar()) != '\n' &amp;&amp; c != EOF) ;</code>처럼 직접 읽어서 버립니다.</p></div>
+
+<div class="ex"><p class="ex-title">예제 18-3 <span class="lv">난이도 ★★★</span></p>
+<p>다음 프로그램을 터미널에서 실행할 때와 <code>./a.out &gt; out.txt</code>로 실행할 때, 화면 또는 out.txt에 나타나는 출력 순서를 각각 예측하십시오.</p>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+int main(void)
+{
+    printf("A\n");
+    fprintf(stderr, "B\n");
+    printf("C\n");
+    return 0;
+}</code></pre>
+<details><summary>정답과 해설 보기</summary>
+<p><b>터미널</b>: stdout이 줄 버퍼이므로 "A\n"은 바로 출력되고, stderr는 버퍼가 없어 즉시 출력됩니다. 화면 순서는 A, B, C입니다.</p>
+<p><b>리다이렉트</b>: stdout이 파일로 가면 완전 버퍼가 되어 A와 C는 프로그램 종료 시에 함께 out.txt에 쓰입니다. B는 stderr라 리다이렉트되지 않고 즉시 화면에 나옵니다. 결과적으로 화면에는 B만, out.txt에는 "A\nC\n"이 남습니다. 만약 <code>./a.out &gt; out.txt 2&gt;&amp;1</code>로 둘 다 같은 파일로 보내면 파일 안의 순서는 <b>B, A, C</b>가 됩니다. 배치 로그에서 오류 메시지가 정상 메시지보다 "먼저" 찍혀 있는 이유가 바로 이것입니다.</p>
+</details></div>
+
+<h2 id="summary">핵심 정리</h2>
+<ul class="summary-list">
+  <li>C는 모든 입출력 장치를 스트림으로 다루며, <code>FILE *</code>는 버퍼·위치·오류/EOF 표시자를 가진 FILE 구조체를 가리킵니다. stdin, stdout, stderr는 처음부터 열려 있습니다.</li>
+  <li><code>fopen</code>은 실패하면 NULL을 반환하므로 항상 검사하고, <code>perror</code>/<code>strerror(errno)</code>로 원인을 기록합니다.</li>
+  <li>"w"와 "w+"는 기존 내용을 지웁니다. 기존 파일을 고칠 때는 "r+", 덧붙일 때는 "a", 덮어쓰기를 막으려면 C11 "wx"를 씁니다.</li>
+  <li>텍스트 모드와 바이너리 모드의 차이는 줄바꿈 변환(윈도우 \n ↔ \r\n)입니다. 텍스트가 아닌 데이터와 위치 계산이 필요한 파일은 반드시 바이너리 모드로 엽니다.</li>
+  <li><code>fclose</code>는 버퍼를 비우고 자원을 반환합니다. 닫지 않으면 데이터 유실과 파일 디스크립터 누수가 생기며, 중요한 파일은 fclose 반환값도 검사합니다.</li>
+  <li><code>fgetc</code>의 반환값은 반드시 int에 받습니다. char에 받으면 0xFF에서 멈추거나 무한 루프가 됩니다.</li>
+  <li><code>fgets</code>는 크기를 지정하고 줄바꿈까지 읽으므로 <code>strcspn</code>으로 \r\n을 제거합니다. gets는 C11에서 삭제되었습니다.</li>
+  <li><code>fscanf</code>/<code>sscanf</code>는 성공 항목 수를 반환하므로 기대 개수와 비교합니다. 실무에서는 fgets + sscanf로 줄 단위 오류 처리를 합니다.</li>
+  <li>반복 조건에 <code>feof</code>를 쓰지 않습니다. EOF 표시자는 끝을 넘어 읽으려 시도한 뒤에 켜지므로 마지막 데이터가 두 번 처리됩니다. 읽기 함수의 반환값으로 반복하고, 끝난 뒤 feof/ferror로 원인을 구분합니다.</li>
+  <li><code>fread</code>/<code>fwrite</code>는 처리한 항목 수를 반환하며, 구조체를 고정 길이 레코드로 저장할 수 있습니다. 다만 패딩·엔디안·형 크기 때문에 시스템 간 교환용으로는 부적합합니다.</li>
+  <li><code>fseek</code>/<code>ftell</code>/<code>rewind</code>로 위치를 옮겨 i × sizeof(레코드) 위치의 레코드를 바로 읽고 고칠 수 있습니다. 갱신 모드에서 읽기와 쓰기를 바꿀 때는 그 사이에 fseek(또는 쓰기 후 fflush)가 필요합니다.</li>
+  <li>버퍼링은 완전/줄/없음 세 가지입니다. 비정상 종료 시 버퍼 내용은 사라지므로 중요 로그는 fflush하거나 줄 버퍼로 설정합니다. <code>fflush(stdin)</code>은 미정의 동작입니다.</li>
+</ul>
+
+<h2 id="interview">CS 면접 단골 질문</h2>
+<div class="box iv"><p class="box-title" data-tag="면접">이 장에서 나오는 면접 질문</p>
+  <details><summary>Q1. 버퍼링된 I/O를 사용하는 이유는 무엇인가요?</summary>
+  <p>시스템 호출은 사용자 모드에서 커널 모드로 전환해야 해서 비용이 큽니다. 표준 라이브러리는 데이터를 사용자 공간 버퍼에 모아 두었다가 한꺼번에 write 시스템 호출을 하므로 호출 횟수가 크게 줄어 성능이 좋아집니다. 대신 프로그램이 비정상 종료되면 버퍼에 남은 데이터가 유실될 수 있어, 중요한 데이터는 fflush로 명시적으로 내보내고, 디스크까지 보장하려면 fsync를 사용합니다.</p>
+  <p><b>꼬리 질문 대비:</b> "fflush와 fsync의 차이는?" fflush는 라이브러리 버퍼 → 커널 페이지 캐시까지, fsync는 커널 캐시 → 실제 저장 장치까지 기록을 보장한다고 답합니다.</p></details>
+  <details><summary>Q2. 텍스트 모드와 바이너리 모드의 차이는?</summary>
+  <p>차이는 줄바꿈 변환 여부입니다. 윈도우 텍스트 모드는 쓸 때 \n을 \r\n으로, 읽을 때 \r\n을 \n으로 바꿉니다. 유닉스 계열에서는 차이가 없습니다. 바이너리 데이터를 텍스트 모드로 다루면 0x0A 바이트 앞에 0x0D가 끼어 데이터가 깨지고, 텍스트 모드에서는 fseek로 계산한 오프셋도 신뢰할 수 없으므로 구조체 저장이나 랜덤 접근은 바이너리 모드로 합니다.</p></details>
+  <details><summary>Q3. while(!feof(fp))가 왜 잘못된 코드인가요?</summary>
+  <p>feof는 이전 읽기가 파일 끝 때문에 실패했는지를 알려 줄 뿐, 다음 읽기가 성공할지 예측하지 못합니다. 마지막 데이터를 읽은 직후에는 EOF 표시자가 아직 꺼져 있어서 반복이 한 번 더 돌고, 그때의 읽기는 실패하지만 반환값을 검사하지 않으므로 이전 버퍼 내용이 한 번 더 처리됩니다. 읽기 함수의 반환값으로 반복을 제어하고, 끝난 뒤에 feof와 ferror로 종료 원인을 구분해야 합니다.</p></details>
+  <details><summary>Q4. fgetc의 반환형이 왜 char가 아니라 int인가요?</summary>
+  <p>읽을 수 있는 바이트 값 256가지와 "더 이상 없음"을 뜻하는 EOF를 모두 구별해야 하기 때문입니다. 257가지 값은 char에 담을 수 없습니다. char에 저장하면 signed char 환경에서는 0xFF 바이트가 EOF로 오인되어 읽기가 중간에 멈추고, unsigned char 환경에서는 EOF가 255가 되어 무한 루프가 됩니다.</p></details>
+  <details><summary>Q5. 파일 디스크립터와 FILE 포인터의 차이는?</summary>
+  <p>파일 디스크립터는 운영체제(POSIX)가 열린 파일을 식별하기 위해 프로세스에 주는 작은 정수로, open/read/write 같은 시스템 호출에 씁니다. 0, 1, 2가 표준 입력, 출력, 오류입니다. FILE 포인터는 C 표준 라이브러리 수준의 객체로, 내부에 파일 디스크립터와 사용자 공간 버퍼, 위치, 상태 플래그를 가집니다. <code>fileno(fp)</code>로 FILE의 디스크립터를, <code>fdopen</code>으로 디스크립터에서 FILE을 얻을 수 있습니다.</p>
+  <p><b>꼬리 질문 대비:</b> "파일을 닫지 않으면?" 디스크립터 누수로 프로세스 한도(ulimit -n)에 도달하면 더 이상 파일이나 소켓을 열 수 없게 됩니다.</p></details>
+  <details><summary>Q6. 구조체를 fwrite로 저장한 파일을 다른 시스템에서 읽으면 어떤 문제가 생기나요?</summary>
+  <p>컴파일러와 아키텍처에 따라 패딩 위치, 정수의 엔디안, long 같은 형의 크기가 다를 수 있어서 같은 구조체 정의로도 값이 잘못 해석될 수 있습니다. 포인터 멤버는 주소만 저장되므로 의미가 없습니다. 교환용 파일은 고정 폭 정수형과 정해진 바이트 순서로 필드 단위 직렬화를 하거나 텍스트 형식을 사용하고, 금융 전문처럼 숫자도 문자로 표현하는 방식을 씁니다.</p></details>
+  <details><summary>Q7. errno는 어떻게 동작하고 사용 시 주의할 점은?</summary>
+  <p>표준 라이브러리와 시스템 호출이 실패할 때 오류 원인 번호를 저장하는 변수로, 멀티스레드 환경에서는 스레드마다 따로 존재합니다. 성공한 호출은 errno를 지우지 않으므로 반드시 반환값으로 실패를 확인한 뒤에만 errno를 보고, 다른 함수를 호출하기 전에 지역 변수에 복사해 둡니다. 비교는 숫자 대신 ENOENT, EACCES 같은 매크로로 합니다.</p></details>
+  <details><summary>Q8. 같은 파일을 두 프로세스가 동시에 수정하면 어떤 문제가 생기고 어떻게 막나요?</summary>
+  <p>두 프로세스가 같은 레코드를 읽고 각자 수정해서 쓰면 나중에 쓴 쪽이 먼저 쓴 변경을 덮어써 갱신이 사라지는 lost update가 생깁니다. 은행 잔액이라면 입금이 사라지는 사고입니다. 파일 잠금(fcntl의 레코드 잠금, flock)으로 읽기-수정-쓰기 구간을 상호 배제하거나, 데이터베이스 트랜잭션과 행 잠금(SELECT ... FOR UPDATE)을 사용합니다.</p>
+  <p><b>꼬리 질문 대비:</b> 트랜잭션 격리 수준과 데드락으로 이어질 수 있으니 ACID 개념을 함께 정리해 두십시오.</p></details>
+  <details><summary>Q9. 결과 파일을 쓸 때 임시 파일에 쓰고 rename하는 이유는?</summary>
+  <p>쓰는 도중 장애가 나거나 다른 프로세스가 쓰다 만 파일을 읽는 것을 막기 위해서입니다. 같은 파일 시스템 안에서의 rename은 POSIX에서 원자적으로 동작하므로, 다른 프로세스는 이전 파일이나 완성된 새 파일 중 하나만 보게 됩니다. 배치 연계에서 "완료 파일(.done)"이나 트레일러 레코드로 완전성을 확인하는 것도 같은 목적입니다.</p></details>
+</div>
+
+<h2 id="exercises">연습문제</h2>
+
+<div class="ex"><p class="ex-title">연습문제 18-1 모드 선택 <span class="lv">난이도 ★☆☆</span></p>
+<p>다음 상황에 알맞은 fopen 모드를 쓰십시오. (1) 매 거래를 거래 로그 파일 끝에 덧붙인다. (2) 원장 바이너리 파일의 특정 레코드를 수정한다. (3) 오늘 날짜의 결과 파일을 새로 만들되, 이미 있으면 실수로 덮어쓰지 않고 실패하게 한다. (4) 대외기관에서 받은 고정 길이 바이너리 파일을 읽는다.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>(1) <code>"a"</code>: 항상 끝에 쓰므로 다른 위치를 덮어쓸 위험이 없습니다. (2) <code>"r+b"</code>: 내용을 유지하며 읽기·쓰기, 바이너리. "w+b"는 내용을 지우므로 절대 안 됩니다. (3) <code>"wx"</code>(C11): 파일이 있으면 NULL을 반환하고 errno는 EEXIST가 됩니다. (4) <code>"rb"</code>: 줄바꿈 변환이 없어 바이트가 그대로 읽힙니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 18-2 출력 예측 <span class="lv">난이도 ★★☆</span></p>
+<p>파일 data.txt의 내용이 "10 20 x 30\n"일 때 출력은?</p>
+<pre><code class="language-c">int v, sum = 0, n = 0;
+while (fscanf(fp, "%d", &amp;v) == 1) { sum += v; n++; }
+printf("%d %d\n", n, sum);</code></pre>
+<details><summary>정답과 해설 보기</summary>
+<p>출력: <code>2 30</code>. 10과 20은 읽히고, "x"에서 변환이 실패해 0이 반환되므로 반복이 끝납니다. 30은 읽히지 않습니다. 반복 조건을 <code>!= EOF</code>로 썼다면 x에서 계속 0이 반환되어 무한 루프가 되었을 것입니다. 오류 데이터를 만나면 멈추고 보고하는 것이 올바른 동작입니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 18-3 버그 찾기 <span class="lv">난이도 ★★☆</span></p>
+<pre><code class="language-c">FILE *fp = fopen("log.txt", "r");
+char c;
+while ((c = fgetc(fp)) != EOF)
+    putchar(c);</code></pre>
+<p>이 코드의 문제점을 모두 찾으십시오.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>(1) fopen의 실패 검사가 없어 파일이 없으면 NULL로 fgetc를 호출해 프로그램이 죽습니다. (2) c가 char이므로 0xFF 바이트에서 읽기가 끝나거나(signed char), EOF를 영원히 감지하지 못합니다(unsigned char). <code>int c</code>로 바꿔야 합니다. (3) fclose가 없습니다. (4) 반복 후 ferror로 읽기 오류를 구분하지 않습니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 18-4 코드 작성: 줄 수, 최장 줄 <span class="lv">난이도 ★★☆</span></p>
+<p>텍스트 파일의 줄 수와 가장 긴 줄의 길이(줄바꿈 제외, 바이트)를 출력하는 프로그램을 fgetc로 작성하십시오. 마지막 줄이 줄바꿈 없이 끝나도 한 줄로 세어야 합니다.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>현재 줄 길이를 세다가 '\n'에서 줄 수를 늘리고 최댓값을 갱신합니다. 파일이 끝났을 때 현재 줄 길이가 0보다 크면 줄바꿈 없는 마지막 줄이 있었던 것이므로 한 줄을 더 셉니다. fgets를 쓰면 버퍼보다 긴 줄을 처리하기 번거로우므로 fgetc가 이 문제에 더 알맞습니다. \r은 길이에서 제외해 윈도우 파일에도 대응합니다.</p>
+<figure class="code good"><figcaption>정답 코드</figcaption><pre><code class="language-c">#include &lt;stdio.h&gt;
+int main(int argc, char *argv[])
+{
+    if (argc &lt; 2) { fprintf(stderr, "사용법: %s 파일\n", argv[0]); return 2; }
+    FILE *fp = fopen(argv[1], "rb");
+    if (fp == NULL) { perror(argv[1]); return 1; }
+    int ch;
+    long lines = 0, cur = 0, maxlen = 0;
+    while ((ch = fgetc(fp)) != EOF) {
+        if (ch == '\n') {
+            lines++;
+            if (cur &gt; maxlen) maxlen = cur;
+            cur = 0;
+        } else if (ch != '\r') {
+            cur++;
+        }
+    }
+    if (cur &gt; 0) { lines++; if (cur &gt; maxlen) maxlen = cur; }
+    fclose(fp);
+    printf("%ld줄, 최장 %ld바이트\n", lines, maxlen);
+    return 0;
+}</code></pre></figure>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 18-5 빈칸 채우기: 파일 크기 <span class="lv">난이도 ★☆☆</span></p>
+<pre><code class="language-c">long file_size(const char *path)
+{
+    FILE *fp = fopen(path, ____);
+    if (fp == NULL) return -1;
+    if (fseek(fp, 0L, ____) != 0) { fclose(fp); return -1; }
+    long sz = ____;
+    fclose(fp);
+    return sz;
+}</code></pre>
+<details><summary>정답과 해설 보기</summary>
+<p><code>"rb"</code>, <code>SEEK_END</code>, <code>ftell(fp)</code>. 텍스트 모드에서는 ftell 값이 바이트 수와 같다는 보장이 없으므로 바이너리 모드로 엽니다. ftell은 실패 시 -1L을 반환하므로 그대로 돌려주면 호출자가 오류를 알 수 있습니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 18-6 금융 응용: 계좌별 합계 <span class="lv">난이도 ★★★</span></p>
+<p>ex18-6의 tx.csv 형식(헤더 1줄, <code>date,acc_no,type,amount</code>)을 읽어 계좌별 순증액(입금 - 출금)을 출력하십시오. 계좌는 최대 100개라고 가정합니다. ex18-6의 데이터라면 110-001은 470000, 110-002는 -120000, 110-003은 1000000입니다.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>계좌번호와 합계를 담는 구조체 배열을 두고, 줄마다 계좌를 선형 검색해 없으면 추가합니다. 실무에서는 해시 테이블이나 파일을 계좌번호로 정렬한 뒤 한 번에 집계(control break)하는 방식을 씁니다.</p>
+<figure class="code good"><figcaption>정답 코드</figcaption><pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+struct Sum { char acc[16]; long long net; };
+
+int main(void)
+{
+    struct Sum s[100];
+    int ns = 0, lineno = 0;
+    char line[256], date[9], acc[16], type;
+    long long amt;
+    FILE *fp = fopen("tx.csv", "r");
+    if (fp == NULL) { perror("tx.csv"); return 1; }
+    while (fgets(line, sizeof line, fp) != NULL) {
+        if (++lineno == 1) continue;
+        if (sscanf(line, "%8[^,],%15[^,],%c,%lld", date, acc, &amp;type, &amp;amt) != 4)
+            continue;                              /* 오류 줄 건너뜀 */
+        if (type != 'D' &amp;&amp; type != 'W') continue;
+        int i;
+        for (i = 0; i &lt; ns; i++)
+            if (strcmp(s[i].acc, acc) == 0) break;
+        if (i == ns) {
+            if (ns == 100) { fprintf(stderr, "계좌 수 초과\n"); break; }
+            strcpy(s[ns].acc, acc);
+            s[ns++].net = 0;
+        }
+        s[i].net += (type == 'D') ? amt : -amt;
+    }
+    fclose(fp);
+    for (int i = 0; i &lt; ns; i++)
+        printf("%s %lld\n", s[i].acc, s[i].net);
+    return 0;
+}</code></pre></figure>
+<p>출력: <code>110-001 470000</code>, <code>110-002 -120000</code>, <code>110-003 1000000</code> (불량 줄의 110-004는 제외).</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 18-7 출력 예측: feof <span class="lv">난이도 ★★☆</span></p>
+<p>파일 내용이 정확히 3바이트 "XYZ"(줄바꿈 없음)일 때 출력은?</p>
+<pre><code class="language-c">int c, n = 0;
+while (!feof(fp)) { c = fgetc(fp); n++; }
+printf("%d %d\n", n, c);</code></pre>
+<details><summary>정답과 해설 보기</summary>
+<p>출력: <code>4 -1</code>(EOF가 -1인 일반적 구현). X, Y, Z를 읽은 세 번의 반복 뒤에도 EOF 표시자는 꺼져 있으므로 네 번째 반복에서 fgetc가 EOF를 반환하며 그때 표시자가 켜집니다. n은 실제 바이트 수보다 1 많은 4가 됩니다. 바이트 수를 세는 프로그램이라면 결과가 틀린 것입니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 18-8 코드 작성: n번째 레코드 정지 처리 <span class="lv">난이도 ★★★</span></p>
+<p>ex18-7의 Rec 형식 원장 파일에서 인덱스 idx(0부터)인 레코드의 status를 1(정지)로 바꾸는 함수 <code>int suspend_at(const char *path, long idx)</code>를 작성하십시오. idx가 범위를 벗어나면 -2를 반환합니다.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>파일 크기로 레코드 수를 구해 범위를 확인하고, idx × sizeof(Rec)로 이동해 읽은 뒤, 다시 같은 위치로 돌아가 씁니다. 읽기 → 쓰기 전환 사이에 fseek가 있으므로 갱신 모드 규칙도 지켜집니다.</p>
+<figure class="code good"><figcaption>정답 코드</figcaption><pre><code class="language-c">int suspend_at(const char *path, long idx)
+{
+    FILE *fp = fopen(path, "r+b");
+    if (fp == NULL) { perror(path); return -1; }
+    Rec r;
+    long pos = idx * (long)sizeof r;
+    int rc = 0;
+
+    if (fseek(fp, 0L, SEEK_END) != 0) rc = -1;
+    else if (idx &lt; 0 || pos + (long)sizeof r &gt; ftell(fp)) rc = -2;
+    else if (fseek(fp, pos, SEEK_SET) != 0 || fread(&amp;r, sizeof r, 1, fp) != 1) rc = -1;
+    else {
+        r.status = 1;
+        if (fseek(fp, pos, SEEK_SET) != 0 || fwrite(&amp;r, sizeof r, 1, fp) != 1) rc = -1;
+    }
+    if (fclose(fp) == EOF) rc = -1;
+    return rc;
+}</code></pre></figure>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 18-9 서술형: 로그 유실 <span class="lv">난이도 ★★☆</span></p>
+<p>야간 배치가 세그멘테이션 오류로 죽었는데 로그 파일에는 시작 메시지만 있고 처리 중 메시지가 하나도 없었습니다. 원인으로 가장 의심되는 것과 해결책 두 가지를 쓰십시오.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>로그 파일 스트림이 완전 버퍼 방식이라 처리 중 메시지가 버퍼에만 있다가 비정상 종료로 사라진 것입니다(시작 메시지는 다른 이유로 flush되었거나 버퍼가 한 번 찼던 경우). 해결책: (1) 로그를 쓸 때마다 <code>fflush</code> 호출, (2) <code>setvbuf(log, NULL, _IOLBF, 0)</code>로 줄 버퍼 설정, 또는 (3) stderr처럼 버퍼 없는 스트림 사용. 디스크까지 보장해야 하면 fsync를 추가합니다. 근본 원인인 세그멘테이션 오류는 코어 덤프와 디버거로 별도 분석합니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 18-10 코드 작성: 안전한 결과 파일 생성 <span class="lv">난이도 ★★★</span></p>
+<p>정산 결과 문자열 배열을 <code>result.tmp</code>에 줄 단위로 쓰고, 모든 쓰기와 fclose가 성공했을 때만 <code>result.txt</code>로 이름을 바꾸는 함수를 작성하십시오. 실패하면 임시 파일을 삭제합니다.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>각 fputs의 반환값과 fclose의 반환값을 모두 검사합니다. 표준 C의 <code>rename</code>(성공 시 0)과 <code>remove</code>를 사용합니다. 윈도우의 rename은 대상 파일이 이미 있으면 실패하므로, 이식성을 고려하면 대상 파일을 먼저 처리하는 로직이 필요합니다(POSIX는 원자적으로 교체).</p>
+<figure class="code good"><figcaption>정답 코드</figcaption><pre><code class="language-c">#include &lt;stdio.h&gt;
+int write_result(const char *lines[], int n)
+{
+    const char *tmp = "result.tmp", *dst = "result.txt";
+    FILE *fp = fopen(tmp, "w");
+    if (fp == NULL) { perror(tmp); return -1; }
+    int ok = 1;
+    for (int i = 0; i &lt; n &amp;&amp; ok; i++)
+        if (fputs(lines[i], fp) == EOF || fputc('\n', fp) == EOF) ok = 0;
+    if (fclose(fp) == EOF) ok = 0;
+    if (!ok) { perror("write"); remove(tmp); return -1; }
+    if (rename(tmp, dst) != 0) { perror("rename"); remove(tmp); return -1; }
+    return 0;
+}</code></pre></figure>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 18-11 출력 예측: 버퍼 <span class="lv">난이도 ★★☆</span></p>
+<p>터미널에서 실행할 때 화면에 무엇이 보입니까?</p>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+int main(void)
+{
+    printf("1");
+    printf("2\n");
+    printf("3");
+    abort();
+}</code></pre>
+<details><summary>정답과 해설 보기</summary>
+<p>"12"와 줄바꿈까지만 보이고 "3"은 보이지 않습니다(그 뒤에 Aborted 같은 셸 메시지). 터미널의 stdout은 줄 버퍼이므로 "2\n"에서 "12\n"이 출력되지만, "3"은 줄바꿈이 없어 버퍼에 남았다가 abort로 사라집니다. "3" 뒤에 <code>fflush(stdout);</code>을 넣으면 보입니다.</p>
+</details></div>
+
+</main>
+<aside class="rail" aria-label="이 페이지 목차"></aside>
+</div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-c.min.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>

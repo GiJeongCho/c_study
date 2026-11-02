@@ -1,0 +1,606 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>부록 · C언어 금융 IT 마스터</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+KR:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-ch="appendix">
+<header class="topbar">
+  <button class="menu-btn" type="button" aria-expanded="false" aria-controls="sidebar">목차</button>
+  <a class="brand" href="index.html"><b>C</b>금융 IT 마스터</a>
+  <span class="where"></span>
+  <span class="progress"></span>
+</header>
+<div class="layout">
+<nav id="sidebar" class="sidebar" aria-label="과정 목차"></nav>
+<div class="page">
+<main class="content">
+
+<header class="ch-head">
+  <p class="eyebrow">부록</p>
+  <div class="bignum">+</div>
+  <h1>부록</h1>
+  <p class="lede">공부하다가, 코드 리뷰를 하다가, 배포 직전에 다시 펼쳐 보는 참고 자료입니다. 아스키 코드표, 가장 기본적인 정렬 알고리즘인 선택 정렬, 과정 전체의 "여기서 잠깐" 핵심 팁, 그리고 금융 IT 현장에서 쓰는 실무 체크리스트를 모았습니다.</p>
+  <div class="goals"><p class="goals-title">부록 구성</p><ul>
+    <li>A. 아스키 코드표: 0~127 전체, 제어 문자의 의미와 C 이스케이프 시퀀스</li>
+    <li>B. 선택 정렬 알고리즘: 단계별 그림, 코드, 시간 복잡도, 안정성, 버블·삽입 정렬과 비교</li>
+    <li>C. 여기서 잠깐 모음: 과정 전반의 핵심 팁과 관련 장 바로 가기</li>
+    <li>D. 금융 IT 실무 체크리스트: 코드 리뷰, 배포 전, 금액 처리, 개인정보, 로그, 배치 운영</li>
+  </ul></div>
+</header>
+
+<h2 id="sA"><span class="num">A</span>아스키 코드표</h2>
+
+<h3 id="sA-1">아스키 코드의 구조</h3>
+<p>ASCII(American Standard Code for Information Interchange)는 문자 하나를 0~127 범위의 정수(7비트)로 표현하는 표준입니다. C의 <code>char</code>는 결국 작은 정수이므로, <code>'A'</code>라고 쓰면 컴파일러는 65라는 숫자로 바꿉니다. 11장에서 배운 것처럼 문자 처리 코드는 이 숫자 배치를 이해하면 훨씬 쉬워집니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 170" width="700" role="img" aria-label="아스키 코드 범위">
+  <rect class="bad" x="20" y="40" width="160" height="50"/>
+  <text x="100" y="62" text-anchor="middle" class="small bold">제어 문자</text>
+  <text x="100" y="80" text-anchor="middle" class="small mono">0 ~ 31</text>
+  <rect class="box" x="180" y="40" width="70" height="50"/>
+  <text x="215" y="62" text-anchor="middle" class="small">기호</text>
+  <text x="215" y="80" text-anchor="middle" class="small mono">32~47</text>
+  <rect class="hl" x="250" y="40" width="70" height="50"/>
+  <text x="285" y="62" text-anchor="middle" class="small">숫자</text>
+  <text x="285" y="80" text-anchor="middle" class="small mono">48~57</text>
+  <rect class="box" x="320" y="40" width="50" height="50"/>
+  <text x="345" y="70" text-anchor="middle" class="small mono">58~64</text>
+  <rect class="hl2" x="370" y="40" width="110" height="50"/>
+  <text x="425" y="62" text-anchor="middle" class="small">대문자</text>
+  <text x="425" y="80" text-anchor="middle" class="small mono">65~90</text>
+  <rect class="box" x="480" y="40" width="50" height="50"/>
+  <text x="505" y="70" text-anchor="middle" class="small mono">91~96</text>
+  <rect class="hl2" x="530" y="40" width="110" height="50"/>
+  <text x="585" y="62" text-anchor="middle" class="small">소문자</text>
+  <text x="585" y="80" text-anchor="middle" class="small mono">97~122</text>
+  <rect class="box" x="640" y="40" width="40" height="50"/>
+  <text x="660" y="70" text-anchor="middle" class="small mono">~127</text>
+  <text x="20" y="125" class="small acc">'0'(48) - '0' = 0 → 숫자 문자를 정수로: c - '0'</text>
+  <text x="20" y="150" class="small acc">'a'(97) - 'A'(65) = 32 → 대소문자 변환은 32 차이 (toupper/tolower 권장)</text>
+</svg>
+<figcaption>그림 A-1 아스키 코드의 영역 배치</figcaption>
+</figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — 아스키 배치에 숨은 설계 의도</p>
+<ul>
+  <li><b>숫자 '0'~'9'가 연속(48~57)</b>: <code>c - '0'</code>으로 문자 숫자를 정수 값으로 바꿀 수 있습니다. C 표준은 실행 문자 집합에서 숫자 문자 '0'~'9'가 연속이라고 <b>보장</b>합니다. 금액 문자열 "0000250000"을 정수로 바꾸는 전문 파싱 코드가 이 성질을 씁니다.</li>
+  <li><b>대문자와 소문자가 정확히 32(0x20) 차이</b>: 2진수로 보면 비트 5 하나만 다릅니다('A'=0100 0001, 'a'=0110 0001). 그래서 <code>c | 0x20</code>은 소문자로, <code>c &amp; ~0x20</code>은 대문자로 바꿉니다(영문자일 때만). 다만 알파벳이 연속이라는 것은 아스키에서만 참이고 표준이 보장하지 않으므로(EBCDIC에서는 불연속), 이식성 있는 코드는 <code>toupper</code>/<code>tolower</code>를 씁니다.</li>
+  <li><b>공백(32)보다 작은 값은 제어 문자</b>: 화면에 찍히는 글자가 아니라 장치를 제어하는 신호입니다. <code>isprint</code>로 출력 가능 여부를 판단할 수 있습니다.</li>
+</ul></div>
+
+<div class="box fin"><p class="box-title" data-tag="금융 실무">은행 시스템에서는 — 아스키와 EBCDIC, 그리고 한글</p>
+<p>IBM 메인프레임은 아스키가 아닌 <b>EBCDIC</b> 문자 코드를 씁니다. EBCDIC에서 'A'는 0xC1, '0'은 0xF0이고 알파벳이 연속되지 않습니다. 메인프레임 계정계와 유닉스 대외계가 파일이나 전문을 주고받을 때는 반드시 코드 변환 단계가 있으며, 숫자 필드가 엉뚱한 문자로 보인다면 이 변환을 의심합니다. 또한 아스키는 0~127만 정의하므로 한글은 EUC-KR/CP949(2바이트, 각 바이트 0x80 이상)나 UTF-8(한글 3바이트)로 표현됩니다. 바이트 값이 128 이상이면 아스키 문자가 아니라는 성질은 "이 바이트가 한글의 일부인가"를 판단하는 데 쓰입니다. 이때 signed char에서는 음수가 되므로 <code>unsigned char</code>로 다뤄야 합니다.</p></div>
+
+<h3 id="sA-2">제어 문자 (0~31, 127)</h3>
+<p>C에서 직접 쓸 일이 있는 제어 문자는 이스케이프 시퀀스 열에 표시했습니다. 굵게 표시한 것은 실무에서 특히 자주 만나는 문자입니다.</p>
+<div class="tbl"><table>
+<thead><tr><th>10진</th><th>16진</th><th>이름</th><th>C 이스케이프</th><th>의미</th></tr></thead>
+<tbody>
+<tr><td>0</td><td>0x00</td><td><b>NUL</b></td><td><code>'\0'</code></td><td>널 문자: 문자열의 끝</td></tr>
+<tr><td>1</td><td>0x01</td><td>SOH</td><td>-</td><td>헤더 시작(Start of Heading)</td></tr>
+<tr><td>2</td><td>0x02</td><td><b>STX</b></td><td>-</td><td>본문 시작(Start of Text): 일부 전문 프레이밍</td></tr>
+<tr><td>3</td><td>0x03</td><td><b>ETX</b></td><td>-</td><td>본문 끝(End of Text): 일부 전문 프레이밍</td></tr>
+<tr><td>4</td><td>0x04</td><td><b>EOT</b></td><td>-</td><td>전송 끝(End of Transmission), 유닉스 터미널 Ctrl+D</td></tr>
+<tr><td>5</td><td>0x05</td><td>ENQ</td><td>-</td><td>조회(Enquiry)</td></tr>
+<tr><td>6</td><td>0x06</td><td><b>ACK</b></td><td>-</td><td>긍정 응답(Acknowledge)</td></tr>
+<tr><td>7</td><td>0x07</td><td>BEL</td><td><code>'\a'</code></td><td>경고음(Bell)</td></tr>
+<tr><td>8</td><td>0x08</td><td>BS</td><td><code>'\b'</code></td><td>백스페이스</td></tr>
+<tr><td>9</td><td>0x09</td><td><b>HT</b></td><td><code>'\t'</code></td><td>수평 탭</td></tr>
+<tr><td>10</td><td>0x0A</td><td><b>LF</b></td><td><code>'\n'</code></td><td>줄바꿈(Line Feed): 유닉스 줄 끝</td></tr>
+<tr><td>11</td><td>0x0B</td><td>VT</td><td><code>'\v'</code></td><td>수직 탭</td></tr>
+<tr><td>12</td><td>0x0C</td><td>FF</td><td><code>'\f'</code></td><td>폼 피드(새 페이지)</td></tr>
+<tr><td>13</td><td>0x0D</td><td><b>CR</b></td><td><code>'\r'</code></td><td>캐리지 리턴: 윈도우 줄 끝은 CR LF</td></tr>
+<tr><td>14</td><td>0x0E</td><td>SO</td><td>-</td><td>Shift Out</td></tr>
+<tr><td>15</td><td>0x0F</td><td>SI</td><td>-</td><td>Shift In</td></tr>
+<tr><td>16</td><td>0x10</td><td>DLE</td><td>-</td><td>Data Link Escape</td></tr>
+<tr><td>17</td><td>0x11</td><td>DC1</td><td>-</td><td>장치 제어 1(XON)</td></tr>
+<tr><td>18</td><td>0x12</td><td>DC2</td><td>-</td><td>장치 제어 2</td></tr>
+<tr><td>19</td><td>0x13</td><td>DC3</td><td>-</td><td>장치 제어 3(XOFF), 터미널 Ctrl+S</td></tr>
+<tr><td>20</td><td>0x14</td><td>DC4</td><td>-</td><td>장치 제어 4</td></tr>
+<tr><td>21</td><td>0x15</td><td><b>NAK</b></td><td>-</td><td>부정 응답(Negative Acknowledge)</td></tr>
+<tr><td>22</td><td>0x16</td><td>SYN</td><td>-</td><td>동기 유휴(Synchronous Idle)</td></tr>
+<tr><td>23</td><td>0x17</td><td>ETB</td><td>-</td><td>전송 블록 끝</td></tr>
+<tr><td>24</td><td>0x18</td><td>CAN</td><td>-</td><td>취소(Cancel)</td></tr>
+<tr><td>25</td><td>0x19</td><td>EM</td><td>-</td><td>매체 끝(End of Medium)</td></tr>
+<tr><td>26</td><td>0x1A</td><td><b>SUB</b></td><td>-</td><td>대체(Substitute), 윈도우 Ctrl+Z: 텍스트 모드 EOF로 취급될 수 있음</td></tr>
+<tr><td>27</td><td>0x1B</td><td><b>ESC</b></td><td>-</td><td>이스케이프: 터미널 제어 시퀀스 시작</td></tr>
+<tr><td>28</td><td>0x1C</td><td>FS</td><td>-</td><td>파일 구분자(File Separator)</td></tr>
+<tr><td>29</td><td>0x1D</td><td>GS</td><td>-</td><td>그룹 구분자(Group Separator)</td></tr>
+<tr><td>30</td><td>0x1E</td><td>RS</td><td>-</td><td>레코드 구분자(Record Separator)</td></tr>
+<tr><td>31</td><td>0x1F</td><td>US</td><td>-</td><td>단위 구분자(Unit Separator)</td></tr>
+<tr><td>127</td><td>0x7F</td><td>DEL</td><td>-</td><td>삭제(Delete)</td></tr>
+</tbody></table></div>
+
+<h3 id="sA-3">출력 가능한 문자 (32~126)</h3>
+<p>표는 10진수, 16진수, 문자 순입니다. 32번은 공백(space) 문자입니다.</p>
+<div class="tbl"><table>
+<thead><tr><th>10진</th><th>16진</th><th>문자</th><th>10진</th><th>16진</th><th>문자</th><th>10진</th><th>16진</th><th>문자</th><th>10진</th><th>16진</th><th>문자</th></tr></thead>
+<tbody>
+<tr><td>32</td><td>0x20</td><td>(공백)</td><td>56</td><td>0x38</td><td><code>8</code></td><td>80</td><td>0x50</td><td><code>P</code></td><td>104</td><td>0x68</td><td><code>h</code></td></tr>
+<tr><td>33</td><td>0x21</td><td><code>!</code></td><td>57</td><td>0x39</td><td><code>9</code></td><td>81</td><td>0x51</td><td><code>Q</code></td><td>105</td><td>0x69</td><td><code>i</code></td></tr>
+<tr><td>34</td><td>0x22</td><td><code>&quot;</code></td><td>58</td><td>0x3A</td><td><code>:</code></td><td>82</td><td>0x52</td><td><code>R</code></td><td>106</td><td>0x6A</td><td><code>j</code></td></tr>
+<tr><td>35</td><td>0x23</td><td><code>#</code></td><td>59</td><td>0x3B</td><td><code>;</code></td><td>83</td><td>0x53</td><td><code>S</code></td><td>107</td><td>0x6B</td><td><code>k</code></td></tr>
+<tr><td>36</td><td>0x24</td><td><code>$</code></td><td>60</td><td>0x3C</td><td><code>&lt;</code></td><td>84</td><td>0x54</td><td><code>T</code></td><td>108</td><td>0x6C</td><td><code>l</code></td></tr>
+<tr><td>37</td><td>0x25</td><td><code>%</code></td><td>61</td><td>0x3D</td><td><code>=</code></td><td>85</td><td>0x55</td><td><code>U</code></td><td>109</td><td>0x6D</td><td><code>m</code></td></tr>
+<tr><td>38</td><td>0x26</td><td><code>&amp;</code></td><td>62</td><td>0x3E</td><td><code>&gt;</code></td><td>86</td><td>0x56</td><td><code>V</code></td><td>110</td><td>0x6E</td><td><code>n</code></td></tr>
+<tr><td>39</td><td>0x27</td><td><code>&#x27;</code></td><td>63</td><td>0x3F</td><td><code>?</code></td><td>87</td><td>0x57</td><td><code>W</code></td><td>111</td><td>0x6F</td><td><code>o</code></td></tr>
+<tr><td>40</td><td>0x28</td><td><code>(</code></td><td>64</td><td>0x40</td><td><code>@</code></td><td>88</td><td>0x58</td><td><code>X</code></td><td>112</td><td>0x70</td><td><code>p</code></td></tr>
+<tr><td>41</td><td>0x29</td><td><code>)</code></td><td>65</td><td>0x41</td><td><code>A</code></td><td>89</td><td>0x59</td><td><code>Y</code></td><td>113</td><td>0x71</td><td><code>q</code></td></tr>
+<tr><td>42</td><td>0x2A</td><td><code>*</code></td><td>66</td><td>0x42</td><td><code>B</code></td><td>90</td><td>0x5A</td><td><code>Z</code></td><td>114</td><td>0x72</td><td><code>r</code></td></tr>
+<tr><td>43</td><td>0x2B</td><td><code>+</code></td><td>67</td><td>0x43</td><td><code>C</code></td><td>91</td><td>0x5B</td><td><code>[</code></td><td>115</td><td>0x73</td><td><code>s</code></td></tr>
+<tr><td>44</td><td>0x2C</td><td><code>,</code></td><td>68</td><td>0x44</td><td><code>D</code></td><td>92</td><td>0x5C</td><td><code>\</code></td><td>116</td><td>0x74</td><td><code>t</code></td></tr>
+<tr><td>45</td><td>0x2D</td><td><code>-</code></td><td>69</td><td>0x45</td><td><code>E</code></td><td>93</td><td>0x5D</td><td><code>]</code></td><td>117</td><td>0x75</td><td><code>u</code></td></tr>
+<tr><td>46</td><td>0x2E</td><td><code>.</code></td><td>70</td><td>0x46</td><td><code>F</code></td><td>94</td><td>0x5E</td><td><code>^</code></td><td>118</td><td>0x76</td><td><code>v</code></td></tr>
+<tr><td>47</td><td>0x2F</td><td><code>/</code></td><td>71</td><td>0x47</td><td><code>G</code></td><td>95</td><td>0x5F</td><td><code>_</code></td><td>119</td><td>0x77</td><td><code>w</code></td></tr>
+<tr><td>48</td><td>0x30</td><td><code>0</code></td><td>72</td><td>0x48</td><td><code>H</code></td><td>96</td><td>0x60</td><td><code>`</code></td><td>120</td><td>0x78</td><td><code>x</code></td></tr>
+<tr><td>49</td><td>0x31</td><td><code>1</code></td><td>73</td><td>0x49</td><td><code>I</code></td><td>97</td><td>0x61</td><td><code>a</code></td><td>121</td><td>0x79</td><td><code>y</code></td></tr>
+<tr><td>50</td><td>0x32</td><td><code>2</code></td><td>74</td><td>0x4A</td><td><code>J</code></td><td>98</td><td>0x62</td><td><code>b</code></td><td>122</td><td>0x7A</td><td><code>z</code></td></tr>
+<tr><td>51</td><td>0x33</td><td><code>3</code></td><td>75</td><td>0x4B</td><td><code>K</code></td><td>99</td><td>0x63</td><td><code>c</code></td><td>123</td><td>0x7B</td><td><code>{</code></td></tr>
+<tr><td>52</td><td>0x34</td><td><code>4</code></td><td>76</td><td>0x4C</td><td><code>L</code></td><td>100</td><td>0x64</td><td><code>d</code></td><td>124</td><td>0x7C</td><td><code>|</code></td></tr>
+<tr><td>53</td><td>0x35</td><td><code>5</code></td><td>77</td><td>0x4D</td><td><code>M</code></td><td>101</td><td>0x65</td><td><code>e</code></td><td>125</td><td>0x7D</td><td><code>}</code></td></tr>
+<tr><td>54</td><td>0x36</td><td><code>6</code></td><td>78</td><td>0x4E</td><td><code>N</code></td><td>102</td><td>0x66</td><td><code>f</code></td><td>126</td><td>0x7E</td><td><code>~</code></td></tr>
+<tr><td>55</td><td>0x37</td><td><code>7</code></td><td>79</td><td>0x4F</td><td><code>O</code></td><td>103</td><td>0x67</td><td><code>g</code></td><td></td><td></td><td></td></tr>
+</tbody></table></div>
+
+<div class="box tip"><p class="box-title" data-tag="잠깐">여기서 잠깐 — 아스키 표를 직접 출력해 보기</p>
+<figure class="code"><figcaption>exA-1.c 출력 가능한 아스키 문자 출력</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;ctype.h&gt;
+
+int main(void)
+{
+    for (int c = 32; c &lt; 127; c++) {
+        printf("%3d 0x%02X %c   ", c, c, c);
+        if ((c - 31) % 4 == 0) putchar('\n');   /* 한 줄에 4개 */
+    }
+    putchar('\n');
+    printf("isprint(10)=%d, isprint('A')=%d\n", isprint(10) != 0, isprint('A') != 0);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과 (가운데 줄 생략)</figcaption><pre> 32 0x20      33 0x21 !    34 0x22 "    35 0x23 #   
+ 36 0x24 $    37 0x25 %    38 0x26 &amp;    39 0x27 '   
+...
+124 0x7C |   125 0x7D }   126 0x7E ~   
+isprint(10)=0, isprint('A')=1</pre></figure>
+<p>32번 공백은 눈에 보이지 않으므로 빈칸으로 찍힙니다. 95개 문자를 4개씩 출력하므로 마지막 줄에는 124~126의 3개만 남습니다.</p></div>
+
+<h3 id="sA-4">자주 쓰는 문자 값 요약</h3>
+<div class="tbl"><table>
+<thead><tr><th>문자</th><th>10진</th><th>16진</th><th>쓰임</th></tr></thead>
+<tbody>
+<tr><td><code>'\0'</code></td><td>0</td><td>0x00</td><td>문자열 끝(널 문자)</td></tr>
+<tr><td><code>'\t'</code></td><td>9</td><td>0x09</td><td>탭: TSV 구분자, Makefile 명령 줄</td></tr>
+<tr><td><code>'\n'</code></td><td>10</td><td>0x0A</td><td>줄바꿈(LF): 유닉스 줄 끝</td></tr>
+<tr><td><code>'\r'</code></td><td>13</td><td>0x0D</td><td>복귀(CR): 윈도우 줄 끝은 CR LF</td></tr>
+<tr><td><code>' '</code></td><td>32</td><td>0x20</td><td>공백: 고정 길이 전문의 문자 필드 채움</td></tr>
+<tr><td><code>','</code></td><td>44</td><td>0x2C</td><td>CSV 구분자</td></tr>
+<tr><td><code>'0'</code></td><td>48</td><td>0x30</td><td>숫자 필드 앞 채움</td></tr>
+<tr><td><code>'A'</code> / <code>'a'</code></td><td>65 / 97</td><td>0x41 / 0x61</td><td>대소문자 32 차이</td></tr>
+<tr><td>ESC</td><td>27</td><td>0x1B</td><td>터미널 색상 제어(ANSI 이스케이프)</td></tr>
+<tr><td>DEL</td><td>127</td><td>0x7F</td><td>삭제 문자, 아스키 최댓값</td></tr>
+</tbody></table></div>
+
+<h2 id="sB"><span class="num">B</span>선택 정렬 알고리즘</h2>
+
+<h3 id="sB-1">선택 정렬의 아이디어</h3>
+<p>선택 정렬(selection sort)은 "아직 정렬되지 않은 부분에서 가장 작은 값을 <b>선택</b>해 맨 앞으로 보낸다"를 반복하는 정렬입니다. 카드 패를 펼쳐 놓고 가장 작은 카드를 찾아 왼쪽 끝에 놓고, 남은 카드에서 다시 가장 작은 것을 찾아 그다음 자리에 놓는 방식과 같습니다. 원리가 단순해 정렬 알고리즘 입문용으로 쓰이며, 17장에서 계좌를 잔액순으로 정렬할 때 이미 사용했습니다.</p>
+<ol class="steps">
+  <li>i = 0부터 n-2까지 반복합니다. i 앞쪽(0 ~ i-1)은 이미 정렬이 끝난 영역입니다.</li>
+  <li>i ~ n-1 범위에서 최솟값의 위치 min을 찾습니다.</li>
+  <li>a[i]와 a[min]을 교환합니다(min == i면 생략 가능).</li>
+  <li>이제 0 ~ i가 정렬된 영역이 됩니다. i를 하나 늘립니다.</li>
+</ol>
+
+<h3 id="sB-2">단계별 그림</h3>
+<p>배열 <code>{ 64, 25, 12, 22, 11 }</code>을 오름차순으로 정렬하는 과정입니다. 회색 바탕은 정렬이 끝난 영역, 금색은 이번 회차에 찾은 최솟값, 녹색은 교환될 자리입니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 330" width="700" role="img" aria-label="선택 정렬 단계">
+  <text x="20" y="40" class="small bold">시작</text>
+  <rect class="box" x="120" y="20" width="60" height="34"/><text x="150" y="42" text-anchor="middle" class="mono small">64</text>
+  <rect class="box" x="180" y="20" width="60" height="34"/><text x="210" y="42" text-anchor="middle" class="mono small">25</text>
+  <rect class="box" x="240" y="20" width="60" height="34"/><text x="270" y="42" text-anchor="middle" class="mono small">12</text>
+  <rect class="box" x="300" y="20" width="60" height="34"/><text x="330" y="42" text-anchor="middle" class="mono small">22</text>
+  <rect class="box" x="360" y="20" width="60" height="34"/><text x="390" y="42" text-anchor="middle" class="mono small">11</text>
+
+  <text x="20" y="100" class="small bold">1회차 i=0</text>
+  <rect class="hl" x="120" y="80" width="60" height="34"/><text x="150" y="102" text-anchor="middle" class="mono small">64</text>
+  <rect class="box" x="180" y="80" width="60" height="34"/><text x="210" y="102" text-anchor="middle" class="mono small">25</text>
+  <rect class="box" x="240" y="80" width="60" height="34"/><text x="270" y="102" text-anchor="middle" class="mono small">12</text>
+  <rect class="box" x="300" y="80" width="60" height="34"/><text x="330" y="102" text-anchor="middle" class="mono small">22</text>
+  <rect class="hl2" x="360" y="80" width="60" height="34"/><text x="390" y="102" text-anchor="middle" class="mono small">11</text>
+  <text x="440" y="102" class="small mono">최소 11, 64와 교환 (비교 4)</text>
+
+  <text x="20" y="160" class="small bold">2회차 i=1</text>
+  <rect class="dash" x="120" y="140" width="60" height="34"/><text x="150" y="162" text-anchor="middle" class="mono small">11</text>
+  <rect class="hl" x="180" y="140" width="60" height="34"/><text x="210" y="162" text-anchor="middle" class="mono small">25</text>
+  <rect class="hl2" x="240" y="140" width="60" height="34"/><text x="270" y="162" text-anchor="middle" class="mono small">12</text>
+  <rect class="box" x="300" y="140" width="60" height="34"/><text x="330" y="162" text-anchor="middle" class="mono small">22</text>
+  <rect class="box" x="360" y="140" width="60" height="34"/><text x="390" y="162" text-anchor="middle" class="mono small">64</text>
+  <text x="440" y="162" class="small mono">최소 12, 25와 교환 (비교 3)</text>
+
+  <text x="20" y="220" class="small bold">3회차 i=2</text>
+  <rect class="dash" x="120" y="200" width="60" height="34"/><text x="150" y="222" text-anchor="middle" class="mono small">11</text>
+  <rect class="dash" x="180" y="200" width="60" height="34"/><text x="210" y="222" text-anchor="middle" class="mono small">12</text>
+  <rect class="hl" x="240" y="200" width="60" height="34"/><text x="270" y="222" text-anchor="middle" class="mono small">25</text>
+  <rect class="hl2" x="300" y="200" width="60" height="34"/><text x="330" y="222" text-anchor="middle" class="mono small">22</text>
+  <rect class="box" x="360" y="200" width="60" height="34"/><text x="390" y="222" text-anchor="middle" class="mono small">64</text>
+  <text x="440" y="222" class="small mono">최소 22, 25와 교환 (비교 2)</text>
+
+  <text x="20" y="280" class="small bold">4회차 i=3</text>
+  <rect class="dash" x="120" y="260" width="60" height="34"/><text x="150" y="282" text-anchor="middle" class="mono small">11</text>
+  <rect class="dash" x="180" y="260" width="60" height="34"/><text x="210" y="282" text-anchor="middle" class="mono small">12</text>
+  <rect class="dash" x="240" y="260" width="60" height="34"/><text x="270" y="282" text-anchor="middle" class="mono small">22</text>
+  <rect class="hl2" x="300" y="260" width="60" height="34"/><text x="330" y="282" text-anchor="middle" class="mono small">25</text>
+  <rect class="box" x="360" y="260" width="60" height="34"/><text x="390" y="282" text-anchor="middle" class="mono small">64</text>
+  <text x="440" y="282" class="small mono">최소 25 제자리, 교환 없음 (비교 1)</text>
+  <text x="120" y="320" class="small acc">결과: 11 12 22 25 64 — 비교 4+3+2+1 = 10회, 교환 3회</text>
+</svg>
+<figcaption>그림 B-1 선택 정렬의 회차별 진행 (n=5이면 4회차로 끝난다)</figcaption>
+</figure>
+
+<h3 id="sB-3">선택 정렬 코드</h3>
+<figure class="code"><figcaption>exB-1.c 선택 정렬과 비교·교환 횟수 측정</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+static long g_cmp = 0, g_swap = 0;        /* 측정용 카운터 */
+
+void selection_sort(int a[], int n)
+{
+    for (int i = 0; i &lt; n - 1; i++) {     /* 마지막 한 개는 자동으로 제자리 */
+        int min = i;                       /* 일단 i를 최솟값 위치로 가정 */
+        for (int j = i + 1; j &lt; n; j++) {
+            g_cmp++;
+            if (a[j] &lt; a[min])             /* 더 작은 값 발견 */
+                min = j;
+        }
+        if (min != i) {                    /* 교환 */
+            int t = a[i];
+            a[i] = a[min];
+            a[min] = t;
+            g_swap++;
+        }
+    }
+}
+
+void print_arr(const int a[], int n)
+{
+    for (int i = 0; i &lt; n; i++) printf("%d ", a[i]);
+    putchar('\n');
+}
+
+int main(void)
+{
+    int a[] = { 64, 25, 12, 22, 11 };
+    int n = sizeof a / sizeof a[0];
+
+    selection_sort(a, n);
+    print_arr(a, n);
+    printf("비교 %ld회, 교환 %ld회\n", g_cmp, g_swap);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>11 12 22 25 64
+비교 10회, 교환 3회</pre></figure>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수</p>
+<ul>
+  <li><b>최솟값 "값"을 저장하고 위치를 잃어버림</b>: <code>int minval = a[i];</code>만 기억하면 교환할 위치를 알 수 없습니다. 위치(인덱스)를 저장해야 합니다.</li>
+  <li><b>안쪽 반복 안에서 매번 교환</b>: 더 작은 값을 찾을 때마다 교환하면 결과는 맞아도 교환 횟수가 크게 늘어 선택 정렬의 장점(교환 최소)이 사라집니다. 이런 코드는 사실상 다른 정렬입니다.</li>
+  <li><b>바깥 반복 범위</b>: <code>i &lt; n</code>으로 써도 결과는 맞지만 마지막 회차는 비교 0회의 헛수고입니다. <code>i &lt; n - 1</code>이 정확합니다.</li>
+</ul></div>
+
+<h3 id="sB-4">시간 복잡도와 공간 복잡도</h3>
+<p>i번째 회차에서 비교는 n-1-i번이므로 전체 비교 횟수는</p>
+<p style="text-align:center"><code>(n-1) + (n-2) + ... + 1 = n(n-1)/2</code></p>
+<p>입니다. 이 값은 <b>입력이 이미 정렬되어 있든, 역순이든, 무작위든 항상 같습니다</b>. 최솟값을 확인하려면 남은 원소를 모두 봐야 하기 때문입니다. 따라서 최선·평균·최악 모두 O(n<sup>2</sup>)입니다. 교환은 회차마다 최대 1번이므로 최대 n-1번, 즉 O(n)입니다. 추가 메모리는 변수 몇 개뿐이므로 공간 복잡도는 O(1)(제자리 정렬, in-place)입니다.</p>
+
+<div class="tbl"><table>
+<thead><tr><th>n</th><th>비교 횟수 n(n-1)/2</th><th>체감</th></tr></thead>
+<tbody>
+<tr><td>10</td><td>45</td><td>즉시</td></tr>
+<tr><td>1,000</td><td>499,500</td><td>즉시</td></tr>
+<tr><td>100,000</td><td>약 50억(4,999,950,000)</td><td>수 초 이상</td></tr>
+<tr><td>10,000,000 (전 계좌)</td><td>약 5×10<sup>13</sup></td><td>사실상 불가능</td></tr>
+</tbody></table></div>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — 교환이 적다는 장점은 언제 쓸모 있을까?</p>
+<p>선택 정렬은 비교는 많지만 <b>쓰기(교환)가 최대 n-1번</b>으로 적습니다. 원소 하나를 옮기는 비용이 비교보다 훨씬 큰 경우, 예를 들어 플래시 메모리처럼 쓰기 횟수에 수명 제한이 있는 저장 장치나, 아주 큰 레코드를 직접 옮겨야 하는 경우에는 이 성질이 의미가 있습니다. 하지만 일반적인 상황에서는 큰 레코드를 정렬할 때 포인터나 인덱스만 정렬하는 방법(17장 여기서 잠깐)이 더 낫습니다.</p></div>
+
+<h3 id="sB-5">안정성(stability)</h3>
+<p>정렬 알고리즘이 <b>안정적(stable)</b>이라는 것은 키가 같은 원소들의 원래 순서가 정렬 후에도 유지된다는 뜻입니다. 기본 선택 정렬은 <b>불안정</b>합니다. 멀리 떨어진 원소끼리 교환하면서 같은 키를 가진 원소를 앞질러 보낼 수 있기 때문입니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 210" width="700" role="img" aria-label="선택 정렬의 불안정성">
+  <text x="20" y="35" class="small bold">원래</text>
+  <rect class="hl" x="110" y="15" width="90" height="34"/><text x="155" y="37" text-anchor="middle" class="mono small">5 (A)</text>
+  <rect class="box" x="200" y="15" width="90" height="34"/><text x="245" y="37" text-anchor="middle" class="mono small">3 (B)</text>
+  <rect class="hl2" x="290" y="15" width="90" height="34"/><text x="335" y="37" text-anchor="middle" class="mono small">5 (C)</text>
+  <rect class="box" x="380" y="15" width="90" height="34"/><text x="425" y="37" text-anchor="middle" class="mono small">2 (D)</text>
+  <path class="arrow-m" d="M155 49 C 200 90, 380 90, 425 49"/>
+  <text x="290" y="92" text-anchor="middle" class="small mute">1회차: 최소 2(D)와 5(A) 교환 — A가 맨 뒤로 날아감</text>
+  <text x="20" y="140" class="small bold">결과</text>
+  <rect class="box" x="110" y="120" width="90" height="34"/><text x="155" y="142" text-anchor="middle" class="mono small">2 (D)</text>
+  <rect class="box" x="200" y="120" width="90" height="34"/><text x="245" y="142" text-anchor="middle" class="mono small">3 (B)</text>
+  <rect class="hl2" x="290" y="120" width="90" height="34"/><text x="335" y="142" text-anchor="middle" class="mono small">5 (C)</text>
+  <rect class="hl" x="380" y="120" width="90" height="34"/><text x="425" y="142" text-anchor="middle" class="mono small">5 (A)</text>
+  <text x="20" y="190" class="small warn-t">키 5끼리의 순서가 A, C에서 C, A로 뒤바뀜 → 불안정</text>
+</svg>
+<figcaption>그림 B-2 선택 정렬은 원거리 교환 때문에 같은 키의 순서를 바꿀 수 있다</figcaption>
+</figure>
+
+<div class="box fin"><p class="box-title" data-tag="금융 실무">은행 시스템에서는 — 안정 정렬이 필요한 순간</p>
+<p>거래 내역을 "거래 시각순"으로 정렬해 둔 상태에서 다시 "계좌번호순"으로 정렬한다고 합시다. 안정 정렬을 쓰면 같은 계좌 안에서는 거래 시각 순서가 그대로 유지되어, 계좌별 거래 내역이 시간순으로 나옵니다. 불안정 정렬을 쓰면 같은 계좌의 거래 순서가 뒤섞여 잔액 추이를 계산할 때 중간 잔액이 음수로 보이는 등 이상한 결과가 나옵니다. 이런 이유로 실무에서는 (1) 안정 정렬(병합 정렬 등)을 쓰거나, (2) 정렬 키에 계좌번호와 거래 일련번호를 <b>모두</b> 넣어 순서가 하나로 정해지게 합니다. 표준 C의 <code>qsort</code>는 안정성을 <b>보장하지 않으므로</b> 두 번째 방법을 써야 합니다.</p></div>
+
+<h3 id="sB-6">버블 정렬, 삽입 정렬과의 비교</h3>
+<div class="tbl"><table>
+<thead><tr><th>항목</th><th>선택 정렬</th><th>버블 정렬</th><th>삽입 정렬</th></tr></thead>
+<tbody>
+<tr><td>아이디어</td><td>최솟값을 찾아 앞으로</td><td>이웃끼리 비교·교환, 큰 값이 뒤로 떠오름</td><td>정렬된 앞부분에 새 원소를 끼워 넣기</td></tr>
+<tr><td>최선 시간</td><td>O(n<sup>2</sup>)</td><td>O(n) (교환 없으면 조기 종료하는 경우)</td><td>O(n) (이미 정렬된 경우)</td></tr>
+<tr><td>평균·최악 시간</td><td>O(n<sup>2</sup>)</td><td>O(n<sup>2</sup>)</td><td>O(n<sup>2</sup>)</td></tr>
+<tr><td>교환(쓰기) 횟수</td><td>최대 n-1 (가장 적음)</td><td>최대 n(n-1)/2</td><td>이동 최대 n(n-1)/2</td></tr>
+<tr><td>안정성</td><td>불안정</td><td>안정</td><td>안정</td></tr>
+<tr><td>추가 메모리</td><td>O(1)</td><td>O(1)</td><td>O(1)</td></tr>
+<tr><td>실무 쓰임</td><td>교육용, 쓰기 비용이 큰 경우</td><td>교육용</td><td>거의 정렬된 데이터, 작은 n, 고급 정렬의 내부 단계</td></tr>
+</tbody></table></div>
+
+<figure class="code"><figcaption>exB-2.c 삽입 정렬 (비교용)</figcaption>
+<pre><code class="language-c">void insertion_sort(int a[], int n)
+{
+    for (int i = 1; i &lt; n; i++) {
+        int key = a[i];                 /* 끼워 넣을 값 */
+        int j = i - 1;
+        while (j &gt;= 0 &amp;&amp; a[j] &gt; key) {  /* &gt; 이므로 같은 값은 넘지 않음: 안정 */
+            a[j + 1] = a[j];            /* 한 칸씩 뒤로 밀기 */
+            j--;
+        }
+        a[j + 1] = key;
+    }
+}</code></pre></figure>
+
+<div class="box tip"><p class="box-title" data-tag="잠깐">여기서 잠깐 — 실무에서는 qsort</p>
+<p>O(n<sup>2</sup>) 정렬은 원리를 배우는 용도이고, 실제 코드에서는 표준 라이브러리 <code>qsort</code>(평균 O(n log n))를 씁니다. 비교 함수에서 <code>return a - b;</code>처럼 빼기를 쓰면 큰 금액에서 오버플로가 나므로 비교 연산으로 -1, 0, 1을 돌려줍니다.</p>
+<figure class="code good"><figcaption>exB-3.c qsort로 잔액 내림차순, 같으면 계좌번호 오름차순</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;string.h&gt;
+
+typedef struct { char acc[16]; long long bal; } Acc;
+
+static int cmp_acc(const void *pa, const void *pb)
+{
+    const Acc *a = pa, *b = pb;
+    if (a-&gt;bal != b-&gt;bal) return (a-&gt;bal &lt; b-&gt;bal) ? 1 : -1;  /* 내림차순 */
+    return strcmp(a-&gt;acc, b-&gt;acc);                            /* 2차 키 */
+}
+
+int main(void)
+{
+    Acc v[] = { {"110-003", 500}, {"110-001", 900}, {"110-002", 500} };
+    qsort(v, 3, sizeof v[0], cmp_acc);
+    for (int i = 0; i &lt; 3; i++) printf("%s %lld\n", v[i].acc, v[i].bal);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>110-001 900
+110-002 500
+110-003 500</pre></figure>
+</div>
+
+<h2 id="sC"><span class="num">C</span>여기서 잠깐 모음</h2>
+<p>과정 전체에서 "여기서 잠깐"과 "자주 하는 실수"로 다룬 핵심 팁을 주제별로 모았습니다. 각 항목의 링크를 누르면 자세한 설명이 있는 절로 이동합니다. 시험 전이나 면접 전, 코드 리뷰 전에 훑어보기 좋습니다.</p>
+
+<h3 id="sC-1">기초 문법과 입출력 (1~8장)</h3>
+<div class="tbl"><table>
+<thead><tr><th>#</th><th>팁</th><th>한 줄 설명</th><th>관련 절</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>int main(void)</code>와 <code>return 0;</code></td><td><code>void main</code>은 표준이 아닙니다. main의 반환값은 운영체제(배치 스케줄러)가 성공/실패 판단에 씁니다.</td><td><a href="ch01.html#s01-1">01-1</a></td></tr>
+<tr><td>2</td><td>경고는 오류처럼</td><td><code>gcc -Wall -Wextra</code>로 컴파일하고 경고를 0개로 유지합니다. 경고의 상당수는 실제 버그입니다.</td><td><a href="ch01.html#s01-2">01-2</a></td></tr>
+<tr><td>3</td><td>printf 서식과 자료형 일치</td><td><code>long long</code>은 <code>%lld</code>, <code>size_t</code>는 <code>%zu</code>, <code>double</code>은 <code>%f</code>. 불일치는 미정의 동작입니다.</td><td><a href="ch02.html#s02-1">02-1</a></td></tr>
+<tr><td>4</td><td>정수 상수의 접미사</td><td>큰 금액 상수는 <code>50000000000LL</code>처럼 LL을 붙여 형을 명확히 합니다.</td><td><a href="ch02.html#s02-2">02-2</a></td></tr>
+<tr><td>5</td><td>초기화하지 않은 지역 변수</td><td>쓰레기값을 가집니다. 선언과 동시에 초기화하는 습관을 들입니다.</td><td><a href="ch03.html#s03-1">03-1</a></td></tr>
+<tr><td>6</td><td>scanf의 <code>&amp;</code>와 반환값</td><td>값을 바꿀 변수의 주소를 넘기고, 반환값(변환 성공 개수)을 반드시 검사합니다. <code>%s</code>에는 폭 지정.</td><td><a href="ch03.html#s03-2">03-2</a></td></tr>
+<tr><td>7</td><td>정수 나눗셈과 나머지</td><td><code>7 / 2</code>는 3, 음수 나눗셈은 0 방향으로 버림(C99). 금액 계산에서 곱셈을 먼저, 나눗셈을 나중에.</td><td><a href="ch04.html#s04-1">04-1</a></td></tr>
+<tr><td>8</td><td>단락 평가</td><td><code>p != NULL &amp;&amp; p-&gt;bal &gt; 0</code>처럼 앞 조건이 거짓이면 뒤는 평가하지 않습니다. 안전 검사 순서가 중요합니다.</td><td><a href="ch04.html#s04-1">04-1</a></td></tr>
+<tr><td>9</td><td>증감 연산자와 시퀀스 포인트</td><td><code>i = i++ + 1;</code>처럼 한 식에서 같은 변수를 두 번 수정하면 미정의 동작입니다.</td><td><a href="ch04.html#s04-2">04-2</a></td></tr>
+<tr><td>10</td><td><code>=</code>와 <code>==</code></td><td><code>if (status = 0)</code>은 대입입니다. 경고를 켜면 잡아 줍니다.</td><td><a href="ch05.html#s05-1">05-1</a></td></tr>
+<tr><td>11</td><td>switch의 break</td><td>break를 빠뜨리면 다음 case로 흘러갑니다(fall-through). 의도했다면 주석으로 표시합니다.</td><td><a href="ch05.html#s05-2">05-2</a></td></tr>
+<tr><td>12</td><td>반복문 경계 off-by-one</td><td>크기 n 배열은 <code>i &lt; n</code>. <code>&lt;=</code>는 범위를 한 칸 넘습니다.</td><td><a href="ch06.html#s06-1">06-1</a></td></tr>
+<tr><td>13</td><td>함수 원형 선언</td><td>호출 전에 원형이 보여야 컴파일러가 인자 형을 검사합니다. 암시적 선언은 C99부터 금지입니다.</td><td><a href="ch07.html#s07-1">07-1</a></td></tr>
+<tr><td>14</td><td>배열 크기 구하기</td><td><code>sizeof a / sizeof a[0]</code>은 배열 이름에만 동작합니다. 함수 매개변수로 받은 배열(사실은 포인터)에는 쓸 수 없습니다.</td><td><a href="ch08.html#s08-1">08-1</a></td></tr>
+<tr><td>15</td><td>문자열의 널 문자 자리</td><td>n글자 문자열은 n+1바이트 배열이 필요합니다.</td><td><a href="ch08.html#s08-2">08-2</a></td></tr>
+</tbody></table></div>
+
+<h3 id="sC-2">포인터, 문자열, 메모리 (9~16장)</h3>
+<div class="tbl"><table>
+<thead><tr><th>#</th><th>팁</th><th>한 줄 설명</th><th>관련 절</th></tr></thead>
+<tbody>
+<tr><td>16</td><td>포인터는 초기화하거나 NULL</td><td>초기화하지 않은 포인터(와일드 포인터)의 역참조는 미정의 동작입니다.</td><td><a href="ch09.html#s09-1">09-1</a></td></tr>
+<tr><td>17</td><td>포인터 크기는 대상과 무관</td><td>64비트 환경에서 모든 데이터 포인터는 8바이트입니다. <code>sizeof(p)</code>와 <code>sizeof(*p)</code>를 구분합니다.</td><td><a href="ch09.html#s09-2">09-2</a></td></tr>
+<tr><td>18</td><td>배열 이름은 포인터가 아니다</td><td>대부분의 식에서 첫 원소 주소로 변환될 뿐, sizeof와 &amp;의 피연산자일 때는 배열 전체입니다.</td><td><a href="ch10.html#s10-1">10-1</a></td></tr>
+<tr><td>19</td><td>배열을 받는 함수는 길이도 받기</td><td>함수는 배열의 길이를 알 수 없으므로 <code>(int *a, size_t n)</code> 형태로 받습니다.</td><td><a href="ch10.html#s10-2">10-2</a></td></tr>
+<tr><td>20</td><td>getchar의 반환값은 int</td><td>EOF를 구별하려면 int로 받아야 합니다(fgetc도 동일).</td><td><a href="ch11.html#s11-1">11-1</a></td></tr>
+<tr><td>21</td><td><code>fflush(stdin)</code> 금지</td><td>표준상 미정의 동작입니다. 남은 입력은 getchar 반복으로 직접 버립니다.</td><td><a href="ch11.html#s11-2">11-2</a></td></tr>
+<tr><td>22</td><td>문자열 리터럴은 수정 불가</td><td><code>char *s = "abc"; s[0] = 'X';</code>는 미정의 동작. 수정하려면 <code>char s[] = "abc";</code></td><td><a href="ch12.html#s12-1">12-1</a></td></tr>
+<tr><td>23</td><td>gets 금지, strcpy 주의</td><td>gets는 C11에서 삭제. 복사는 길이를 아는 <code>snprintf</code>나 길이 검사 후 memcpy를 씁니다.</td><td><a href="ch12.html#s12-2">12-2</a></td></tr>
+<tr><td>24</td><td>strncpy의 함정</td><td>원본이 길면 널 문자를 붙이지 않습니다. 마지막 바이트를 직접 <code>'\0'</code>으로 설정합니다.</td><td><a href="ch12.html#s12-2">12-2</a></td></tr>
+<tr><td>25</td><td>지역 변수 주소 반환 금지</td><td>함수가 끝나면 스택 공간이 사라져 댕글링 포인터가 됩니다.</td><td><a href="ch13.html#s13-1">13-1</a></td></tr>
+<tr><td>26</td><td>static 지역 변수</td><td>함수 호출이 끝나도 값이 유지되며 한 번만 초기화됩니다. 멀티스레드에서는 공유 상태가 되므로 주의합니다.</td><td><a href="ch13.html#s13-2">13-2</a></td></tr>
+<tr><td>27</td><td>2차원 배열 매개변수</td><td>열 크기는 반드시 지정해야 합니다: <code>int a[][4]</code>.</td><td><a href="ch14.html#s14-1">14-1</a></td></tr>
+<tr><td>28</td><td>void 포인터는 역참조 불가</td><td>적절한 형으로 변환한 뒤 사용합니다. qsort 비교 함수가 대표적인 예입니다.</td><td><a href="ch15.html#s15-2">15-2</a></td></tr>
+<tr><td>29</td><td>malloc 반환값 검사와 free</td><td>NULL 검사, 할당한 만큼 정확히 한 번 free, free 후 포인터에 NULL 대입.</td><td><a href="ch16.html#s16-1">16-1</a></td></tr>
+<tr><td>30</td><td>realloc은 임시 포인터로</td><td><code>p = realloc(p, n)</code>은 실패 시 원래 메모리를 잃어버립니다(누수).</td><td><a href="ch16.html#s16-2">16-2</a></td></tr>
+</tbody></table></div>
+
+<h3 id="sC-3">구조체, 파일, 빌드 (17~19장)</h3>
+<div class="tbl"><table>
+<thead><tr><th>#</th><th>팁</th><th>한 줄 설명</th><th>관련 절</th></tr></thead>
+<tbody>
+<tr><td>31</td><td>한글 필드는 바이트 수로</td><td>UTF-8 한글은 3바이트, CP949는 2바이트. 필드 크기는 바이트 기준으로 잡습니다.</td><td><a href="ch17.html#s17-1">17-1</a></td></tr>
+<tr><td>32</td><td><code>sizeof *p</code> 관용구</td><td><code>p = malloc(sizeof *p)</code>는 형이 바뀌어도 안전합니다.</td><td><a href="ch17.html#s17-1">17-1</a></td></tr>
+<tr><td>33</td><td>구조체는 대입 가능, 비교 불가</td><td>==로 비교할 수 없고 memcmp는 패딩 때문에 위험합니다. 멤버별 비교 함수를 씁니다.</td><td><a href="ch17.html#s17-1">17-1</a></td></tr>
+<tr><td>34</td><td>큰 레코드는 포인터 배열로 정렬</td><td>구조체 전체 대신 8바이트 포인터만 옮겨 비용을 줄입니다.</td><td><a href="ch17.html#s17-2">17-2</a></td></tr>
+<tr><td>35</td><td>패딩 줄이기</td><td>멤버를 정렬 값이 큰 순서로 배치합니다. 전문 구조체는 char 배열로 정의하고 <code>_Static_assert</code>로 길이 검증.</td><td><a href="ch17.html#s17-2">17-2</a></td></tr>
+<tr><td>36</td><td>typedef 이름에 <code>_t</code> 피하기</td><td>POSIX가 예약한 접미사입니다.</td><td><a href="ch17.html#s17-2">17-2</a></td></tr>
+<tr><td>37</td><td>파일 경로의 역슬래시</td><td>C 문자열에서는 <code>"C:\\data"</code> 또는 <code>"C:/data"</code>. 상대 경로는 현재 작업 디렉터리 기준입니다.</td><td><a href="ch18.html#s18-1">18-1</a></td></tr>
+<tr><td>38</td><td>"w"는 기존 내용을 지운다</td><td>수정은 "r+", 덧붙이기는 "a", 덮어쓰기 방지는 C11 "wx".</td><td><a href="ch18.html#s18-1">18-1</a></td></tr>
+<tr><td>39</td><td>바이너리 데이터는 "b" 모드</td><td>윈도우 텍스트 모드의 \n ↔ \r\n 변환이 데이터를 망가뜨립니다.</td><td><a href="ch18.html#s18-1">18-1</a></td></tr>
+<tr><td>40</td><td>fgets + sscanf</td><td>줄 단위로 읽고 그 줄만 파싱해야 오류 줄을 정확히 보고하고 건너뛸 수 있습니다.</td><td><a href="ch18.html#s18-2">18-2</a></td></tr>
+<tr><td>41</td><td><code>while (!feof(fp))</code> 금지</td><td>마지막 데이터가 두 번 처리됩니다. 읽기 함수의 반환값으로 반복합니다.</td><td><a href="ch18.html#s18-2">18-2</a></td></tr>
+<tr><td>42</td><td>갱신 모드의 방향 전환</td><td>읽기와 쓰기 사이에 fseek(쓰기 후에는 fflush도 가능)가 필요합니다.</td><td><a href="ch18.html#s18-2">18-2</a></td></tr>
+<tr><td>43</td><td>중요 로그는 flush</td><td>비정상 종료 시 버퍼 내용은 사라집니다. 줄 버퍼 설정이나 fflush를 씁니다.</td><td><a href="ch18.html#s18-2">18-2</a></td></tr>
+<tr><td>44</td><td>매크로는 괄호, 부작용 금지</td><td>매개변수와 전체를 괄호로, 인자에 ++나 함수 호출 금지. 가능하면 static inline 함수로.</td><td><a href="ch19.html#s19-1">19-1</a></td></tr>
+<tr><td>45</td><td>do { } while (0)</td><td>여러 문장 매크로를 하나의 문장처럼 쓰는 관용구입니다.</td><td><a href="ch19.html#s19-1">19-1</a></td></tr>
+<tr><td>46</td><td><code>#pragma pack</code>은 push/pop 쌍으로</td><td>복원하지 않으면 뒤따르는 모든 구조체의 배치가 바뀝니다.</td><td><a href="ch19.html#s19-1">19-1</a></td></tr>
+<tr><td>47</td><td>헤더에는 선언만</td><td>변수 정의나 일반 함수 정의를 헤더에 두면 multiple definition 링크 오류가 납니다.</td><td><a href="ch19.html#s19-2">19-2</a></td></tr>
+<tr><td>48</td><td>.c는 자기 .h를 가장 먼저 include</td><td>선언과 정의의 불일치를 컴파일러가 잡고, 헤더의 자기 완결성도 검증됩니다.</td><td><a href="ch19.html#s19-2">19-2</a></td></tr>
+<tr><td>49</td><td>공개하지 않는 것은 static</td><td>이름 충돌을 막고 캡슐화합니다.</td><td><a href="ch19.html#s19-2">19-2</a></td></tr>
+<tr><td>50</td><td>Makefile 의존성에 헤더 포함</td><td>헤더 변경이 반영되지 않으면 서로 다른 구조체 정의가 섞인 바이너리가 만들어집니다.</td><td><a href="ch19.html#s19-2">19-2</a></td></tr>
+</tbody></table></div>
+
+<h3 id="sC-4">금융 IT 심화 (20~33장)</h3>
+<div class="tbl"><table>
+<thead><tr><th>#</th><th>팁</th><th>한 줄 설명</th><th>관련 절</th></tr></thead>
+<tbody>
+<tr><td>51</td><td>부호 있는 정수 오버플로는 UB</td><td>연산 전에 범위를 검사합니다: <code>if (a &gt; LLONG_MAX - b)</code>.</td><td><a href="ch20.html#s20-1">20-1</a></td></tr>
+<tr><td>52</td><td>금액에 double 금지</td><td>원 단위 정수, 외화는 최소 단위 정수로 다룹니다.</td><td><a href="ch21.html#s21-1">21-1</a></td></tr>
+<tr><td>53</td><td>반올림 규칙은 명시적으로</td><td>절사·반올림·은행가 반올림 중 상품 규정에 맞는 것을 정수 연산으로 구현합니다.</td><td><a href="ch21.html#s21-2">21-2</a></td></tr>
+<tr><td>54</td><td>모든 외부 입력은 검증</td><td>길이, 형식, 범위를 확인하기 전에는 신뢰하지 않습니다.</td><td><a href="ch22.html#s22-1">22-1</a></td></tr>
+<tr><td>55</td><td>전문의 숫자 필드</td><td>문자로 된 고정 길이 숫자는 자릿수와 숫자 문자 여부를 검사한 뒤 변환합니다.</td><td><a href="ch24.html#s24-1">24-1</a></td></tr>
+<tr><td>56</td><td>배치는 재실행 가능하게</td><td>체크포인트와 처리 여부 플래그로 이중 처리를 막습니다.</td><td><a href="ch25.html#s25-2">25-2</a></td></tr>
+<tr><td>57</td><td>공유 자원은 잠금</td><td>읽기-수정-쓰기 구간은 뮤텍스나 DB 잠금으로 보호합니다.</td><td><a href="ch28.html#s28-2">28-2</a></td></tr>
+<tr><td>58</td><td>트랜잭션은 짧게</td><td>잠금 유지 시간이 길수록 경합과 데드락 위험이 커집니다.</td><td><a href="ch29.html#s29-2">29-2</a></td></tr>
+<tr><td>59</td><td>core 파일과 디버그 심볼</td><td>운영 장애 분석을 위해 심볼 정보를 별도 보관합니다.</td><td><a href="ch30.html#s30-1">30-1</a></td></tr>
+<tr><td>60</td><td>이식성 있는 정수형</td><td>파일·전문에 쓰는 정수는 <code>int32_t</code>, <code>int64_t</code> 같은 고정 폭 형을 씁니다.</td><td><a href="ch31.html#s31-2">31-2</a></td></tr>
+</tbody></table></div>
+
+<h2 id="sD"><span class="num">D</span>금융 IT 실무 체크리스트</h2>
+<p>금융권 개발 현장에서 코드 리뷰, 테스트, 배포, 운영 단계마다 확인하는 항목을 정리했습니다. 회사마다 세부 기준은 다르지만 아래 항목은 거의 공통입니다. 각 항목을 "예"라고 답할 수 있을 때 다음 단계로 넘어갑니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 150" width="700" role="img" aria-label="개발에서 운영까지의 검증 단계">
+  <rect class="box" x="10" y="50" width="120" height="50" rx="8"/>
+  <text x="70" y="80" text-anchor="middle" class="small bold">개발</text>
+  <path class="arrow" d="M130 75 H 150"/>
+  <rect class="hl" x="150" y="50" width="120" height="50" rx="8"/>
+  <text x="210" y="72" text-anchor="middle" class="small bold">코드 리뷰</text>
+  <text x="210" y="90" text-anchor="middle" class="small mute">D-1</text>
+  <path class="arrow" d="M270 75 H 290"/>
+  <rect class="box" x="290" y="50" width="120" height="50" rx="8"/>
+  <text x="350" y="72" text-anchor="middle" class="small bold">테스트</text>
+  <text x="350" y="90" text-anchor="middle" class="small mute">D-3, D-4</text>
+  <path class="arrow" d="M410 75 H 430"/>
+  <rect class="hl2" x="430" y="50" width="120" height="50" rx="8"/>
+  <text x="490" y="72" text-anchor="middle" class="small bold">배포</text>
+  <text x="490" y="90" text-anchor="middle" class="small mute">D-2</text>
+  <path class="arrow" d="M550 75 H 570"/>
+  <rect class="box" x="570" y="50" width="120" height="50" rx="8"/>
+  <text x="630" y="72" text-anchor="middle" class="small bold">운영</text>
+  <text x="630" y="90" text-anchor="middle" class="small mute">D-5, D-6</text>
+  <text x="350" y="130" text-anchor="middle" class="small acc">각 단계의 체크리스트를 통과해야 다음 단계로</text>
+</svg>
+<figcaption>그림 D-1 체크리스트가 적용되는 단계</figcaption>
+</figure>
+
+<h3 id="sD-1">D-1 코드 리뷰 체크리스트</h3>
+<div class="tbl"><table>
+<thead><tr><th>분류</th><th>확인 항목</th></tr></thead>
+<tbody>
+<tr><td>빌드</td><td><code>-Wall -Wextra</code> 경고 0건인가? 팀 표준 컴파일 옵션을 사용했는가?</td></tr>
+<tr><td>반환값</td><td>malloc, fopen, fread/fwrite, fclose, scanf류, 모든 업무 함수의 반환값을 검사하는가?</td></tr>
+<tr><td>메모리</td><td>할당한 메모리와 연 파일·소켓을 모든 경로(오류 경로 포함)에서 해제하는가? 해제 후 사용, 이중 해제는 없는가?</td></tr>
+<tr><td>버퍼</td><td>문자열 복사·서식 출력에 길이 제한이 있는가? <code>gets</code>, 폭 없는 <code>%s</code>, 길이 검사 없는 <code>strcpy</code>/<code>strcat</code>/<code>sprintf</code>는 없는가?</td></tr>
+<tr><td>경계</td><td>배열 인덱스, 반복 경계(off-by-one), 빈 입력(0건), 최대 건수를 처리하는가?</td></tr>
+<tr><td>정수</td><td>오버플로 가능성이 있는 곱셈·덧셈을 사전 검사하는가? 부호 있는/없는 정수 비교를 섞지 않았는가?</td></tr>
+<tr><td>미정의 동작</td><td>초기화하지 않은 변수, 한 식에서의 중복 수정, 정렬되지 않은 접근, 매크로 부작용은 없는가?</td></tr>
+<tr><td>구조</td><td>공개하지 않는 함수·변수는 static인가? 헤더에 정의가 없는가? 매직 넘버 대신 enum/상수를 쓰는가?</td></tr>
+<tr><td>동시성</td><td>전역·static 변수를 여러 스레드/프로세스가 공유하는가? 공유한다면 잠금이 있는가?</td></tr>
+<tr><td>가독성</td><td>함수 하나가 한 가지 일만 하는가? 이름이 업무 용어와 일치하는가? 주석이 "무엇"이 아닌 "왜"를 설명하는가?</td></tr>
+</tbody></table></div>
+
+<h3 id="sD-2">D-2 배포 전 체크리스트</h3>
+<ul>
+  <li>형상 관리 시스템에 커밋된 소스로, 빌드 서버에서 빌드한 바이너리인가? (개발자 PC 빌드 금지)</li>
+  <li>변경 요청서(요건)와 실제 변경 내용이 일치하는가? 관련 없는 변경이 섞이지 않았는가?</li>
+  <li>단위 테스트, 통합 테스트, 대외기관 연동 테스트, 회귀 테스트 결과가 승인되었는가?</li>
+  <li>공통 헤더(구조체, 전문 레이아웃)를 바꿨다면 영향받는 모든 프로그램을 함께 다시 빌드·배포하는가?</li>
+  <li>DB 스키마나 설정 변경이 함께 필요한가? 적용 순서(DB → 프로그램 등)가 정해져 있는가?</li>
+  <li>롤백(원복) 절차와 이전 버전 바이너리가 준비되어 있는가? 원복 시 데이터 정합성 문제는 없는가?</li>
+  <li>배포 시각이 온라인 거래량이 적은 시간대이며, 일마감·대외 마감 배치와 겹치지 않는가?</li>
+  <li>배포 후 확인할 모니터링 지표(오류율, 응답 시간, 처리 건수)와 담당자가 정해져 있는가?</li>
+  <li>운영 환경 설정(접속 정보, 경로, 로그 레벨)이 개발 환경 값으로 남아 있지 않은가?</li>
+</ul>
+
+<h3 id="sD-3">D-3 금액 처리 체크리스트</h3>
+<div class="tbl"><table>
+<thead><tr><th>항목</th><th>확인 내용</th></tr></thead>
+<tbody>
+<tr><td>자료형</td><td>금액에 float/double을 쓰지 않았는가? 원화는 <code>long long</code>(또는 int64_t) 원 단위, 외화는 최소 통화 단위 정수인가?</td></tr>
+<tr><td>범위</td><td>금액 합계·곱셈(금액 × 이율 × 일수)이 자료형 범위를 넘지 않는지 검토했는가?</td></tr>
+<tr><td>연산 순서</td><td>곱셈을 먼저, 나눗셈을 나중에 하여 정밀도 손실을 줄였는가?</td></tr>
+<tr><td>단수 처리</td><td>원 미만 절사/반올림/올림 규칙이 상품 규정과 일치하는가? 음수 금액의 처리 방향을 확인했는가?</td></tr>
+<tr><td>합계 검증</td><td>건별 계산의 합과 총액 계산이 다를 때(단수 차이) 어느 쪽을 기준으로 할지 정해져 있는가?</td></tr>
+<tr><td>음수·0</td><td>입금·출금 금액이 0 이하인 요청을 거절하는가? 잔액이 음수가 될 수 있는 상품(마이너스 통장)과 없는 상품을 구분하는가?</td></tr>
+<tr><td>한도</td><td>1회·1일 한도, 계좌 상태(정지, 압류, 해지), 지급 정지 여부를 출금 전에 검사하는가?</td></tr>
+<tr><td>원자성</td><td>출금과 입금, 거래 내역 기록이 하나의 트랜잭션으로 묶여 있는가? 실패 시 보상 처리가 있는가?</td></tr>
+<tr><td>중복 방지</td><td>같은 요청이 재전송되었을 때 이중 처리하지 않도록 거래 고유번호로 중복 검사를 하는가?</td></tr>
+<tr><td>대사</td><td>원장 잔액 = 전일 잔액 + 당일 입금 - 당일 출금 검증 절차가 있는가?</td></tr>
+</tbody></table></div>
+
+<h3 id="sD-4">D-4 개인정보·보안 체크리스트</h3>
+<ul>
+  <li>주민등록번호, 계좌 비밀번호, 카드 번호 전체, CVC, 인증 정보를 평문으로 저장·출력·로그 기록하지 않는가?</li>
+  <li>화면·로그·파일 출력 시 계좌번호, 카드 번호, 전화번호, 이름에 마스킹 규칙을 적용하는가?</li>
+  <li>민감 정보를 담았던 메모리 버퍼를 사용 후 지우는가? (최적화로 제거되지 않는 방법 사용: <code>explicit_bzero</code>, <code>memset_s</code> 등)</li>
+  <li>소스 코드, 설정 파일, 실행 파일에 비밀번호·키가 하드코딩되어 있지 않은가?</li>
+  <li>외부 입력(전문, 파일, 화면 입력)의 길이·형식·범위를 검증한 뒤에 사용하는가?</li>
+  <li>개인정보가 담긴 파일의 접근 권한이 최소화되어 있는가? 보존 기간이 지난 파일은 파기하는가?</li>
+  <li>테스트 환경에서 실제 고객 데이터를 쓰지 않고, 쓰더라도 변환(가명 처리)했는가?</li>
+  <li>시큐어 코딩 점검 도구(정적 분석)의 지적 사항을 처리했는가?</li>
+</ul>
+
+<h3 id="sD-5">D-5 로그 체크리스트</h3>
+<div class="tbl"><table>
+<thead><tr><th>항목</th><th>확인 내용</th></tr></thead>
+<tbody>
+<tr><td>형식</td><td>시각(밀리초), 프로세스/스레드 ID, 거래 추적 번호, 소스 위치, 레벨, 메시지가 표준 형식으로 남는가?</td></tr>
+<tr><td>레벨</td><td>운영에서 적절한 레벨(INFO/WARN 이상)인가? 디버그 레벨을 켰을 때 민감 정보나 대량 로그가 나오지 않는가?</td></tr>
+<tr><td>오류 정보</td><td>오류 로그에 원인(errno, 오류 코드), 입력 키(계좌번호 마스킹), 처리 단계가 포함되어 장애 분석이 가능한가?</td></tr>
+<tr><td>유실 방지</td><td>중요한 로그는 flush되는가? 비정상 종료 직전의 상황이 남는가?</td></tr>
+<tr><td>용량</td><td>로그 파일 회전(rotation)과 보관 기간이 설정되어 디스크가 가득 차지 않는가?</td></tr>
+<tr><td>감사</td><td>누가, 언제, 어떤 데이터에 접근·변경했는지 감사 로그가 별도로 남는가? 감사 로그는 위·변조로부터 보호되는가?</td></tr>
+<tr><td>성능</td><td>반복문 안의 과도한 로그가 처리 성능을 떨어뜨리지 않는가?</td></tr>
+</tbody></table></div>
+
+<h3 id="sD-6">D-6 배치 운영 체크리스트</h3>
+<ul>
+  <li><b>선행 조건</b>: 선행 배치 완료, 입력 파일 도착(완료 파일·트레일러 확인), 영업일 여부를 확인하고 시작하는가?</li>
+  <li><b>입력 검증</b>: 헤더·트레일러의 건수와 금액 합계를 실제 데이터와 비교하는가? 중복 수신 파일을 걸러 내는가?</li>
+  <li><b>오류 처리</b>: 오류 레코드는 사유와 함께 별도 파일로 분리하고, 허용 오류율을 넘으면 중단하는가?</li>
+  <li><b>재실행</b>: 중간 실패 후 재실행해도 이중 처리되지 않는가? 체크포인트(커밋 단위)와 재시작 지점이 정의되어 있는가?</li>
+  <li><b>커밋 주기</b>: 대량 갱신을 적절한 건수마다 커밋해 잠금과 롤백 세그먼트를 과도하게 점유하지 않는가?</li>
+  <li><b>출력 파일</b>: 임시 이름으로 쓰고 완료 후 이름 변경(rename)하는가? 다음 단계가 쓰다 만 파일을 읽지 않는가?</li>
+  <li><b>종료 코드</b>: 성공·경고·실패를 종료 코드로 구분해 스케줄러가 후속 작업 실행 여부를 판단할 수 있는가?</li>
+  <li><b>처리 결과 보고</b>: 처리 건수, 성공·오류 건수, 금액 합계, 시작·종료 시각을 결과 로그에 남기는가?</li>
+  <li><b>시간 관리</b>: 마감 시각까지의 예상 처리 시간을 알고 있는가? 데이터 증가에 따른 처리 시간 추이를 모니터링하는가?</li>
+  <li><b>비상 연락</b>: 실패 시 알림이 담당자에게 가는가? 수작업 처리 절차와 연락 체계가 문서화되어 있는가?</li>
+</ul>
+
+<div class="box key"><p class="box-title" data-tag="핵심">한 줄 요약</p>
+<p>금융 IT에서 좋은 코드는 "동작하는 코드"가 아니라 <b>"틀렸을 때 알 수 있고, 멈췄을 때 다시 돌릴 수 있고, 돈이 1원도 어긋나지 않는 코드"</b>입니다. 이 체크리스트는 그 기준을 매번 확인하기 위한 도구입니다.</p></div>
+
+</main>
+<aside class="rail" aria-label="이 페이지 목차"></aside>
+</div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-c.min.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,1662 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ch17 사용자 정의 자료형 · C언어 금융 IT 마스터</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+KR:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-ch="ch17">
+<header class="topbar">
+  <button class="menu-btn" type="button" aria-expanded="false" aria-controls="sidebar">목차</button>
+  <a class="brand" href="index.html"><b>C</b>금융 IT 마스터</a>
+  <span class="where"></span>
+  <span class="progress"></span>
+</header>
+<div class="layout">
+<nav id="sidebar" class="sidebar" aria-label="과정 목차"></nav>
+<div class="page">
+<main class="content">
+
+<header class="ch-head">
+  <p class="eyebrow">PART 1 · C 기초 완전 정복 · CHAPTER</p>
+  <div class="bignum">17</div>
+  <h1>사용자 정의 자료형</h1>
+  <p class="lede">계좌 하나에는 계좌번호, 예금주, 잔액, 상태가 함께 붙어 다닙니다. 이 서로 다른 자료를 하나의 이름으로 묶어 다루는 도구가 구조체입니다. 은행의 원장 레코드, 대외기관과 주고받는 전문, 거래 로그는 모두 구조체로 표현되므로, 이 장은 금융 IT 코드를 읽기 위한 가장 직접적인 준비 과정입니다.</p>
+  <div class="goals"><p class="goals-title">이 장에서 배울 것</p><ul>
+    <li>구조체를 선언하고 변수를 만들며 멤버에 <code>.</code>과 <code>-&gt;</code>로 접근하는 방법</li>
+    <li>구조체 초기화(순서 초기화, 지정 초기화), 구조체 대입이 실제로 무엇을 복사하는지</li>
+    <li>구조체를 함수에 값으로 넘길 때와 포인터로 넘길 때의 차이와 선택 기준</li>
+    <li>계좌 구조체 <code>Account</code>를 설계하고 입금·출금·이체 함수를 작성하는 방법</li>
+    <li>구조체 배열, 중첩 구조체, 자기 참조 구조체(연결 리스트의 출발점)</li>
+    <li>패딩과 정렬이 생기는 이유(CPU의 정렬 접근)와 크기를 줄이는 멤버 배치</li>
+    <li>공용체(union)의 메모리 공유 원리와 용도, 열거형(enum)으로 상태 코드 정의, typedef</li>
+  </ul></div>
+</header>
+
+<h2 id="s17-1"><span class="num">17-1</span>구조체</h2>
+
+<h3 id="s17-1-1">구조체가 필요한 이유</h3>
+<p>지금까지 우리는 <code>int</code>, <code>double</code>, <code>char</code> 배열 같은 기본 자료형으로 데이터를 표현했습니다. 그런데 은행 계좌 하나를 표현하려고 하면 곧바로 불편함이 드러납니다. 계좌 하나에는 최소한 다음 정보가 필요합니다.</p>
+<ul>
+  <li>계좌번호: 문자열(예: <code>"110-234-567890"</code>)</li>
+  <li>예금주 이름: 문자열</li>
+  <li>잔액: 원 단위 정수(<code>long long</code>)</li>
+  <li>계좌 상태: 정상, 정지, 해지 등을 나타내는 정수</li>
+</ul>
+<p>구조체가 없다면 이 정보를 각각 별도의 변수, 계좌가 여러 개라면 별도의 배열로 관리해야 합니다.</p>
+
+<figure class="code bad"><figcaption>구조체 없이 계좌 100개 관리 — 무엇이 불편할까?</figcaption>
+<pre><code class="language-c">char      acc_no[100][20];    /* 계좌번호 */
+char      owner[100][30];     /* 예금주 */
+long long balance[100];       /* 잔액 */
+int       status[100];        /* 상태 */
+
+/* 계좌 하나를 함수에 넘기려면 인자가 네 개나 필요합니다 */
+void print_account(const char *no, const char *name, long long bal, int st);
+
+/* 정렬할 때 balance만 바꾸고 owner를 깜빡 안 바꾸면 데이터가 엉킵니다 */</code></pre></figure>
+
+<p>이 방식의 문제는 세 가지입니다. 첫째, <b>논리적으로 하나인 데이터가 물리적으로 흩어져</b> 있습니다. 잔액으로 정렬하면서 네 배열을 모두 같은 순서로 바꿔야 하는데, 하나라도 빠뜨리면 김철수의 계좌번호에 이영희의 잔액이 붙는 대형 사고가 납니다. 둘째, 함수에 계좌를 넘길 때 인자가 많아지고 순서를 헷갈리기 쉽습니다. 셋째, 나중에 "개설일"이라는 정보가 추가되면 관련 함수의 매개변수를 전부 고쳐야 합니다.</p>
+<p>구조체(structure)는 이 문제를 <b>서로 다른 자료형의 변수를 하나로 묶어 새로운 자료형을 만드는 방법</b>으로 해결합니다. 묶인 각각의 변수를 <b>멤버(member)</b> 또는 필드(field)라고 부릅니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 680 230" width="680" role="img" aria-label="흩어진 배열과 구조체 묶음 비교">
+  <text x="160" y="22" text-anchor="middle" class="bold">구조체 없이: 흩어진 배열 4개</text>
+  <rect class="box" x="20" y="40" width="280" height="30" rx="4"/>
+  <text x="30" y="60" class="small mono">acc_no[0] acc_no[1] acc_no[2] ...</text>
+  <rect class="box" x="20" y="80" width="280" height="30" rx="4"/>
+  <text x="30" y="100" class="small mono">owner[0] owner[1] owner[2] ...</text>
+  <rect class="box" x="20" y="120" width="280" height="30" rx="4"/>
+  <text x="30" y="140" class="small mono">balance[0] balance[1] ...</text>
+  <rect class="box" x="20" y="160" width="280" height="30" rx="4"/>
+  <text x="30" y="180" class="small mono">status[0] status[1] ...</text>
+  <text x="160" y="215" text-anchor="middle" class="small warn-t">0번 계좌 정보가 네 곳에 흩어짐</text>
+  <path class="arrow" d="M320 115 H 370"/>
+  <text x="530" y="22" text-anchor="middle" class="bold">구조체로: 계좌 하나 = 한 덩어리</text>
+  <rect class="hl" x="390" y="40" width="130" height="150" rx="6"/>
+  <text x="455" y="62" text-anchor="middle" class="small bold">accounts[0]</text>
+  <text x="455" y="90" text-anchor="middle" class="small mono">acc_no</text>
+  <text x="455" y="115" text-anchor="middle" class="small mono">owner</text>
+  <text x="455" y="140" text-anchor="middle" class="small mono">balance</text>
+  <text x="455" y="165" text-anchor="middle" class="small mono">status</text>
+  <rect class="box" x="530" y="40" width="130" height="150" rx="6"/>
+  <text x="595" y="62" text-anchor="middle" class="small bold">accounts[1]</text>
+  <text x="595" y="90" text-anchor="middle" class="small mono">acc_no</text>
+  <text x="595" y="115" text-anchor="middle" class="small mono">owner</text>
+  <text x="595" y="140" text-anchor="middle" class="small mono">balance</text>
+  <text x="595" y="165" text-anchor="middle" class="small mono">status</text>
+  <text x="525" y="215" text-anchor="middle" class="small acc">정렬·복사·전달을 한 번에</text>
+</svg>
+<figcaption>그림 17-1 흩어진 배열 대신 구조체로 관련 데이터를 묶기</figcaption>
+</figure>
+
+<h3 id="s17-1-2">구조체 선언과 변수 정의</h3>
+<p>구조체는 두 단계로 사용합니다. 먼저 <b>구조체의 모양(형틀)을 선언</b>하고, 그 형틀로 <b>실제 변수를 만듭니다</b>. 붕어빵 틀과 붕어빵의 관계와 같습니다. 틀을 선언하는 것만으로는 메모리가 할당되지 않습니다.</p>
+
+<figure class="code"><figcaption>ex17-1.c 구조체 선언과 변수 정의</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+
+struct account {              /* struct 키워드 + 태그 이름(account) */
+    char      acc_no[20];     /* 멤버 1: 계좌번호 */
+    char      owner[30];      /* 멤버 2: 예금주 */
+    long long balance;        /* 멤버 3: 잔액(원 단위 정수) */
+    int       status;         /* 멤버 4: 0=정상, 1=정지, 2=해지 */
+};                            /* 세미콜론을 빠뜨리지 마세요! */
+
+int main(void)
+{
+    struct account a;         /* 형틀로 변수 a를 만듦: 이때 메모리 할당 */
+
+    strcpy(a.acc_no, "110-234-567890");   /* 문자열 멤버는 strcpy로 */
+    strcpy(a.owner, "김철수");
+    a.balance = 1500000LL;                /* 숫자 멤버는 대입으로 */
+    a.status  = 0;
+
+    printf("계좌번호: %s\n", a.acc_no);
+    printf("예금주  : %s\n", a.owner);
+    printf("잔액    : %lld원\n", a.balance);
+    printf("상태    : %d\n", a.status);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>계좌번호: 110-234-567890
+예금주  : 김철수
+잔액    : 1500000원
+상태    : 0</pre></figure>
+
+<p>선언 문법을 하나씩 짚어 보겠습니다.</p>
+<ul>
+  <li><code>struct</code>는 구조체를 만든다는 키워드이고, <code>account</code>는 이 구조체에 붙인 <b>태그(tag) 이름</b>입니다.</li>
+  <li>자료형의 이름은 <code>account</code>가 아니라 <b><code>struct account</code></b> 두 단어 전체입니다. 그래서 변수를 만들 때 <code>struct account a;</code>라고 씁니다. (C++에서는 <code>account a;</code>도 되지만 C에서는 안 됩니다. 이 불편함은 17-2의 <code>typedef</code>로 해결합니다.)</li>
+  <li>중괄호 안에는 멤버를 일반 변수 선언처럼 나열합니다. 멤버 선언에는 초기값을 줄 수 없습니다(<code>long long balance = 0;</code>은 C에서 오류).</li>
+  <li>닫는 중괄호 뒤의 <b>세미콜론</b>은 필수입니다. 빠뜨리면 다음 줄에서 엉뚱한 오류 메시지가 나옵니다.</li>
+</ul>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — 선언만으로는 왜 메모리가 생기지 않을까?</p>
+<p><code>struct account { ... };</code>는 컴파일러에게 "앞으로 <code>struct account</code>라는 자료형은 이런 모양이다"라고 알려 주는 <b>설계도</b>일 뿐입니다. 컴파일러는 이 설계도로부터 크기와 각 멤버의 위치(오프셋)를 계산해 기억해 둡니다. 실제 메모리는 <code>struct account a;</code>처럼 변수를 정의하는 순간 스택(지역 변수)이나 데이터 영역(전역 변수)에 할당됩니다.</p>
+<p>멤버 접근 <code>a.balance</code>는 컴파일 후에는 "변수 a의 시작 주소 + balance의 오프셋" 위치를 읽는 기계어로 바뀝니다. 즉 멤버 이름은 실행 중에는 남아 있지 않고, <b>컴파일 시간에 고정된 거리(바이트 수)</b>로 바뀌어 사라집니다. 이 점 때문에 구조체 멤버 접근은 배열 인덱스 접근만큼이나 빠릅니다.</p>
+</div>
+
+<p>구조체 선언과 동시에 변수를 만들 수도 있고, 전역으로 선언할 수도 있습니다.</p>
+<figure class="code"><figcaption>선언과 동시에 변수 정의하기</figcaption>
+<pre><code class="language-c">struct point {
+    int x;
+    int y;
+} p1, p2;                 /* struct point 형 변수 p1, p2를 함께 정의 */
+
+struct {                  /* 태그 없는(익명) 구조체 */
+    int hour, min;
+} t;                      /* 이 형틀은 다시 쓸 수 없음: 이름이 없으니까 */</code></pre></figure>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수</p>
+<ul>
+  <li><b>닫는 중괄호 뒤 세미콜론 누락</b>: <code>struct a { int x; }</code> 다음 줄의 <code>int main(void)</code>가 "구조체를 반환하는 main"처럼 해석되어 이상한 오류가 납니다.</li>
+  <li><b>문자열 멤버에 = 로 대입</b>: <code>a.owner = "김철수";</code>는 컴파일 오류입니다. 배열 이름은 대입의 왼쪽에 올 수 없기 때문입니다(12장 복습). <code>strcpy</code> 또는 더 안전하게 <code>snprintf(a.owner, sizeof a.owner, "%s", "김철수");</code>를 씁니다.</li>
+  <li><b>구조체 선언을 함수 안에 넣고 다른 함수에서 사용</b>: 함수 안에서 선언한 구조체 형은 그 함수 안에서만 보입니다. 여러 함수가 함께 쓰는 형은 파일 위쪽(또는 헤더 파일)에 선언합니다.</li>
+</ul></div>
+
+<div class="box tip"><p class="box-title" data-tag="잠깐">여기서 잠깐 — 한글 문자열의 길이</p>
+<p>UTF-8 환경에서 한글 한 글자는 보통 3바이트입니다. "김철수"는 9바이트에 널 문자 1바이트를 더해 10바이트가 필요합니다. 윈도우 콘솔의 CP949(EUC-KR 계열)에서는 한 글자 2바이트입니다. 예금주 필드 크기를 잡을 때는 "글자 수"가 아니라 "바이트 수" 기준으로 여유 있게 잡아야 합니다. 금융권 전문에서 한글 필드가 깨지는 사고의 상당수가 이 바이트 계산 실수에서 나옵니다.</p></div>
+
+<h3 id="s17-1-3">멤버 접근 연산자 . 과 -&gt;</h3>
+<p>구조체 변수의 멤버에 접근할 때는 <b>멤버 접근 연산자 <code>.</code>(점)</b>을 씁니다. <code>a.balance</code>는 "a 안에 있는 balance"라는 뜻입니다. 멤버는 해당 자료형의 일반 변수와 똑같이 다룰 수 있습니다. 즉 <code>a.balance += 10000;</code>, <code>scanf("%lld", &amp;a.balance);</code>, <code>printf("%c", a.owner[0]);</code> 모두 가능합니다.</p>
+
+<figure class="code"><figcaption>ex17-2.c 멤버를 일반 변수처럼 사용하기</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+struct account {
+    char      acc_no[20];
+    long long balance;
+};
+
+int main(void)
+{
+    struct account a;
+
+    printf("계좌번호와 입금 전 잔액 입력: ");
+    scanf("%19s %lld", a.acc_no, &amp;a.balance);  /* acc_no는 배열이라 &amp; 없음 */
+
+    a.balance += 50000;                          /* 5만 원 입금 */
+    printf("[%s] 입금 후 잔액: %lld원\n", a.acc_no, a.balance);
+    printf("계좌번호 첫 글자: %c\n", a.acc_no[0]);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과 (입력: 110-001 100000)</figcaption><pre>계좌번호와 입금 전 잔액 입력: 110-001 100000
+[110-001] 입금 후 잔액: 150000원
+계좌번호 첫 글자: 1</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — <code>&amp;a.balance</code>는 왜 괄호 없이 되나요?</p>
+<p>연산자 우선순위 때문입니다. 멤버 접근 연산자 <code>.</code>과 <code>-&gt;</code>는 후위 연산자 그룹으로 <b>가장 높은 우선순위</b>를 가집니다. 단항 <code>&amp;</code>보다 높으므로 <code>&amp;a.balance</code>는 <code>&amp;(a.balance)</code>, 즉 "a의 balance 멤버의 주소"로 해석됩니다. 우리가 원하는 그대로입니다. 반면 <code>a.acc_no</code>는 배열이므로 이름 자체가 첫 원소의 주소로 변환되어 <code>&amp;</code>가 필요 없습니다.</p></div>
+
+<p>구조체를 <b>포인터</b>로 가리킬 때는 사정이 달라집니다. 포인터 <code>p</code>가 구조체 <code>a</code>를 가리키면 <code>*p</code>가 곧 <code>a</code>이므로 <code>(*p).balance</code>로 접근할 수 있습니다. 그런데 괄호가 꼭 필요합니다. <code>*p.balance</code>라고 쓰면 <code>.</code>의 우선순위가 <code>*</code>보다 높아서 <code>*(p.balance)</code>로 해석되고, 포인터 p에는 balance라는 멤버가 없으므로 컴파일 오류가 납니다.</p>
+<p>이 괄호가 매번 번거롭기 때문에 C는 <b>간접 멤버 접근 연산자 <code>-&gt;</code>(화살표)</b>를 제공합니다. <code>p-&gt;balance</code>는 <code>(*p).balance</code>와 완전히 같은 뜻입니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 680 220" width="680" role="img" aria-label="포인터와 화살표 연산자">
+  <rect class="hl2" x="30" y="80" width="120" height="50" rx="6"/>
+  <text x="90" y="102" text-anchor="middle" class="mono bold">p</text>
+  <text x="90" y="120" text-anchor="middle" class="small mono">0x7ffc1000</text>
+  <text x="90" y="150" text-anchor="middle" class="small mute">struct account *</text>
+  <path class="arrow" d="M150 105 H 260"/>
+  <text x="205" y="95" text-anchor="middle" class="small mute">가리킴</text>
+  <rect class="box" x="260" y="30" width="200" height="160" rx="6"/>
+  <text x="360" y="22" text-anchor="middle" class="small mute mono">a (주소 0x7ffc1000)</text>
+  <rect class="line" x="275" y="45" width="170" height="40"/>
+  <text x="360" y="70" text-anchor="middle" class="mono small">acc_no[20]</text>
+  <rect class="hl" x="275" y="95" width="170" height="40"/>
+  <text x="360" y="120" text-anchor="middle" class="mono small">balance</text>
+  <rect class="line" x="275" y="145" width="170" height="35"/>
+  <text x="360" y="167" text-anchor="middle" class="mono small">status</text>
+  <text x="480" y="105" class="small mono acc">p-&gt;balance</text>
+  <text x="480" y="125" class="small mono">== (*p).balance</text>
+  <text x="480" y="145" class="small mono">== a.balance</text>
+</svg>
+<figcaption>그림 17-2 구조체 포인터와 -&gt; 연산자: 세 표현은 같은 메모리를 가리킨다</figcaption>
+</figure>
+
+<figure class="code"><figcaption>ex17-3.c . 과 -&gt; 비교</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+struct account {
+    char      acc_no[20];
+    long long balance;
+    int       status;
+};
+
+int main(void)
+{
+    struct account a = { "110-001", 300000, 0 };
+    struct account *p = &amp;a;          /* p는 a의 주소를 저장 */
+
+    printf("%lld\n", a.balance);       /* 변수로 직접 접근 */
+    printf("%lld\n", (*p).balance);    /* 역참조 후 접근: 괄호 필수 */
+    printf("%lld\n", p-&gt;balance);      /* 화살표로 간편하게 */
+
+    p-&gt;balance -= 70000;               /* 포인터로 수정하면 a가 바뀜 */
+    printf("a.balance = %lld\n", a.balance);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>300000
+300000
+300000
+a.balance = 230000</pre></figure>
+
+<div class="box key"><p class="box-title" data-tag="핵심">한 줄 요약</p>
+<p>왼쪽이 <b>구조체 변수</b>면 <code>.</code>, 왼쪽이 <b>구조체를 가리키는 포인터</b>면 <code>-&gt;</code>. <code>p-&gt;m</code>은 <code>(*p).m</code>의 줄임 표기입니다.</p></div>
+
+<div class="ex"><p class="ex-title">예제 17-1 <span class="lv">난이도 ★☆☆</span></p>
+<p>다음 중 컴파일 오류가 나는 줄을 모두 고르고 이유를 설명하십시오. (<code>struct account a, *p = &amp;a;</code>로 정의되어 있다고 가정)</p>
+<pre><code class="language-c">(1) a.balance = 100;
+(2) p.balance = 100;
+(3) p-&gt;balance = 100;
+(4) *p.balance = 100;
+(5) (*p).balance = 100;
+(6) a-&gt;balance = 100;</code></pre>
+<details><summary>정답과 해설 보기</summary>
+<p>오류: (2), (4), (6).</p>
+<p>(2) p는 포인터이지 구조체가 아니므로 <code>.</code>을 쓸 수 없습니다. gcc는 "request for member 'balance' in something not a structure or union"이라고 알려 줍니다. (4) <code>.</code>이 <code>*</code>보다 우선순위가 높아 <code>*(p.balance)</code>로 해석되므로 (2)와 같은 오류입니다. (6) a는 구조체 변수이고 포인터가 아니므로 <code>-&gt;</code>를 쓸 수 없습니다("invalid type argument of '-&gt;'"). (1), (3), (5)는 모두 같은 메모리에 100을 저장합니다.</p>
+</details></div>
+
+<h3 id="s17-1-4">구조체 초기화</h3>
+<p>구조체 변수는 배열처럼 중괄호로 초기화할 수 있습니다. 두 가지 방식이 있습니다.</p>
+<ol class="steps">
+  <li><b>순서대로 초기화</b>(C89부터): 멤버를 선언한 순서대로 값을 나열합니다.</li>
+  <li><b>지정 초기화(designated initializer)</b>(C99부터): <code>.멤버이름 = 값</code> 형태로 어떤 멤버에 무엇을 넣는지 명시합니다.</li>
+</ol>
+
+<figure class="code"><figcaption>ex17-4.c 두 가지 초기화 방식</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+struct account {
+    char      acc_no[20];
+    char      owner[30];
+    long long balance;
+    int       status;
+};
+
+int main(void)
+{
+    /* 1) 순서대로: acc_no, owner, balance, status 순 */
+    struct account a1 = { "110-001", "김철수", 1500000, 0 };
+
+    /* 2) 지정 초기화: 순서와 무관, 이름이 드러나 읽기 쉬움 */
+    struct account a2 = { .owner = "이영희", .balance = 820000,
+                          .acc_no = "220-777" };   /* status 생략 */
+
+    /* 3) 일부만 주면 나머지는 0으로 */
+    struct account a3 = { "330-123" };
+
+    /* 4) 전부 0으로 만드는 관용구 */
+    struct account a4 = { 0 };
+
+    printf("%s %s %lld %d\n", a1.acc_no, a1.owner, a1.balance, a1.status);
+    printf("%s %s %lld %d\n", a2.acc_no, a2.owner, a2.balance, a2.status);
+    printf("[%s] [%s] %lld %d\n", a3.acc_no, a3.owner, a3.balance, a3.status);
+    printf("[%s] %lld\n", a4.acc_no, a4.balance);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>110-001 김철수 1500000 0
+220-777 이영희 820000 0
+[330-123] [] 0 0
+[] 0</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — 일부만 초기화하면 나머지가 왜 0이 될까?</p>
+<p>C 표준은 "초기화 목록이 멤버보다 적으면, 남은 멤버는 <b>정적 저장 기간 객체처럼</b> 초기화된다"고 정합니다. 정적 객체의 기본 초기값은 정수 0, 실수 0.0, 포인터 NULL입니다. 그래서 <code>{ 0 }</code>은 첫 멤버를 명시적으로 0으로, 나머지는 규칙에 따라 0으로 만드는 "전부 0" 관용구가 됩니다. 반대로 <b>초기화 목록 자체가 없는</b> 지역 구조체 변수(<code>struct account a;</code>)는 쓰레기값을 가집니다. 스택 메모리에 이전 함수가 남긴 값이 그대로 있기 때문입니다.</p></div>
+
+<div class="box fix"><p class="box-title" data-tag="해결">이렇게 해결합니다 — 실무 권장 초기화 습관</p>
+<ul>
+  <li>지역 구조체는 정의와 동시에 <code>= { 0 }</code>으로 초기화합니다. 쓰레기값이 섞인 레코드가 파일이나 전문으로 나가는 사고를 막습니다.</li>
+  <li>멤버가 다섯 개 이상이면 지정 초기화를 씁니다. 나중에 구조체 중간에 멤버가 추가되어도 값이 엉뚱한 멤버에 들어가지 않습니다.</li>
+  <li>이미 만든 변수를 다시 0으로 만들 때는 <code>memset(&amp;a, 0, sizeof a);</code> 또는 <code>a = (struct account){ 0 };</code>(C99 복합 리터럴)을 씁니다.</li>
+</ul></div>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 — 초기화와 대입은 다릅니다</p>
+<p>중괄호 목록은 <b>정의할 때만</b> 쓸 수 있습니다.</p>
+<figure class="code bad"><figcaption>잘못된 예 — 왜 틀렸을까?</figcaption>
+<pre><code class="language-c">struct account a;
+a = { "110-001", "김철수", 1000, 0 };   /* 오류: 중괄호 목록은 초기화 전용 */</code></pre></figure>
+<figure class="code good"><figcaption>고친 코드 (C99 복합 리터럴)</figcaption>
+<pre><code class="language-c">struct account a;
+a = (struct account){ "110-001", "김철수", 1000, 0 };  /* 임시 구조체를 만들어 대입 */</code></pre></figure>
+</div>
+
+<h3 id="s17-1-5">구조체 대입과 복사</h3>
+<p>배열과 구조체의 결정적인 차이가 여기서 나옵니다. 배열은 <code>arr1 = arr2;</code>처럼 통째로 대입할 수 없지만, <b>구조체는 같은 형끼리 <code>=</code>로 통째로 대입</b>할 수 있습니다. 구조체 안에 배열 멤버가 있어도 그 배열까지 모두 복사됩니다.</p>
+
+<figure class="code"><figcaption>ex17-5.c 구조체 대입은 전체 복사</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+
+struct account {
+    char      acc_no[20];
+    long long balance;
+};
+
+int main(void)
+{
+    struct account src = { "110-001", 500000 };
+    struct account dst;
+
+    dst = src;                          /* 모든 바이트를 복사 */
+    strcpy(dst.acc_no, "999-999");      /* 사본을 바꿔도 */
+    dst.balance = 0;
+
+    printf("src: %s %lld\n", src.acc_no, src.balance);   /* 원본은 그대로 */
+    printf("dst: %s %lld\n", dst.acc_no, dst.balance);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>src: 110-001 500000
+dst: 999-999 0</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — 배열은 대입이 안 되는데 구조체 안의 배열은 왜 복사될까?</p>
+<p>배열 이름은 대부분의 식에서 "첫 원소의 주소"로 변환되어(배열의 포인터 변환, decay) 더 이상 배열 전체를 나타내지 않습니다. 주소에 주소를 대입하는 것은 의미가 없으므로 배열 대입은 금지됩니다. 반면 구조체 이름은 변환되지 않고 <b>구조체 객체 전체</b>를 나타냅니다. 컴파일러는 구조체 대입을 <code>sizeof(struct account)</code> 바이트를 그대로 옮기는 코드(작으면 레지스터 몇 번의 이동, 크면 <code>memcpy</code> 호출)로 번역합니다. 배열 멤버도 그 바이트 안에 들어 있으므로 함께 복사됩니다.</p>
+<p>이 성질은 역사적으로도 재미있습니다. 초기 C(K&amp;R 1판)에서는 구조체 대입이 없었고, C89 표준에서 정식으로 추가되었습니다. 덕분에 "배열을 값으로 복사하고 싶으면 구조체로 감싸라"는 기법도 쓸 수 있습니다.</p></div>
+
+<p>하지만 이 복사는 <b>얕은 복사(shallow copy)</b>입니다. 구조체 멤버가 포인터라면 포인터 값(주소)만 복사되고, 가리키는 대상은 복사되지 않습니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 680 230" width="680" role="img" aria-label="얕은 복사 그림">
+  <rect class="box" x="30" y="40" width="170" height="80" rx="6"/>
+  <text x="115" y="30" text-anchor="middle" class="small bold">c1</text>
+  <text x="115" y="70" text-anchor="middle" class="mono small">id = 1</text>
+  <text x="115" y="98" text-anchor="middle" class="mono small">memo = 0x5000</text>
+  <rect class="box" x="30" y="140" width="170" height="80" rx="6"/>
+  <text x="115" y="134" text-anchor="middle" class="small bold">c2 = c1 후</text>
+  <text x="115" y="170" text-anchor="middle" class="mono small">id = 1</text>
+  <text x="115" y="198" text-anchor="middle" class="mono small">memo = 0x5000</text>
+  <rect class="hl2" x="400" y="90" width="230" height="60" rx="6"/>
+  <text x="515" y="115" text-anchor="middle" class="mono small">힙 0x5000</text>
+  <text x="515" y="135" text-anchor="middle" class="mono small">"VIP 고객"</text>
+  <path class="arrow" d="M200 95 L 400 110"/>
+  <path class="arrow" d="M200 195 L 400 135"/>
+  <text x="300" y="215" text-anchor="middle" class="small warn-t">두 구조체가 같은 문자열을 공유: 한쪽에서 free하면 다른 쪽은 댕글링</text>
+</svg>
+<figcaption>그림 17-3 포인터 멤버가 있는 구조체의 대입은 얕은 복사가 된다</figcaption>
+</figure>
+
+<figure class="code"><figcaption>ex17-6.c 얕은 복사와 깊은 복사</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;string.h&gt;
+
+struct customer {
+    int   id;
+    char *memo;                  /* 힙에 할당한 메모를 가리키는 포인터 */
+};
+
+/* 깊은 복사: 가리키는 대상까지 새로 할당해서 복사 */
+int customer_copy(struct customer *dst, const struct customer *src)
+{
+    dst-&gt;id = src-&gt;id;
+    dst-&gt;memo = malloc(strlen(src-&gt;memo) + 1);
+    if (dst-&gt;memo == NULL) return -1;
+    strcpy(dst-&gt;memo, src-&gt;memo);
+    return 0;
+}
+
+int main(void)
+{
+    struct customer c1, c2, c3;
+    c1.id = 1;
+    c1.memo = malloc(20);
+    if (c1.memo == NULL) return 1;
+    strcpy(c1.memo, "VIP");
+
+    c2 = c1;                       /* 얕은 복사: memo 주소만 복사 */
+    if (customer_copy(&amp;c3, &amp;c1) != 0) return 1;   /* 깊은 복사 */
+
+    strcpy(c1.memo, "BLACKLIST");  /* 원본 메모 수정 */
+    printf("c2.memo = %s\n", c2.memo);   /* 같이 바뀜! */
+    printf("c3.memo = %s\n", c3.memo);   /* 독립적 */
+
+    free(c1.memo);                 /* c2.memo도 이제 해제된 메모리 */
+    free(c3.memo);
+    /* free(c2.memo); 를 하면 이중 해제(double free): 미정의 동작 */
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>c2.memo = BLACKLIST
+c3.memo = VIP</pre></figure>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 — 구조체 비교에 == 사용</p>
+<p>대입은 되지만 <b><code>==</code>로 구조체 두 개를 비교할 수는 없습니다</b>(컴파일 오류). 그렇다고 <code>memcmp(&amp;a, &amp;b, sizeof a)</code>로 비교하는 것도 위험합니다. 17-2에서 배울 패딩 바이트에 쓰레기값이 들어 있을 수 있어, 멤버 값이 모두 같아도 다르다고 나올 수 있습니다. 멤버를 하나씩 비교하는 함수를 직접 작성하는 것이 정석입니다.</p>
+<figure class="code good"><figcaption>멤버별 비교 함수</figcaption>
+<pre><code class="language-c">int account_equal(const struct account *a, const struct account *b)
+{
+    return strcmp(a-&gt;acc_no, b-&gt;acc_no) == 0
+        &amp;&amp; a-&gt;balance == b-&gt;balance;
+}</code></pre></figure></div>
+
+<div class="ex"><p class="ex-title">예제 17-2 <span class="lv">난이도 ★★☆</span></p>
+<p>다음 프로그램의 출력을 예측하십시오.</p>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+struct wrap { int arr[3]; };
+
+void twice(struct wrap w)
+{
+    for (int i = 0; i &lt; 3; i++) w.arr[i] *= 2;
+}
+
+int main(void)
+{
+    struct wrap a = { { 1, 2, 3 } }, b;
+    b = a;
+    b.arr[0] = 100;
+    twice(a);
+    printf("%d %d %d / %d\n", a.arr[0], a.arr[1], a.arr[2], b.arr[0]);
+    return 0;
+}</code></pre>
+<details><summary>정답과 해설 보기</summary>
+<p>출력: <code>1 2 3 / 100</code></p>
+<p><code>b = a;</code>는 배열 멤버까지 통째로 복사하므로 b는 a와 독립된 사본입니다. b.arr[0]을 바꿔도 a는 그대로입니다. <code>twice(a)</code>는 구조체를 <b>값으로</b> 넘기므로 함수 안의 w는 a의 사본이고, 사본의 배열을 두 배로 해도 a는 변하지 않습니다. 배열을 그냥 넘기면 주소가 넘어가 원본이 바뀌지만, 구조체로 감싸면 값 복사가 일어난다는 점이 핵심입니다.</p>
+</details></div>
+
+<h3 id="s17-1-6">구조체 포인터</h3>
+<p>구조체 포인터는 구조체 변수의 시작 주소를 저장하는 포인터입니다. 선언은 <code>struct account *p;</code>이고, 포인터 연산의 규칙도 다른 포인터와 같습니다. <code>p + 1</code>은 주소에 1을 더하는 것이 아니라 <b><code>sizeof(struct account)</code> 바이트만큼</b> 이동한 주소입니다. 그래서 구조체 배열을 포인터로 순회할 수 있습니다.</p>
+
+<figure class="code"><figcaption>ex17-7.c 구조체 포인터 연산</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+struct account {
+    char      acc_no[16];
+    long long balance;
+};
+
+int main(void)
+{
+    struct account list[3] = {
+        { "110-001", 100000 },
+        { "110-002", 250000 },
+        { "110-003",  70000 }
+    };
+    struct account *p;
+    long long total = 0;
+
+    printf("sizeof(struct account) = %zu\n", sizeof(struct account));
+    for (p = list; p &lt; list + 3; p++) {      /* p++ 은 24바이트씩 이동 */
+        printf("%p  %s  %lld\n", (void *)p, p-&gt;acc_no, p-&gt;balance);
+        total += p-&gt;balance;
+    }
+    printf("총 잔액: %lld원\n", total);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과 (주소는 실행마다 다름)</figcaption><pre>sizeof(struct account) = 24
+0x7ffd5e3a0b10  110-001  100000
+0x7ffd5e3a0b28  110-002  250000
+0x7ffd5e3a0b40  110-003  70000
+총 잔액: 420000원</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — 주소가 왜 0x18(24)씩 증가할까?</p>
+<p><code>acc_no[16]</code>이 16바이트, <code>long long</code>이 8바이트로 합계 24바이트입니다. 포인터 산술은 "가리키는 자료형의 크기" 단위로 움직이므로 <code>p++</code>는 24바이트를 건너뜁니다. 16진수로 0x...b10 + 0x18 = 0x...b28 입니다. 만약 <code>acc_no[20]</code>이었다면 20 + 8 = 28이 아니라 <b>32</b>바이트가 됩니다. 이유는 17-2의 패딩에서 자세히 다룹니다.</p></div>
+
+<p>구조체 포인터는 다음과 같은 경우에 반드시 필요합니다.</p>
+<ul>
+  <li>함수가 호출한 쪽의 구조체를 <b>수정</b>해야 할 때(입금 함수가 잔액을 바꾸는 경우)</li>
+  <li>큰 구조체를 복사하지 않고 <b>효율적으로 전달</b>할 때</li>
+  <li><code>malloc</code>으로 구조체를 <b>동적 할당</b>할 때(16장 복습): <code>struct account *p = malloc(sizeof *p);</code></li>
+  <li>연결 리스트처럼 구조체끼리 <b>서로 연결</b>할 때(17-2 자기 참조 구조체)</li>
+</ul>
+
+<figure class="code"><figcaption>ex17-8.c 구조체 동적 할당</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;string.h&gt;
+
+struct account {
+    char      acc_no[16];
+    long long balance;
+};
+
+int main(void)
+{
+    struct account *p = malloc(sizeof *p);   /* sizeof *p: 형이 바뀌어도 안전 */
+    if (p == NULL) {
+        fprintf(stderr, "메모리 부족\n");
+        return 1;
+    }
+    strcpy(p-&gt;acc_no, "550-010");
+    p-&gt;balance = 3000000;
+    printf("%s %lld\n", p-&gt;acc_no, p-&gt;balance);
+    free(p);                                  /* 사용 후 반드시 해제 */
+    p = NULL;                                 /* 댕글링 포인터 방지 */
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>550-010 3000000</pre></figure>
+
+<div class="box tip"><p class="box-title" data-tag="잠깐">여기서 잠깐 — <code>sizeof *p</code> 관용구</p>
+<p><code>malloc(sizeof(struct account))</code>보다 <code>malloc(sizeof *p)</code>가 낫습니다. 나중에 p의 형을 다른 구조체로 바꿔도 malloc 인자를 고칠 필요가 없고, 형 이름을 잘못 적어 크기가 틀리는 실수도 막습니다. <code>sizeof</code>는 (가변 길이 배열이 아닌 한) 피연산자를 실제로 평가하지 않으므로 p가 아직 초기화되지 않았어도 안전합니다.</p></div>
+
+<h3 id="s17-1-7">함수에 구조체 전달하기: 값 vs 포인터</h3>
+<p>구조체를 함수에 넘기는 방법은 두 가지입니다. 이 선택은 성능과 정확성 모두에 영향을 주므로 원리를 확실히 이해해야 합니다.</p>
+
+<div class="tbl"><table>
+<thead><tr><th>구분</th><th>값으로 전달 <code>f(struct account a)</code></th><th>포인터로 전달 <code>f(struct account *p)</code></th></tr></thead>
+<tbody>
+<tr><td>넘어가는 것</td><td>구조체 전체의 사본(sizeof 바이트)</td><td>주소 8바이트</td></tr>
+<tr><td>원본 수정</td><td>불가능(사본만 바뀜)</td><td>가능</td></tr>
+<tr><td>복사 비용</td><td>구조체가 클수록 커짐</td><td>항상 작음</td></tr>
+<tr><td>멤버 접근</td><td><code>a.balance</code></td><td><code>p-&gt;balance</code></td></tr>
+<tr><td>읽기 전용 보장</td><td>자동(사본이므로)</td><td><code>const struct account *p</code>로 명시</td></tr>
+<tr><td>NULL 위험</td><td>없음</td><td>있음(검사 필요)</td></tr>
+</tbody></table></div>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 260" width="700" role="img" aria-label="값 전달과 포인터 전달의 스택 비교">
+  <text x="170" y="22" text-anchor="middle" class="bold">값으로 전달</text>
+  <rect class="box" x="40" y="40" width="260" height="70" rx="6"/>
+  <text x="50" y="58" class="small mute">main의 스택 프레임</text>
+  <rect class="hl" x="60" y="66" width="220" height="34" rx="4"/>
+  <text x="170" y="88" text-anchor="middle" class="small mono">a (1,000바이트)</text>
+  <rect class="box" x="40" y="160" width="260" height="70" rx="6"/>
+  <text x="50" y="178" class="small mute">deposit의 스택 프레임</text>
+  <rect class="hl2" x="60" y="186" width="220" height="34" rx="4"/>
+  <text x="170" y="208" text-anchor="middle" class="small mono">a의 사본 (1,000바이트)</text>
+  <path class="arrow" d="M170 110 V 160"/>
+  <text x="180" y="140" class="small warn-t">1,000바이트 복사</text>
+  <text x="530" y="22" text-anchor="middle" class="bold">포인터로 전달</text>
+  <rect class="box" x="400" y="40" width="260" height="70" rx="6"/>
+  <text x="410" y="58" class="small mute">main의 스택 프레임</text>
+  <rect class="hl" x="420" y="66" width="220" height="34" rx="4"/>
+  <text x="530" y="88" text-anchor="middle" class="small mono">a (1,000바이트)</text>
+  <rect class="box" x="400" y="160" width="260" height="70" rx="6"/>
+  <text x="410" y="178" class="small mute">deposit의 스택 프레임</text>
+  <rect class="hl2" x="420" y="186" width="90" height="34" rx="4"/>
+  <text x="465" y="208" text-anchor="middle" class="small mono">p (8B)</text>
+  <path class="arrow" d="M510 200 C 600 190, 650 140, 600 104"/>
+  <text x="560" y="150" class="small acc">원본을 가리킴</text>
+</svg>
+<figcaption>그림 17-4 값 전달은 구조체 전체를 복사하고, 포인터 전달은 주소만 넘긴다</figcaption>
+</figure>
+
+<figure class="code"><figcaption>ex17-9.c 값 전달로는 입금이 반영되지 않는다</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+struct account {
+    char      acc_no[16];
+    long long balance;
+};
+
+void deposit_wrong(struct account a, long long amt)   /* 값 전달 */
+{
+    a.balance += amt;                 /* 사본의 잔액만 증가 */
+}
+
+void deposit(struct account *p, long long amt)        /* 포인터 전달 */
+{
+    p-&gt;balance += amt;                /* 원본의 잔액 증가 */
+}
+
+void print_account(const struct account *p)           /* 읽기 전용 */
+{
+    printf("[%s] %lld원\n", p-&gt;acc_no, p-&gt;balance);
+    /* p-&gt;balance = 0;  이라고 쓰면 const 위반으로 컴파일 오류 */
+}
+
+int main(void)
+{
+    struct account a = { "110-001", 100000 };
+
+    deposit_wrong(a, 50000);
+    print_account(&amp;a);                /* 100000: 반영 안 됨 */
+
+    deposit(&amp;a, 50000);
+    print_account(&amp;a);                /* 150000: 반영됨 */
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>[110-001] 100000원
+[110-001] 150000원</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — C에는 call by reference가 없다</p>
+<p>C의 함수 호출은 <b>언제나 값에 의한 전달(call by value)</b>입니다. 구조체를 넘기면 구조체 값이 복사되고, 포인터를 넘기면 포인터 값(주소)이 복사됩니다. "포인터로 넘기면 참조 전달"이라는 말은 정확히는 "주소를 값으로 전달해서 참조 전달 <b>효과</b>를 낸다"는 뜻입니다. 함수 안의 <code>p</code> 자체는 사본이므로 <code>p = NULL;</code>로 바꿔도 호출한 쪽의 포인터는 변하지 않습니다. 하지만 <code>*p</code>(가리키는 대상)는 원본이므로 <code>p-&gt;balance</code>를 바꾸면 원본이 바뀝니다.</p>
+<p>성능 측면에서, x86-64 리눅스 호출 규약(System V ABI)은 16바이트 이하의 작은 구조체는 레지스터로 넘기지만, 그보다 큰 구조체는 메모리(스택)에 복사해서 넘깁니다. 수백 바이트짜리 고객 레코드를 값으로 넘기면 호출할 때마다 그만큼 메모리 복사가 일어납니다. 초당 수천 건을 처리하는 계정계 거래 처리에서는 무시할 수 없는 비용입니다.</p></div>
+
+<div class="box fix"><p class="box-title" data-tag="해결">이렇게 해결합니다 — 전달 방식 선택 기준</p>
+<ol class="steps">
+  <li>함수가 구조체를 <b>수정해야 하면</b>: <code>struct T *p</code></li>
+  <li>수정하지 않지만 구조체가 <b>크면</b>(대략 16바이트 초과): <code>const struct T *p</code></li>
+  <li>작은 구조체(좌표, 날짜 등)이고 읽기만 하면: 값 전달도 좋습니다. 코드가 단순하고 NULL 걱정이 없습니다.</li>
+  <li>포인터로 받는 함수는 첫 줄에서 NULL을 검사하거나, 주석으로 "NULL 금지"를 명시합니다.</li>
+</ol></div>
+
+<p>함수가 구조체를 <b>반환</b>할 수도 있습니다. 작은 구조체를 만들어 돌려주는 "생성 함수"에 자주 씁니다.</p>
+<figure class="code"><figcaption>ex17-10.c 구조체 반환</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+struct date { int y, m, d; };
+
+struct date make_date(int y, int m, int d)
+{
+    struct date t = { y, m, d };
+    return t;                       /* 구조체 값 전체를 반환(복사) */
+}
+
+int main(void)
+{
+    struct date open = make_date(2026, 10, 28);
+    printf("개설일: %04d-%02d-%02d\n", open.y, open.m, open.d);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>개설일: 2026-10-28</pre></figure>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 — 지역 구조체의 주소 반환</p>
+<figure class="code bad"><figcaption>잘못된 예 — 왜 틀렸을까?</figcaption>
+<pre><code class="language-c">struct date *make_date_bad(int y, int m, int d)
+{
+    struct date t = { y, m, d };
+    return &amp;t;          /* 함수가 끝나면 t의 스택 공간은 사라짐 */
+}</code></pre></figure>
+<p>t는 지역 변수이므로 함수가 반환되는 순간 수명이 끝납니다. 반환된 주소를 역참조하는 것은 미정의 동작입니다. 우연히 값이 남아 있어 테스트에서는 통과하다가, 다음 함수 호출이 그 스택을 덮어쓰는 순간 값이 바뀝니다. 구조체를 값으로 반환하거나, 호출한 쪽이 공간을 마련해 포인터로 넘기거나, malloc으로 할당해 반환하십시오.</p></div>
+
+<div class="ex"><p class="ex-title">예제 17-3 <span class="lv">난이도 ★★☆</span></p>
+<p>두 날짜 중 더 이른 날짜를 반환하는 함수 <code>struct date earlier(struct date a, struct date b)</code>를 작성하십시오. 같으면 a를 반환합니다.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>연, 월, 일 순으로 비교합니다. 날짜 구조체는 12바이트로 작으므로 값 전달이 자연스럽습니다. 비교를 간단히 하려면 날짜를 <code>y*10000 + m*100 + d</code> 형태의 정수(예: 20261028)로 바꿔 비교하는 방법이 있는데, 이것은 금융권에서 영업일자를 8자리 정수나 문자열 "YYYYMMDD"로 다루는 관행과 같습니다. 8자리 문자열도 사전순 비교가 날짜순 비교와 일치한다는 점이 이 형식의 장점입니다.</p>
+<figure class="code good"><figcaption>정답 코드</figcaption><pre><code class="language-c">struct date earlier(struct date a, struct date b)
+{
+    long ka = a.y * 10000L + a.m * 100 + a.d;
+    long kb = b.y * 10000L + b.m * 100 + b.d;
+    return (kb &lt; ka) ? b : a;
+}</code></pre></figure>
+</details></div>
+
+<h3 id="s17-1-8">계좌 구조체 Account 설계하기</h3>
+<p>이제 배운 내용을 종합해 작은 계좌 관리 모듈을 만들어 봅시다. 실무 계정계의 계좌 원장은 수십~수백 개의 필드를 가지지만, 핵심 구조는 아래와 비슷합니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 680 250" width="680" role="img" aria-label="Account 구조체와 함수 관계">
+  <rect class="hl" x="250" y="20" width="180" height="150" rx="8"/>
+  <text x="340" y="42" text-anchor="middle" class="bold">struct Account</text>
+  <text x="265" y="68" class="small mono">acc_no[16]</text>
+  <text x="265" y="90" class="small mono">owner[32]</text>
+  <text x="265" y="112" class="small mono">balance (long long)</text>
+  <text x="265" y="134" class="small mono">status (int)</text>
+  <text x="265" y="156" class="small mono">tx_count (int)</text>
+  <rect class="box" x="20" y="40" width="160" height="40" rx="6"/>
+  <text x="100" y="65" text-anchor="middle" class="small mono">account_open()</text>
+  <rect class="box" x="20" y="110" width="160" height="40" rx="6"/>
+  <text x="100" y="135" text-anchor="middle" class="small mono">account_deposit()</text>
+  <rect class="box" x="500" y="40" width="160" height="40" rx="6"/>
+  <text x="580" y="65" text-anchor="middle" class="small mono">account_withdraw()</text>
+  <rect class="box" x="500" y="110" width="160" height="40" rx="6"/>
+  <text x="580" y="135" text-anchor="middle" class="small mono">account_transfer()</text>
+  <rect class="box" x="250" y="195" width="180" height="40" rx="6"/>
+  <text x="340" y="220" text-anchor="middle" class="small mono">account_print()</text>
+  <path class="arrow-m" d="M180 60 H 250"/>
+  <path class="arrow-m" d="M180 130 H 250"/>
+  <path class="arrow-m" d="M500 60 H 430"/>
+  <path class="arrow-m" d="M500 130 H 430"/>
+  <path class="arrow-m" d="M340 195 V 170"/>
+</svg>
+<figcaption>그림 17-5 Account 구조체와 이를 다루는 함수들: 모두 포인터로 받는다</figcaption>
+</figure>
+
+<figure class="code"><figcaption>ex17-11.c 계좌 구조체와 입출금·이체</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+
+#define ACC_NORMAL   0
+#define ACC_SUSPEND  1
+#define ACC_CLOSED   2
+
+/* 오류 코드: 0이면 성공, 음수면 실패 */
+#define OK               0
+#define ERR_INVALID_AMT -1
+#define ERR_NOT_NORMAL  -2
+#define ERR_NO_FUNDS    -3
+
+struct Account {
+    char      acc_no[16];
+    char      owner[32];
+    long long balance;      /* 원 단위 정수: 실수형 금지 */
+    int       status;
+    int       tx_count;     /* 거래 건수 */
+};
+
+void account_open(struct Account *a, const char *no, const char *owner)
+{
+    memset(a, 0, sizeof *a);                          /* 패딩까지 0으로 */
+    snprintf(a-&gt;acc_no, sizeof a-&gt;acc_no, "%s", no);   /* 길이 초과 방지 */
+    snprintf(a-&gt;owner, sizeof a-&gt;owner, "%s", owner);
+    a-&gt;status = ACC_NORMAL;
+}
+
+int account_deposit(struct Account *a, long long amt)
+{
+    if (amt &lt;= 0)                 return ERR_INVALID_AMT;
+    if (a-&gt;status != ACC_NORMAL)  return ERR_NOT_NORMAL;
+    a-&gt;balance += amt;
+    a-&gt;tx_count++;
+    return OK;
+}
+
+int account_withdraw(struct Account *a, long long amt)
+{
+    if (amt &lt;= 0)                 return ERR_INVALID_AMT;
+    if (a-&gt;status != ACC_NORMAL)  return ERR_NOT_NORMAL;
+    if (a-&gt;balance &lt; amt)         return ERR_NO_FUNDS;   /* 잔액 부족 */
+    a-&gt;balance -= amt;
+    a-&gt;tx_count++;
+    return OK;
+}
+
+/* 이체: 출금이 성공한 경우에만 입금. 입금 실패 시 출금을 되돌림 */
+int account_transfer(struct Account *from, struct Account *to, long long amt)
+{
+    int rc = account_withdraw(from, amt);
+    if (rc != OK) return rc;
+    rc = account_deposit(to, amt);
+    if (rc != OK) {               /* 보상 처리(롤백) */
+        from-&gt;balance += amt;
+        from-&gt;tx_count--;
+        return rc;
+    }
+    return OK;
+}
+
+void account_print(const struct Account *a)
+{
+    static const char *st[] = { "정상", "정지", "해지" };
+    printf("%-10s %-8s %12lld원  %s  거래 %d건\n",
+           a-&gt;acc_no, a-&gt;owner, a-&gt;balance, st[a-&gt;status], a-&gt;tx_count);
+}
+
+int main(void)
+{
+    struct Account kim, lee;
+    int rc;
+
+    account_open(&amp;kim, "110-001", "Kim");
+    account_open(&amp;lee, "110-002", "Lee");
+
+    account_deposit(&amp;kim, 1000000);
+    rc = account_transfer(&amp;kim, &amp;lee, 300000);
+    printf("이체1 결과: %d\n", rc);
+
+    rc = account_transfer(&amp;kim, &amp;lee, 900000);   /* 잔액 70만 원뿐 */
+    printf("이체2 결과: %d\n", rc);
+
+    lee.status = ACC_SUSPEND;                    /* 입금 계좌 정지 */
+    rc = account_transfer(&amp;kim, &amp;lee, 100000);
+    printf("이체3 결과: %d\n", rc);
+
+    account_print(&amp;kim);
+    account_print(&amp;lee);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>이체1 결과: 0
+이체2 결과: -3
+이체3 결과: -2
+110-001    Kim            700000원  정상  거래 2건
+110-002    Lee            300000원  정지  거래 1건</pre></figure>
+
+<p>결과를 추적해 봅시다. kim은 100만 원 입금(거래 1건), 30만 원 이체 출금(2건)으로 70만 원입니다. 이체2는 잔액 부족으로 출금 자체가 실패해 아무것도 바뀌지 않습니다. 이체3은 kim 출금은 성공(70만→60만, 3건)했지만 lee가 정지 상태라 입금이 실패하고, 보상 처리로 kim 잔액을 70만 원, 거래 건수를 2건으로 되돌렸습니다. lee는 이체1의 입금 1건만 남습니다.</p>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — 왜 잔액에 double을 쓰지 않을까?</p>
+<p><code>double</code>은 이진 부동소수점이라 0.1 같은 십진 소수를 정확히 표현하지 못합니다. <code>0.1 + 0.2 == 0.3</code>이 거짓이 되는 것처럼, 이자를 계산하고 더하는 과정에서 미세 오차가 누적되면 원장 잔액과 거래 내역 합계가 1원 단위로 맞지 않는 "대사 불일치"가 생깁니다. 그래서 원화는 <b>원 단위 정수</b>(<code>long long</code>, 최대 약 922경)로, 외화처럼 소수점이 필요한 금액은 <b>최소 단위 정수</b>(센트 단위 등)나 고정소수점 십진 표현으로 저장합니다.</p></div>
+
+<div class="box fin"><p class="box-title" data-tag="금융 실무">은행 시스템에서는 — 원장 레코드와 거래의 원자성</p>
+<p>은행의 계좌 원장(ledger)은 위의 <code>struct Account</code>를 훨씬 크게 확장한 레코드입니다. 계좌번호, 고객번호, 상품코드, 잔액, 지급정지 여부, 최종거래일자, 이자 계산 기준 잔액, 거래 일련번호 등이 들어갑니다. 실제 시스템에서 이체는 위 예제처럼 메모리 안의 두 구조체를 고치는 것이 아니라 <b>데이터베이스 트랜잭션</b>으로 처리됩니다. 출금 계좌 UPDATE와 입금 계좌 UPDATE, 거래 내역 INSERT가 하나의 트랜잭션으로 묶여 모두 성공(COMMIT)하거나 모두 취소(ROLLBACK)됩니다. 우리 예제의 "보상 처리"는 이 원자성(Atomicity)을 흉내 낸 것입니다.</p>
+<p>또한 실무 코드는 함수의 반환값으로 <b>오류 코드</b>를 돌려주고, 호출한 쪽은 반드시 검사합니다. "잔액 부족", "지급 정지 계좌", "해지 계좌"는 각각 고유한 응답 코드로 단말이나 대외기관에 전달됩니다. 반환값을 무시하는 코드는 코드 리뷰에서 가장 먼저 지적받습니다.</p></div>
+
+<div class="ex"><p class="ex-title">예제 17-4 <span class="lv">난이도 ★★★</span></p>
+<p>위 <code>account_transfer</code>에서 <code>from</code>과 <code>to</code>가 <b>같은 계좌</b>(같은 주소)로 호출되면 어떻게 되는지 설명하고, 이를 막는 코드를 추가하십시오. 또한 <code>to-&gt;balance + amt</code>가 <code>long long</code> 범위를 넘을 가능성은 어떻게 막을 수 있을까요?</p>
+<details><summary>정답과 해설 보기</summary>
+<p>같은 계좌면 출금 후 다시 입금되어 잔액은 그대로지만 거래 건수가 2 늘어나고, 거래 로그가 있다면 무의미한 거래 두 건이 기록됩니다. 실무에서는 "출금 계좌와 입금 계좌 동일" 오류로 거절합니다. 주소 비교(<code>from == to</code>)와 계좌번호 비교를 함께 하면 안전합니다(같은 계좌가 메모리에 두 번 적재된 경우 대비).</p>
+<p>부호 있는 정수 오버플로는 미정의 동작이므로 <b>더하기 전에</b> 검사해야 합니다. <code>LLONG_MAX - to-&gt;balance &lt; amt</code>이면 거절합니다. 더 현실적으로는 1회 이체 한도와 1일 이체 한도를 먼저 검사하므로 그런 금액은 애초에 들어오지 않습니다.</p>
+<figure class="code good"><figcaption>정답 코드</figcaption><pre><code class="language-c">#include &lt;limits.h&gt;
+#define ERR_SAME_ACC  -4
+#define ERR_OVERFLOW  -5
+
+int account_transfer(struct Account *from, struct Account *to, long long amt)
+{
+    if (from == to || strcmp(from-&gt;acc_no, to-&gt;acc_no) == 0)
+        return ERR_SAME_ACC;
+    if (amt &gt; 0 &amp;&amp; LLONG_MAX - to-&gt;balance &lt; amt)
+        return ERR_OVERFLOW;
+    int rc = account_withdraw(from, amt);
+    if (rc != OK) return rc;
+    rc = account_deposit(to, amt);
+    if (rc != OK) { from-&gt;balance += amt; from-&gt;tx_count--; return rc; }
+    return OK;
+}</code></pre></figure>
+</details></div>
+
+<h2 id="s17-2"><span class="num">17-2</span>구조체 활용, 공용체, 열거형</h2>
+
+<h3 id="s17-2-1">구조체 배열</h3>
+<p>같은 형의 구조체 여러 개는 배열로 관리합니다. 구조체 배열은 "레코드의 목록"이며, 데이터베이스의 테이블이나 파일의 레코드 묶음을 메모리에 올린 모습과 같습니다. 원소 접근은 <code>arr[i].member</code>입니다. <code>[]</code>와 <code>.</code>은 우선순위가 같고 왼쪽부터 결합하므로 "i번째 원소의 멤버"로 해석됩니다.</p>
+
+<figure class="code"><figcaption>ex17-12.c 구조체 배열로 고객 목록 처리</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+struct Account {
+    char      acc_no[16];
+    char      owner[16];
+    long long balance;
+};
+
+/* 잔액 내림차순 정렬(선택 정렬): 구조체 통째로 교환 */
+void sort_by_balance(struct Account a[], int n)
+{
+    for (int i = 0; i &lt; n - 1; i++) {
+        int max = i;
+        for (int j = i + 1; j &lt; n; j++)
+            if (a[j].balance &gt; a[max].balance) max = j;
+        if (max != i) {
+            struct Account tmp = a[i];   /* 구조체 대입 3번으로 교환 */
+            a[i] = a[max];
+            a[max] = tmp;
+        }
+    }
+}
+
+int main(void)
+{
+    struct Account list[] = {
+        { "110-001", "Kim",  1200000 },
+        { "110-002", "Lee",  5300000 },
+        { "110-003", "Park",  450000 },
+        { "110-004", "Choi", 2800000 },
+    };
+    int n = sizeof list / sizeof list[0];    /* 원소 개수 = 4 */
+    long long sum = 0;
+
+    sort_by_balance(list, n);
+    for (int i = 0; i &lt; n; i++) {
+        printf("%d위 %-8s %-5s %10lld\n", i + 1,
+               list[i].acc_no, list[i].owner, list[i].balance);
+        sum += list[i].balance;
+    }
+    printf("합계 %lld, 평균 %lld\n", sum, sum / n);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>1위 110-002  Lee      5300000
+2위 110-004  Choi     2800000
+3위 110-001  Kim      1200000
+4위 110-003  Park      450000
+합계 9750000, 평균 2437500</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — 구조체 배열을 함수에 넘기면 원본이 정렬되는 이유</p>
+<p>구조체 하나를 값으로 넘기면 복사가 일어나지만, <b>배열</b>을 넘기면 배열 이름이 첫 원소의 주소로 변환되어 <code>struct Account *</code>가 넘어갑니다. 매개변수 <code>struct Account a[]</code>는 사실 <code>struct Account *a</code>와 같습니다. 그래서 함수 안에서 <code>a[i] = ...</code>로 바꾸면 main의 list가 직접 바뀝니다. 이 규칙은 int 배열의 경우와 완전히 같습니다.</p></div>
+
+<div class="box tip"><p class="box-title" data-tag="잠깐">여기서 잠깐 — 큰 레코드는 포인터 배열로 정렬하기</p>
+<p>위 예제는 교환할 때마다 구조체 전체(40바이트)를 세 번 복사합니다. 레코드가 수백 바이트이고 수십만 건이라면 비용이 큽니다. 이때는 <code>struct Account *idx[N];</code>처럼 포인터 배열을 만들어 <b>포인터만 정렬</b>하면 8바이트씩만 움직입니다. 원본 순서도 보존됩니다. 데이터베이스의 인덱스와 같은 발상입니다. 표준 라이브러리의 <code>qsort</code>를 쓰면 정렬 알고리즘을 직접 짤 필요도 없습니다.</p></div>
+
+<h3 id="s17-2-2">중첩 구조체</h3>
+<p>구조체의 멤버로 다른 구조체를 넣을 수 있습니다. 예를 들어 거래 내역에는 "거래 일시"가 있는데, 날짜와 시각을 각각 구조체로 만들어 두면 다른 곳에서도 재사용할 수 있습니다. 접근은 <code>.</code>을 연달아 씁니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 680 210" width="680" role="img" aria-label="중첩 구조체 구조">
+  <rect class="box" x="20" y="20" width="640" height="170" rx="8"/>
+  <text x="35" y="42" class="bold mono">struct Tx tx</text>
+  <rect class="line" x="40" y="60" width="130" height="110" rx="4"/>
+  <text x="105" y="120" text-anchor="middle" class="mono small">tx_no</text>
+  <rect class="hl" x="190" y="60" width="260" height="110" rx="6"/>
+  <text x="320" y="78" text-anchor="middle" class="small bold mono">when (struct DateTime)</text>
+  <rect class="hl2" x="205" y="90" width="110" height="65" rx="4"/>
+  <text x="260" y="110" text-anchor="middle" class="small mono">date</text>
+  <text x="260" y="132" text-anchor="middle" class="small mono">y m d</text>
+  <rect class="hl2" x="325" y="90" width="110" height="65" rx="4"/>
+  <text x="380" y="110" text-anchor="middle" class="small mono">time</text>
+  <text x="380" y="132" text-anchor="middle" class="small mono">h mi s</text>
+  <rect class="line" x="470" y="60" width="80" height="110" rx="4"/>
+  <text x="510" y="120" text-anchor="middle" class="mono small">amount</text>
+  <rect class="line" x="565" y="60" width="80" height="110" rx="4"/>
+  <text x="605" y="120" text-anchor="middle" class="mono small">type</text>
+</svg>
+<figcaption>그림 17-6 중첩 구조체: tx.when.date.y 처럼 바깥에서 안쪽으로 접근한다</figcaption>
+</figure>
+
+<figure class="code"><figcaption>ex17-13.c 중첩 구조체로 거래 내역 표현</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+struct Date { int y, m, d; };
+struct Time { int h, mi, s; };
+struct DateTime {
+    struct Date date;        /* 구조체 안의 구조체 */
+    struct Time time;
+};
+
+struct Tx {
+    long            tx_no;   /* 거래 일련번호 */
+    struct DateTime when;    /* 거래 일시 */
+    long long       amount;  /* 거래 금액 */
+    char            type;    /* 'D' 입금, 'W' 출금 */
+};
+
+void print_tx(const struct Tx *t)
+{
+    printf("#%ld %04d-%02d-%02d %02d:%02d:%02d %c %lld\n",
+           t-&gt;tx_no,
+           t-&gt;when.date.y, t-&gt;when.date.m, t-&gt;when.date.d,   /* -&gt; 다음 . . */
+           t-&gt;when.time.h, t-&gt;when.time.mi, t-&gt;when.time.s,
+           t-&gt;type, t-&gt;amount);
+}
+
+int main(void)
+{
+    struct Tx t = {
+        .tx_no  = 1001,
+        .when   = { { 2026, 10, 28 }, { 9, 5, 30 } },   /* 중첩 중괄호 */
+        .amount = 250000,
+        .type   = 'D'
+    };
+    print_tx(&amp;t);
+
+    t.when.time.h = 15;          /* 중첩 멤버 수정 */
+    t.tx_no++;
+    t.type = 'W';
+    print_tx(&amp;t);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>#1001 2026-10-28 09:05:30 D 250000
+#1002 2026-10-28 15:05:30 W 250000</pre></figure>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 — 자기 자신을 멤버로 넣기</p>
+<p>구조체는 다른 구조체를 멤버로 가질 수 있지만, <b>자기 자신과 같은 형</b>을 멤버로 가질 수는 없습니다. <code>struct node { int v; struct node next; };</code>는 오류입니다. node 안에 node가 있고 그 안에 또 node가 있어 크기가 무한대가 되기 때문입니다. 컴파일러는 "field has incomplete type"이라고 알려 줍니다. 대신 <b>자기 자신을 가리키는 포인터</b>는 가능합니다. 포인터의 크기는 가리키는 대상과 무관하게 8바이트로 정해져 있기 때문입니다(17-2-4).</p></div>
+
+<h3 id="s17-2-3">구조체의 크기: 패딩과 정렬</h3>
+<p>구조체의 크기는 멤버 크기의 단순 합이 아닐 수 있습니다. 다음 실험을 보십시오.</p>
+
+<figure class="code"><figcaption>ex17-14.c 멤버 순서에 따라 달라지는 구조체 크기</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stddef.h&gt;      /* offsetof */
+
+struct A { char c; int i; char d; };     /* 1 + 4 + 1 = 6 ? */
+struct B { char c; char d; int i; };     /* 1 + 1 + 4 = 6 ? */
+struct C { char c; double x; int i; };   /* 1 + 8 + 4 = 13 ? */
+struct D { double x; int i; char c; };   /* 8 + 4 + 1 = 13 ? */
+
+int main(void)
+{
+    printf("A=%zu B=%zu C=%zu D=%zu\n",
+           sizeof(struct A), sizeof(struct B),
+           sizeof(struct C), sizeof(struct D));
+    printf("A: c@%zu i@%zu d@%zu\n",
+           offsetof(struct A, c), offsetof(struct A, i), offsetof(struct A, d));
+    printf("C: c@%zu x@%zu i@%zu\n",
+           offsetof(struct C, c), offsetof(struct C, x), offsetof(struct C, i));
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과 (x86-64 gcc)</figcaption><pre>A=12 B=8 C=24 D=16
+A: c@0 i@4 d@8
+C: c@0 x@8 i@16</pre></figure>
+
+<p>같은 멤버인데 순서만 바꿨더니 크기가 12와 8, 24와 16으로 달라졌습니다. 컴파일러가 멤버 사이와 끝에 아무 의미 없는 빈 바이트, 즉 <b>패딩(padding)</b>을 끼워 넣었기 때문입니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 250" width="700" role="img" aria-label="struct A와 B의 메모리 배치">
+  <text x="20" y="30" class="bold mono">struct A (12바이트)</text>
+  <rect class="hl" x="20" y="45" width="50" height="40"/><text x="45" y="70" text-anchor="middle" class="small mono">c</text>
+  <rect class="dash" x="70" y="45" width="150" height="40"/><text x="145" y="70" text-anchor="middle" class="small mute">패딩 3</text>
+  <rect class="hl2" x="220" y="45" width="200" height="40"/><text x="320" y="70" text-anchor="middle" class="small mono">i (4)</text>
+  <rect class="hl" x="420" y="45" width="50" height="40"/><text x="445" y="70" text-anchor="middle" class="small mono">d</text>
+  <rect class="dash" x="470" y="45" width="150" height="40"/><text x="545" y="70" text-anchor="middle" class="small mute">꼬리 패딩 3</text>
+  <text x="20" y="102" class="small mute mono">0</text>
+  <text x="215" y="102" class="small mute mono">4</text>
+  <text x="415" y="102" class="small mute mono">8</text>
+  <text x="610" y="102" class="small mute mono">12</text>
+  <text x="20" y="150" class="bold mono">struct B (8바이트)</text>
+  <rect class="hl" x="20" y="165" width="50" height="40"/><text x="45" y="190" text-anchor="middle" class="small mono">c</text>
+  <rect class="hl" x="70" y="165" width="50" height="40"/><text x="95" y="190" text-anchor="middle" class="small mono">d</text>
+  <rect class="dash" x="120" y="165" width="100" height="40"/><text x="170" y="190" text-anchor="middle" class="small mute">패딩 2</text>
+  <rect class="hl2" x="220" y="165" width="200" height="40"/><text x="320" y="190" text-anchor="middle" class="small mono">i (4)</text>
+  <text x="20" y="222" class="small mute mono">0</text>
+  <text x="215" y="222" class="small mute mono">4</text>
+  <text x="415" y="222" class="small mute mono">8</text>
+  <text x="460" y="190" class="small acc">같은 멤버, 4바이트 절약</text>
+</svg>
+<figcaption>그림 17-7 패딩: int는 4의 배수 주소에 놓여야 하므로 빈 바이트가 생긴다 (한 칸 = 1바이트)</figcaption>
+</figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — CPU는 왜 정렬된 주소를 좋아할까?</p>
+<p>CPU는 메모리를 1바이트씩 읽지 않습니다. 메모리 버스와 캐시는 4바이트, 8바이트, 그리고 캐시 라인(보통 64바이트) 단위로 데이터를 가져옵니다. 4바이트 int가 주소 4, 8, 12처럼 <b>4의 배수</b>에 있으면 한 번의 접근으로 읽을 수 있습니다. 그런데 주소 1부터 걸쳐 있으면(1~4번 바이트) 두 개의 워드(0~3, 4~7)에 걸치게 되어, CPU는 두 번 읽고 필요한 바이트를 잘라 붙여야 합니다. 이것을 <b>비정렬 접근(unaligned access)</b>이라고 합니다.</p>
+<ul>
+  <li>x86-64는 비정렬 접근을 하드웨어가 처리해 주지만 느려질 수 있고, 캐시 라인 경계에 걸치면 더 느립니다. 원자적(atomic) 연산은 정렬되어 있어야 보장됩니다.</li>
+  <li>일부 ARM, SPARC 같은 CPU는 비정렬 접근 시 <b>버스 오류(bus error)</b>로 프로그램이 죽기도 합니다.</li>
+</ul>
+<p>그래서 각 자료형에는 <b>정렬 요구(alignment requirement)</b>가 있습니다. x86-64 리눅스에서 <code>char</code>=1, <code>short</code>=2, <code>int</code>=4, <code>long</code>/<code>long long</code>/<code>double</code>/포인터=8입니다. C11의 <code>_Alignof(int)</code>(또는 <code>&lt;stdalign.h&gt;</code>의 <code>alignof</code>)로 확인할 수 있습니다. 컴파일러는 각 멤버의 오프셋이 그 정렬 값의 배수가 되도록 앞에 패딩을 넣습니다.</p>
+<p><b>꼬리 패딩</b>은 왜 필요할까요? 구조체 배열을 생각하면 됩니다. struct A의 크기가 9라면 <code>arr[1]</code>은 주소 9에서 시작하고, 그 안의 i는 주소 13에 놓여 4의 배수가 아닙니다. 그래서 구조체 전체 크기는 <b>가장 큰 정렬 요구를 가진 멤버의 정렬 값의 배수</b>로 맞춰집니다. A는 int(4)가 최대이므로 9를 12로, C는 double(8)이 최대이므로 20을 24로 올립니다.</p></div>
+
+<p>규칙을 정리하면 다음과 같습니다.</p>
+<ol class="steps">
+  <li>각 멤버는 자신의 정렬 값의 배수인 오프셋에 놓인다. 필요하면 앞에 패딩을 넣는다.</li>
+  <li>구조체 전체의 정렬 값은 멤버 정렬 값 중 최댓값이다.</li>
+  <li>구조체 크기는 전체 정렬 값의 배수가 되도록 끝에 패딩을 넣는다.</li>
+  <li>첫 멤버의 오프셋은 항상 0이다(표준이 보장). 그래서 구조체 주소와 첫 멤버 주소는 같다.</li>
+</ol>
+
+<div class="ex"><p class="ex-title">예제 17-5 <span class="lv">난이도 ★★☆</span></p>
+<p>x86-64 리눅스에서 다음 구조체의 크기를 구하고, 크기를 최소로 만드는 멤버 순서를 제시하십시오.</p>
+<pre><code class="language-c">struct Tx {
+    char      type;        /* 'D' / 'W' */
+    long long amount;
+    short     branch;      /* 지점 코드 */
+    int       teller_id;   /* 창구 직원 번호 */
+    char      channel;     /* 'B' 영업점, 'I' 인터넷 */
+};</code></pre>
+<details><summary>정답과 해설 보기</summary>
+<p>원래 순서: type@0(1) → amount는 8의 배수여야 하므로 패딩 7, amount@8~15 → branch@16~17 → teller_id는 4의 배수여야 하므로 패딩 2, @20~23 → channel@24 → 끝 25를 8의 배수로 올려 <b>32바이트</b>. 실제 데이터는 1+8+2+4+1=16바이트인데 절반이 패딩입니다.</p>
+<p>정렬 값이 큰 순서로 배치합니다: amount@0~7, teller_id@8~11, branch@12~13, type@14, channel@15 → 16바이트로 패딩 0. 이 기법을 "큰 것부터 배치"라고 하며, 수백만 건의 레코드를 메모리에 올리는 배치 프로그램에서 메모리를 크게 절약합니다.</p>
+<figure class="code good"><figcaption>정답 코드</figcaption><pre><code class="language-c">struct Tx {
+    long long amount;      /* 8 */
+    int       teller_id;   /* 4 */
+    short     branch;      /* 2 */
+    char      type;        /* 1 */
+    char      channel;     /* 1  =&gt; 합계 16, 패딩 없음 */
+};</code></pre></figure>
+</details></div>
+
+<div class="box fin"><p class="box-title" data-tag="금융 실무">은행 시스템에서는 — 전문(電文)과 구조체 패딩</p>
+<p>은행과 대외기관(타 은행, 카드사, 결제 중계기관 등)은 정해진 바이트 배치의 <b>고정 길이 전문</b>으로 통신합니다. 예를 들어 "전문 종별 코드 4바이트, 거래 일자 8바이트, 계좌번호 16바이트, 금액 13바이트(숫자 문자)…"처럼 각 필드의 위치가 바이트 단위로 고정됩니다. 이때 구조체를 그대로 소켓으로 보내면(<code>send(sock, &amp;msg, sizeof msg, 0)</code>) 다음 문제가 생깁니다.</p>
+<ul>
+  <li>컴파일러가 넣은 <b>패딩</b>이 필드 사이에 끼어 필드 위치가 어긋납니다.</li>
+  <li>숫자 필드를 <code>int</code>로 두면 <b>엔디안</b>(바이트 순서)이 상대 시스템과 다를 수 있습니다.</li>
+  <li>패딩 바이트에 쓰레기값이 들어가 로그에 이상한 문자가 찍히거나, 메모리에 남아 있던 민감 정보 조각이 새어 나갈 수 있습니다.</li>
+</ul>
+<p>그래서 금융 전문은 대개 <b>모든 필드를 <code>char</code> 배열</b>로 정의합니다(<code>char amt[13];</code>처럼 숫자도 문자로). char 배열은 정렬 요구가 1이므로 패딩이 생기지 않습니다. 그리고 <code>_Static_assert(sizeof(struct Msg) == 300, "전문 길이 불일치");</code>로 컴파일 시점에 길이를 검증합니다. gcc의 <code>__attribute__((packed))</code>나 <code>#pragma pack(1)</code>으로 패딩을 없앨 수도 있지만, 비정렬 접근과 이식성 문제가 있어 신중히 사용합니다(19장에서 <code>#pragma</code>를 다룹니다).</p></div>
+
+<figure class="code"><figcaption>ex17-15.c 패딩 없는 고정 길이 전문 구조체</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+
+struct TransferMsg {          /* 모든 필드를 char 배열로: 패딩 0 */
+    char msg_type[4];         /* "0200" 이체 요청 */
+    char tx_date[8];          /* "20261028" */
+    char from_acc[16];        /* 출금 계좌, 왼쪽 정렬 공백 채움 */
+    char to_acc[16];          /* 입금 계좌 */
+    char amount[13];          /* "0000000250000" 오른쪽 정렬 0 채움 */
+    char filler[7];           /* 예비 영역(공백) */
+};
+_Static_assert(sizeof(struct TransferMsg) == 64, "전문 길이는 64바이트여야 함");
+
+int main(void)
+{
+    struct TransferMsg m;
+    char buf[32];
+
+    memset(&amp;m, ' ', sizeof m);                       /* 전체를 공백으로 */
+    memcpy(m.msg_type, "0200", 4);
+    memcpy(m.tx_date, "20261028", 8);
+    memcpy(m.from_acc, "110001", 6);
+    memcpy(m.to_acc, "220002", 6);
+    snprintf(buf, sizeof buf, "%013lld", 250000LL);   /* 0 채운 13자리 */
+    memcpy(m.amount, buf, 13);                        /* 널 문자는 복사 안 함 */
+
+    printf("[%.*s]\n", (int)sizeof m, (const char *)&amp;m);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>[020020261028110001          220002          0000000250000       ]</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — 왜 strcpy가 아니라 memcpy를 썼을까?</p>
+<p>전문 필드는 <b>널 문자로 끝나지 않는</b> 고정 길이 바이트열입니다. <code>strcpy(m.msg_type, "0200")</code>은 "0200" 4바이트 뒤에 널 문자 1바이트를 더 써서 다음 필드(tx_date)의 첫 바이트를 덮어씁니다. 마지막 필드라면 구조체 밖을 침범하는 버퍼 오버플로가 됩니다. 정확히 필요한 바이트 수만큼 <code>memcpy</code>하고, 출력할 때도 <code>%.*s</code>로 길이를 지정해야 합니다.</p></div>
+
+<h3 id="s17-2-4">자기 참조 구조체 입문</h3>
+<p>멤버로 <b>자기와 같은 형을 가리키는 포인터</b>를 가진 구조체를 자기 참조 구조체(self-referential structure)라고 합니다. 이것이 연결 리스트, 트리, 큐 같은 동적 자료구조의 기초입니다. 여기서는 개념만 익히고, 본격적인 구현은 자료구조 장에서 다룹니다.</p>
+
+<figure class="code"><figcaption>ex17-16.c 거래 내역을 연결 리스트로 잇기</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+
+struct TxNode {
+    long long      amount;      /* 거래 금액(+입금, -출금) */
+    struct TxNode *next;        /* 다음 거래를 가리키는 포인터 */
+};
+
+/* 리스트 맨 앞에 새 노드 추가, 새 머리를 반환 */
+struct TxNode *push_front(struct TxNode *head, long long amt)
+{
+    struct TxNode *n = malloc(sizeof *n);
+    if (n == NULL) return head;          /* 실패 시 기존 리스트 유지 */
+    n-&gt;amount = amt;
+    n-&gt;next = head;                      /* 새 노드가 옛 머리를 가리킴 */
+    return n;
+}
+
+int main(void)
+{
+    struct TxNode *head = NULL;          /* 빈 리스트 */
+    long long sum = 0;
+
+    head = push_front(head, 100000);
+    head = push_front(head, -30000);
+    head = push_front(head, 50000);
+
+    for (struct TxNode *p = head; p != NULL; p = p-&gt;next) {
+        printf("%lld -&gt; ", p-&gt;amount);
+        sum += p-&gt;amount;
+    }
+    printf("NULL\n합계: %lld\n", sum);
+
+    while (head != NULL) {               /* 해제: next를 먼저 보관 */
+        struct TxNode *nx = head-&gt;next;
+        free(head);
+        head = nx;
+    }
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>50000 -&gt; -30000 -&gt; 100000 -&gt; NULL
+합계: 120000</pre></figure>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 150" width="700" role="img" aria-label="연결 리스트 그림">
+  <rect class="hl2" x="20" y="55" width="70" height="40" rx="4"/>
+  <text x="55" y="80" text-anchor="middle" class="small mono">head</text>
+  <path class="arrow" d="M90 75 H 130"/>
+  <rect class="box" x="130" y="50" width="100" height="50" rx="4"/>
+  <text x="165" y="80" text-anchor="middle" class="small mono">50000</text>
+  <rect class="hl" x="200" y="50" width="30" height="50"/>
+  <path class="arrow" d="M230 75 H 290"/>
+  <rect class="box" x="290" y="50" width="100" height="50" rx="4"/>
+  <text x="325" y="80" text-anchor="middle" class="small mono">-30000</text>
+  <rect class="hl" x="360" y="50" width="30" height="50"/>
+  <path class="arrow" d="M390 75 H 450"/>
+  <rect class="box" x="450" y="50" width="100" height="50" rx="4"/>
+  <text x="485" y="80" text-anchor="middle" class="small mono">100000</text>
+  <rect class="hl" x="520" y="50" width="30" height="50"/>
+  <path class="arrow" d="M550 75 H 610"/>
+  <text x="645" y="80" text-anchor="middle" class="small mono warn-t">NULL</text>
+  <text x="350" y="130" text-anchor="middle" class="small mute">각 노드의 강조 칸이 next 포인터: 다음 노드의 주소를 저장</text>
+</svg>
+<figcaption>그림 17-8 자기 참조 구조체로 만든 연결 리스트</figcaption>
+</figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — 해제할 때 next를 먼저 보관하는 이유</p>
+<p><code>free(head); head = head-&gt;next;</code> 순서로 쓰면 이미 해제한 메모리에서 next를 읽게 됩니다. 이것은 해제 후 사용(use-after-free)으로 미정의 동작입니다. 해제된 메모리는 할당기가 내부 관리 정보로 덮어쓸 수 있어, 엉뚱한 주소로 이동하거나 보안 취약점이 됩니다. 반드시 next를 지역 변수에 먼저 복사한 뒤 free합니다.</p>
+<p>또 하나, 왜 포인터 멤버는 허용될까요? 컴파일러가 <code>struct TxNode</code>의 크기를 계산하는 시점에는 아직 TxNode가 완성되지 않은 <b>불완전형(incomplete type)</b>입니다. 불완전형의 객체는 크기를 모르므로 멤버로 둘 수 없지만, 불완전형을 <b>가리키는 포인터</b>의 크기는 항상 8바이트로 알려져 있으므로 문제가 없습니다.</p></div>
+
+<h3 id="s17-2-5">공용체 union</h3>
+<p>공용체(union)는 문법이 구조체와 똑같지만 결정적인 차이가 있습니다. 구조체의 멤버는 각자 자기 공간을 가지지만, <b>공용체의 모든 멤버는 같은 시작 주소의 메모리를 공유</b>합니다. 따라서 공용체의 크기는 가장 큰 멤버의 크기(에 정렬을 위한 꼬리 패딩을 더한 값)이며, 한 번에 의미 있는 값은 하나의 멤버뿐입니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 240" width="700" role="img" aria-label="구조체와 공용체의 메모리 비교">
+  <text x="20" y="25" class="bold mono">struct S { int i; double d; char s[4]; }  (24바이트)</text>
+  <rect class="hl" x="20" y="40" width="80" height="36"/><text x="60" y="63" text-anchor="middle" class="small mono">i</text>
+  <rect class="dash" x="100" y="40" width="80" height="36"/><text x="140" y="63" text-anchor="middle" class="small mute">패딩</text>
+  <rect class="hl2" x="180" y="40" width="160" height="36"/><text x="260" y="63" text-anchor="middle" class="small mono">d</text>
+  <rect class="box" x="340" y="40" width="80" height="36"/><text x="380" y="63" text-anchor="middle" class="small mono">s</text>
+  <rect class="dash" x="420" y="40" width="80" height="36"/><text x="460" y="63" text-anchor="middle" class="small mute">패딩</text>
+  <text x="20" y="125" class="bold mono">union U { int i; double d; char s[4]; }  (8바이트)</text>
+  <rect class="hl2" x="20" y="140" width="160" height="28"/><text x="200" y="159" class="small mono">d : 바이트 0~7</text>
+  <rect class="hl" x="20" y="172" width="80" height="24"/><text x="200" y="189" class="small mono">i : 바이트 0~3</text>
+  <rect class="box" x="20" y="200" width="80" height="24"/><text x="200" y="217" class="small mono">s : 바이트 0~3</text>
+  <text x="430" y="189" class="small acc">모두 같은 주소에서 시작</text>
+</svg>
+<figcaption>그림 17-9 구조체는 멤버를 나란히, 공용체는 멤버를 겹쳐 배치한다</figcaption>
+</figure>
+
+<figure class="code"><figcaption>ex17-17.c 공용체의 메모리 공유 확인 (엔디안 검사)</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+union Probe {
+    unsigned int  i;         /* 4바이트 */
+    unsigned char b[4];      /* 같은 4바이트를 바이트 단위로 */
+};
+
+int main(void)
+{
+    union Probe p;
+    p.i = 0x12345678;        /* int 멤버로 쓰고 */
+
+    printf("sizeof(union Probe) = %zu\n", sizeof p);
+    printf("&amp;p.i = %p, &amp;p.b = %p\n", (void *)&amp;p.i, (void *)&amp;p.b);
+    for (int k = 0; k &lt; 4; k++)            /* 바이트 멤버로 읽기 */
+        printf("b[%d] = %02X\n", k, p.b[k]);
+    printf("%s 엔디안\n", p.b[0] == 0x78 ? "리틀" : "빅");
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과 (x86-64, 주소는 예시)</figcaption><pre>sizeof(union Probe) = 4
+&amp;p.i = 0x7ffe8a2c1a14, &amp;p.b = 0x7ffe8a2c1a14
+b[0] = 78
+b[1] = 56
+b[2] = 34
+b[3] = 12
+리틀 엔디안</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — 왜 78 56 34 12 순서로 나올까?</p>
+<p>x86 계열 CPU는 <b>리틀 엔디안(little endian)</b>으로, 여러 바이트 정수를 저장할 때 <b>가장 낮은 자리 바이트(0x78)를 가장 낮은 주소</b>에 둡니다. 공용체는 같은 4바이트를 int로도, 바이트 배열로도 볼 수 있게 해 주므로 이 저장 순서를 그대로 드러냅니다. 네트워크 표준 바이트 순서와 IBM 메인프레임 등은 <b>빅 엔디안</b>이라 0x12가 먼저 옵니다. 메인프레임 계정계와 유닉스/리눅스 대외계가 섞인 금융권에서 숫자를 바이너리로 주고받을 때 엔디안 변환을 빠뜨리면 금액이 완전히 다른 숫자로 해석됩니다.</p>
+<p>표준 관점에서, 마지막으로 쓴 멤버가 아닌 다른 멤버로 읽는 것(type punning)은 C99 TC3 이후의 C에서 허용되며, 저장된 바이트를 새 형으로 재해석한 값이 나옵니다(그 결과는 표현 방식에 따라 다르고, 트랩 표현이면 문제가 될 수 있음). C++에서는 미정의 동작이니 C++ 코드로 옮길 때는 <code>memcpy</code>를 쓰십시오.</p></div>
+
+<p>공용체의 실제 용도는 크게 세 가지입니다.</p>
+<ol class="steps">
+  <li><b>메모리 절약</b>: 동시에 쓰이지 않는 데이터를 겹쳐 저장합니다.</li>
+  <li><b>바이트 재해석</b>: 위 엔디안 검사처럼 같은 데이터를 다른 형으로 봅니다(프로토콜 파싱, 하드웨어 레지스터).</li>
+  <li><b>태그 있는 공용체(tagged union)</b>: "종류 표시(tag)" 멤버와 공용체를 구조체로 묶어, 종류에 따라 다른 데이터를 담습니다. 가장 많이 쓰는 패턴입니다.</li>
+</ol>
+
+<figure class="code"><figcaption>ex17-18.c 태그 있는 공용체로 결제 수단 표현</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+enum PayKind { PAY_ACCOUNT, PAY_CARD, PAY_CASH };
+
+struct Payment {
+    enum PayKind kind;              /* 태그: 어떤 멤버가 유효한지 */
+    long long    amount;
+    union {
+        struct { char bank[4]; char acc_no[16]; } account;
+        struct { char card_no[20]; int installment; } card;
+        struct { int  receipt_no; } cash;
+    } u;
+};
+
+void print_payment(const struct Payment *p)
+{
+    switch (p-&gt;kind) {              /* 태그를 보고 해석 */
+    case PAY_ACCOUNT:
+        printf("계좌이체 %s-%s %lld원\n", p-&gt;u.account.bank,
+               p-&gt;u.account.acc_no, p-&gt;amount);
+        break;
+    case PAY_CARD:
+        printf("카드 %s %d개월 %lld원\n", p-&gt;u.card.card_no,
+               p-&gt;u.card.installment, p-&gt;amount);
+        break;
+    case PAY_CASH:
+        printf("현금 영수증 %d %lld원\n", p-&gt;u.cash.receipt_no, p-&gt;amount);
+        break;
+    }
+}
+
+int main(void)
+{
+    struct Payment a = { .kind = PAY_ACCOUNT, .amount = 50000,
+                         .u.account = { "088", "110-001" } };
+    struct Payment c = { .kind = PAY_CARD, .amount = 1200000,
+                         .u.card = { "9410-****-****-123", 3 } };
+    print_payment(&amp;a);
+    print_payment(&amp;c);
+    printf("sizeof(struct Payment) = %zu\n", sizeof(struct Payment));
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>계좌이체 088-110-001 50000원
+카드 9410-****-****-123 3개월 1200000원
+sizeof(struct Payment) = 40</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — 크기가 왜 40일까?</p>
+<p>공용체 u의 멤버 크기는 account가 4+16=20, card가 20+4=24(card_no 20바이트 뒤 int는 오프셋 20, 4의 배수이므로 패딩 없음), cash가 4입니다. 가장 큰 24바이트, 정렬 4이므로 u는 24바이트입니다. 바깥 구조체는 kind(4)@0, amount는 8 정렬이라 패딩 4 후 @8~15, u@16~39이고, 전체 정렬 8에 대해 40이 이미 8의 배수이므로 <b>40바이트</b>입니다. 세 결제 수단을 각각 구조체 멤버로 나열했다면 4+4+8+20+24+4=64바이트가 필요했을 것입니다.</p>
+<p>참고로 카드 번호 예시는 마스킹된 18글자 문자열로 card_no[20]에 널 문자까지 들어갑니다. 실제 카드 번호(16자리)를 평문으로 저장하거나 출력하는 것은 금융 규제상 금지이며 반드시 마스킹하거나 암호화합니다.</p></div>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 — 태그와 실제 내용 불일치</p>
+<p>공용체는 컴파일러가 "지금 어느 멤버가 유효한지" 추적해 주지 않습니다. kind를 PAY_CARD로 바꾸고 u.card를 채우지 않으면 이전 account 데이터의 바이트를 카드 번호로 잘못 읽습니다. 태그와 내용을 항상 함께 설정하는 생성 함수(<code>make_card_payment(...)</code>)를 만들어 직접 대입을 피하는 것이 안전합니다.</p></div>
+
+<h3 id="s17-2-6">열거형 enum과 거래 상태 코드</h3>
+<p>거래의 상태를 0, 1, 2 같은 숫자로 관리하면 코드에 <code>if (st == 3)</code> 같은 의미 불명의 숫자(매직 넘버)가 등장합니다. 열거형(enumeration)은 <b>정수 상수에 이름을 붙여 하나의 형으로 묶는</b> 방법입니다.</p>
+
+<figure class="code"><figcaption>ex17-19.c 열거형으로 거래 상태 관리</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+enum TxState {
+    TX_REQUESTED,        /* 0: 요청됨 */
+    TX_APPROVED,         /* 1: 승인됨 */
+    TX_SETTLED,          /* 2: 정산 완료 */
+    TX_CANCELLED,        /* 3: 취소됨 */
+    TX_FAILED,           /* 4: 실패 */
+    TX_STATE_COUNT       /* 5: 개수(배열 크기용 관용구) */
+};
+
+static const char *state_name[TX_STATE_COUNT] = {
+    "요청", "승인", "정산", "취소", "실패"
+};
+
+/* 허용된 상태 전이인지 검사 */
+int can_change(enum TxState from, enum TxState to)
+{
+    switch (from) {
+    case TX_REQUESTED: return to == TX_APPROVED || to == TX_FAILED;
+    case TX_APPROVED:  return to == TX_SETTLED  || to == TX_CANCELLED;
+    default:           return 0;      /* 정산·취소·실패는 최종 상태 */
+    }
+}
+
+int main(void)
+{
+    enum TxState s = TX_REQUESTED;
+    enum TxState plan[] = { TX_APPROVED, TX_REQUESTED, TX_SETTLED, TX_CANCELLED };
+
+    for (int i = 0; i &lt; 4; i++) {
+        if (can_change(s, plan[i])) {
+            printf("%s -&gt; %s 허용\n", state_name[s], state_name[plan[i]]);
+            s = plan[i];
+        } else {
+            printf("%s -&gt; %s 거부\n", state_name[s], state_name[plan[i]]);
+        }
+    }
+    printf("최종 상태: %s(%d)\n", state_name[s], s);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>요청 -&gt; 승인 허용
+승인 -&gt; 요청 거부
+승인 -&gt; 정산 허용
+정산 -&gt; 취소 거부
+최종 상태: 정산(2)</pre></figure>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 230" width="700" role="img" aria-label="거래 상태 전이도">
+  <rect class="box" x="20" y="85" width="120" height="44" rx="22"/>
+  <text x="80" y="112" text-anchor="middle" class="small mono">REQUESTED</text>
+  <rect class="hl" x="230" y="85" width="120" height="44" rx="22"/>
+  <text x="290" y="112" text-anchor="middle" class="small mono">APPROVED</text>
+  <rect class="hl2" x="460" y="25" width="120" height="44" rx="22"/>
+  <text x="520" y="52" text-anchor="middle" class="small mono">SETTLED</text>
+  <rect class="box" x="460" y="145" width="120" height="44" rx="22"/>
+  <text x="520" y="172" text-anchor="middle" class="small mono">CANCELLED</text>
+  <rect class="bad" x="230" y="170" width="120" height="44" rx="22"/>
+  <text x="290" y="197" text-anchor="middle" class="small mono">FAILED</text>
+  <path class="arrow" d="M140 107 H 230"/>
+  <text x="185" y="98" text-anchor="middle" class="small mute">승인</text>
+  <path class="arrow" d="M350 100 L 460 52"/>
+  <text x="392" y="66" class="small mute">정산</text>
+  <path class="arrow" d="M350 115 L 460 162"/>
+  <text x="392" y="156" class="small mute">취소</text>
+  <path class="arrow-m" d="M100 129 L 230 188"/>
+  <text x="60" y="180" class="small mute">거절/오류</text>
+  <text x="600" y="112" class="small mute">최종 상태</text>
+</svg>
+<figcaption>그림 17-10 enum으로 정의한 거래 상태와 허용된 전이</figcaption>
+</figure>
+
+<p>열거형의 규칙은 다음과 같습니다.</p>
+<ul>
+  <li>값을 지정하지 않으면 첫 상수는 0, 이후는 앞의 값 + 1입니다.</li>
+  <li>값을 직접 줄 수 있습니다: <code>enum RespCode { RC_OK = 0, RC_INVALID_ACC = 14, RC_NO_FUNDS = 51, RC_TIMEOUT = 91 };</code> 값을 지정하지 않은 다음 상수는 바로 앞 값 + 1이 됩니다.</li>
+  <li>열거 상수의 형은 C에서 <code>int</code>입니다. 열거형 변수의 실제 저장 형은 구현 정의(보통 int)입니다.</li>
+  <li>C는 열거형 변수에 범위 밖의 정수를 넣는 것을 막지 않습니다(<code>s = 42;</code>도 컴파일됨). C++보다 느슨합니다.</li>
+</ul>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — #define 상수 대신 enum을 쓰는 이유</p>
+<p><code>#define TX_APPROVED 1</code>도 같은 일을 하는 것처럼 보이지만, 전처리기가 컴파일 전에 단순히 글자를 바꿔 버리므로 컴파일러와 디버거는 TX_APPROVED라는 이름을 모릅니다. enum 상수는 컴파일러가 아는 진짜 식별자라서 (1) gdb에서 <code>print s</code>를 하면 <code>TX_SETTLED</code>로 보이고, (2) 변수의 형이 <code>enum TxState</code>로 문서화되며, (3) <code>switch</code>에서 열거 상수 중 하나를 처리하지 않으면 <code>gcc -Wall</code>(<code>-Wswitch</code>)이 경고해 줍니다. 상태 코드가 하나 추가되었을 때 처리 누락을 컴파일러가 찾아 주는 것은 실무에서 매우 큰 장점입니다. 단, 이 경고는 <code>default</code>가 있으면 나오지 않으므로, 누락이 치명적인 곳에서는 default 없이 모든 case를 나열하기도 합니다.</p></div>
+
+<div class="box fin"><p class="box-title" data-tag="금융 실무">은행 시스템에서는 — 응답 코드와 상태 코드</p>
+<p>카드 승인이나 대외 이체에서 상대 기관은 <b>응답 코드</b>를 돌려줍니다. 승인(정상), 잔액 부족, 계좌 오류, 시간 초과(타임아웃) 등이 각각 정해진 코드로 표현됩니다. 실무 코드는 이 코드를 enum이나 상수 표로 정의하고, 코드별로 "고객에게 보여 줄 메시지", "재시도 가능 여부", "망 취소(reversal) 필요 여부"를 매핑합니다. 특히 타임아웃은 "상대방은 처리했는데 우리는 응답을 못 받은" 상태일 수 있어서, 재시도하면 이중 출금이 되고 무시하면 돈이 공중에 뜹니다. 그래서 타임아웃을 별도의 상태(예: <code>TX_UNKNOWN</code>)로 두고, 이후 조회 전문이나 일마감 대사(reconciliation)로 확정하는 설계가 일반적입니다.</p></div>
+
+<h3 id="s17-2-7">typedef로 형 이름 짓기</h3>
+<p><code>typedef</code>는 기존 자료형에 <b>새 이름(별칭)</b>을 붙입니다. 새로운 형을 만드는 것이 아니라 이름만 하나 더 붙이는 것입니다. 문법은 변수 선언 앞에 typedef를 붙인 모양이라고 기억하면 쉽습니다. <code>long long money;</code>는 변수 선언이고, <code>typedef long long Money;</code>는 Money라는 형 이름 선언입니다.</p>
+
+<figure class="code"><figcaption>ex17-20.c typedef 활용</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+typedef long long Money;                 /* 금액 형: 의미가 드러남 */
+
+typedef struct Account {                 /* 태그와 typedef 동시에 */
+    char  acc_no[16];
+    Money balance;
+} Account;                               /* 이제 Account만으로 사용 가능 */
+
+typedef enum { DR, CR } Side;            /* 익명 enum에 이름 붙이기 */
+
+typedef int (*Validator)(const Account *, Money);   /* 함수 포인터 형 */
+
+int check_limit(const Account *a, Money amt)
+{
+    (void)a;                             /* 사용 안 함 경고 방지 */
+    return amt &lt;= 5000000;               /* 1회 한도 500만 원 */
+}
+
+int main(void)
+{
+    Account a = { "110-001", 800000 };   /* struct 키워드 불필요 */
+    Validator v = check_limit;
+    Side s = CR;
+
+    printf("%s %lld\n", a.acc_no, a.balance);
+    printf("600만 원 이체 가능? %s\n", v(&amp;a, 6000000) ? "예" : "아니오");
+    printf("Side=%d, sizeof(Money)=%zu\n", s, sizeof(Money));
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>110-001 800000
+600만 원 이체 가능? 아니오
+Side=1, sizeof(Money)=8</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — typedef와 #define의 차이</p>
+<p><code>#define PTR char *</code> 후 <code>PTR a, b;</code>라고 쓰면 전처리기가 <code>char * a, b;</code>로 바꾸므로 a만 포인터이고 b는 char입니다. 반면 <code>typedef char *PTR;</code> 후 <code>PTR a, b;</code>는 a와 b가 모두 <code>char *</code>입니다. typedef는 컴파일러가 이해하는 진짜 형 이름이고, #define은 글자 치환이기 때문입니다. 또한 typedef는 블록 범위 규칙을 따르고 디버거에도 이름이 남습니다.</p>
+<p><code>Money</code> 같은 typedef는 문서화 효과도 큽니다. 나중에 금액 형을 다른 형으로 바꿔야 할 때 typedef 한 줄만 바꾸면 선언부를 일일이 찾을 필요가 없습니다.</p></div>
+
+<div class="box tip"><p class="box-title" data-tag="잠깐">여기서 잠깐 — _t 접미사는 피하세요</p>
+<p><code>size_t</code>, <code>int32_t</code>처럼 표준 형들은 <code>_t</code>로 끝납니다. POSIX 표준은 <code>_t</code>로 끝나는 이름을 시스템용으로 예약하고 있으므로, 직접 만드는 typedef에는 <code>account_t</code>보다 <code>Account</code>처럼 다른 명명 규칙을 쓰는 편이 안전합니다. 실제 프로젝트에서는 팀의 코딩 표준을 따르면 됩니다.</p></div>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 — 자기 참조 구조체에서 typedef 이름 사용</p>
+<figure class="code bad"><figcaption>잘못된 예 — 왜 틀렸을까?</figcaption>
+<pre><code class="language-c">typedef struct {
+    int   v;
+    Node *next;     /* 오류: 이 시점에는 Node라는 이름이 아직 없음 */
+} Node;</code></pre></figure>
+<p>typedef 이름 Node는 선언이 끝나는 세미콜론에서야 생깁니다. 구조체 내부에서는 태그 이름을 써야 합니다.</p>
+<figure class="code good"><figcaption>고친 코드</figcaption>
+<pre><code class="language-c">typedef struct Node {
+    int          v;
+    struct Node *next;   /* 태그 이름으로 참조 */
+} Node;</code></pre></figure></div>
+
+<div class="ex"><p class="ex-title">예제 17-6 <span class="lv">난이도 ★★★</span></p>
+<p>다음 코드의 출력을 x86-64 리눅스 기준으로 예측하십시오.</p>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+typedef union { long long ll; int i[2]; char c[8]; } U;
+typedef struct { char tag; U u; } S;
+int main(void)
+{
+    U x;
+    x.ll = 0;
+    x.i[1] = 1;
+    printf("%zu %zu %lld\n", sizeof(U), sizeof(S), x.ll);
+    return 0;
+}</code></pre>
+<details><summary>정답과 해설 보기</summary>
+<p>출력: <code>8 16 4294967296</code></p>
+<p>U는 가장 큰 멤버가 8바이트이고 정렬도 8이라 8바이트입니다. S는 tag@0, U는 8 정렬이므로 패딩 7 후 @8~15, 합계 16입니다. x.ll을 0으로 만든 뒤 i[1](바이트 4~7)에 1을 넣으면, 리틀 엔디안에서 바이트 4는 ll의 상위 32비트 중 가장 낮은 바이트입니다. 따라서 ll = 1 × 2<sup>32</sup> = 4294967296이 됩니다. 빅 엔디안 기계라면 i[1]이 하위 32비트가 되어 1이 출력됩니다.</p>
+</details></div>
+
+<h2 id="summary">핵심 정리</h2>
+<ul class="summary-list">
+  <li>구조체는 서로 다른 자료형을 하나로 묶은 사용자 정의 자료형입니다. 형 이름은 <code>struct 태그</code> 전체이며, 선언만으로는 메모리가 생기지 않고 변수를 정의할 때 할당됩니다.</li>
+  <li>구조체 변수는 <code>.</code>, 구조체 포인터는 <code>-&gt;</code>로 멤버에 접근합니다. <code>p-&gt;m</code>은 <code>(*p).m</code>과 같고, <code>*p.m</code>은 우선순위 때문에 틀린 식입니다.</li>
+  <li>초기화는 순서 초기화와 지정 초기화(C99, <code>.멤버 = 값</code>)가 있고, 일부만 주면 나머지는 0이 됩니다. <code>= { 0 }</code>은 전체 0 초기화 관용구입니다.</li>
+  <li>같은 형의 구조체는 <code>=</code>로 통째로 대입(배열 멤버 포함)할 수 있지만 <code>==</code>로 비교할 수는 없습니다. 포인터 멤버는 얕은 복사가 되므로 필요하면 깊은 복사 함수를 만듭니다.</li>
+  <li>C는 항상 값 전달입니다. 구조체를 수정하거나 큰 구조체를 효율적으로 넘길 때는 포인터를, 읽기 전용이면 <code>const</code> 포인터를 씁니다.</li>
+  <li>금액은 원 단위 정수(<code>long long</code>)로 다루고, 입출금 함수는 오류 코드를 반환하며 호출한 쪽에서 반드시 검사합니다.</li>
+  <li>구조체 배열을 함수에 넘기면 주소가 넘어가 원본이 바뀝니다. 큰 레코드는 포인터 배열로 정렬하면 효율적입니다.</li>
+  <li>패딩은 CPU의 정렬 접근 요구 때문에 생깁니다. 각 멤버는 자기 정렬 값의 배수 오프셋에, 전체 크기는 최대 정렬 값의 배수로 맞춰집니다. 큰 멤버부터 배치하면 크기를 줄일 수 있습니다.</li>
+  <li>금융 전문처럼 바이트 배치가 정해진 데이터는 char 배열 필드로 정의하고 <code>_Static_assert</code>로 길이를 검증합니다.</li>
+  <li>자기 참조 구조체는 자기 형을 가리키는 포인터 멤버를 가지며 연결 리스트의 기초입니다. 자기 형 자체를 멤버로 둘 수는 없습니다.</li>
+  <li>공용체는 모든 멤버가 같은 메모리를 공유하며 크기는 가장 큰 멤버 기준입니다. 엔디안 확인, 바이트 재해석, 태그 있는 공용체에 씁니다.</li>
+  <li>열거형은 이름 붙은 정수 상수 집합으로, 매직 넘버를 없애고 switch 누락 경고를 받을 수 있습니다. typedef는 형에 별칭을 붙이며 #define과 달리 컴파일러가 이해하는 형 이름입니다.</li>
+</ul>
+
+<h2 id="interview">CS 면접 단골 질문</h2>
+<div class="box iv"><p class="box-title" data-tag="면접">이 장에서 나오는 면접 질문</p>
+  <details><summary>Q1. 구조체 패딩(padding)이 무엇이고 왜 생기나요?</summary>
+  <p>구조체 멤버 사이나 끝에 컴파일러가 넣는 빈 바이트입니다. CPU는 자료형 크기의 배수 주소에 있는 데이터를 한 번에 읽도록 설계되어 있어, 정렬되지 않은 데이터는 두 번 읽어야 하거나 일부 아키텍처에서는 예외가 발생합니다. 그래서 컴파일러는 각 멤버를 정렬 요구에 맞는 오프셋에 두고, 구조체 배열에서도 정렬이 유지되도록 끝에 꼬리 패딩을 넣습니다. 예를 들어 <code>char, int, char</code> 순서면 12바이트, <code>char, char, int</code>면 8바이트입니다.</p>
+  <p><b>꼬리 질문 대비:</b> "패딩을 없애려면?" 멤버를 정렬 값이 큰 순서로 배치하는 것이 첫 번째이고, <code>#pragma pack</code>이나 <code>__attribute__((packed))</code>도 있지만 비정렬 접근 성능 저하와 이식성 문제가 있다고 답합니다. 네트워크 전문은 char 배열로 정의하는 것이 일반적이라는 점도 덧붙이면 좋습니다.</p></details>
+  <details><summary>Q2. 구조체와 공용체의 차이는 무엇인가요?</summary>
+  <p>구조체는 멤버마다 별도의 메모리를 가져 모든 멤버를 동시에 저장할 수 있고, 크기는 멤버 크기 합에 패딩을 더한 값입니다. 공용체는 모든 멤버가 같은 시작 주소의 메모리를 공유해 한 번에 하나의 멤버만 의미가 있고, 크기는 가장 큰 멤버 크기에 정렬 패딩을 더한 값입니다. 공용체는 메모리 절약, 같은 바이트의 다른 형 해석, 태그 있는 공용체로 여러 형태의 데이터를 표현할 때 씁니다.</p>
+  <p><b>꼬리 질문 대비:</b> "공용체로 엔디안을 확인하는 방법은?" int에 1을 넣고 char 배열 첫 바이트가 1이면 리틀 엔디안이라고 설명합니다.</p></details>
+  <details><summary>Q3. 구조체를 함수에 넘길 때 값으로 넘기는 것과 포인터로 넘기는 것의 차이는?</summary>
+  <p>값으로 넘기면 구조체 전체가 복사되어 함수 안에서 바꿔도 원본에 영향이 없지만, 구조체가 크면 복사 비용이 큽니다. 포인터로 넘기면 주소 8바이트만 복사되므로 빠르고 원본을 수정할 수 있습니다. 수정할 의도가 없다면 <code>const</code> 포인터로 받아 실수로 바꾸는 것을 컴파일러가 막게 합니다. 엄밀히 C는 언제나 값 전달이고, 포인터 전달은 주소라는 값을 넘겨 참조 효과를 내는 것입니다.</p>
+  <p><b>꼬리 질문 대비:</b> "C에 call by reference가 있나요?" 없습니다. C++의 참조(&amp;)와 구분해 설명합니다.</p></details>
+  <details><summary>Q4. 얕은 복사와 깊은 복사의 차이를 설명해 주세요.</summary>
+  <p>얕은 복사는 구조체의 바이트를 그대로 복사하므로 포인터 멤버는 주소만 복사되어 원본과 사본이 같은 대상을 공유합니다. 한쪽에서 수정하면 다른 쪽도 바뀌고, 둘 다 free하면 이중 해제가 됩니다. 깊은 복사는 포인터가 가리키는 대상까지 새로 할당해 복사하므로 두 객체가 완전히 독립됩니다. C의 구조체 대입은 얕은 복사이므로 동적 메모리를 가진 구조체는 복사 함수를 직접 작성해야 합니다.</p></details>
+  <details><summary>Q5. 구조체를 memcmp로 비교하면 안 되는 이유는?</summary>
+  <p>패딩 바이트의 값은 정해져 있지 않기 때문입니다. 멤버 값이 모두 같아도 패딩에 남은 쓰레기값이 다르면 memcmp는 다르다고 판단합니다. 또한 문자열 멤버는 널 문자 이후의 바이트가 다를 수 있고, 부동소수점은 +0.0과 -0.0처럼 값은 같지만 비트가 다른 경우가 있습니다. 멤버별 비교 함수를 작성하는 것이 정확합니다.</p>
+  <p><b>꼬리 질문 대비:</b> "그럼 memset으로 0 초기화한 뒤라면 괜찮나요?" 대입 과정에서 패딩이 다시 바뀔 수 있으므로 보장되지 않는다고 답합니다.</p></details>
+  <details><summary>Q6. 엔디안(endianness)이란 무엇이고 언제 문제가 되나요?</summary>
+  <p>여러 바이트 데이터를 메모리에 저장하는 바이트 순서입니다. 리틀 엔디안은 하위 바이트를 낮은 주소에(x86, 대부분의 ARM 설정), 빅 엔디안은 상위 바이트를 낮은 주소에(네트워크 바이트 순서, 일부 메인프레임) 둡니다. 서로 다른 시스템이 바이너리 정수를 주고받거나 바이너리 파일을 공유할 때 문제가 됩니다. 네트워크에서는 <code>htonl</code>/<code>ntohl</code>로 변환하고, 금융 전문은 아예 숫자를 문자로 표현해 엔디안 문제를 피합니다.</p></details>
+  <details><summary>Q7. enum과 #define 상수의 차이는?</summary>
+  <p>#define은 전처리 단계의 단순 텍스트 치환이라 형 정보가 없고 디버거에 이름이 남지 않습니다. enum 상수는 컴파일러가 아는 int 상수로, 열거형이라는 형을 통해 의미가 문서화되고 디버거에서 이름으로 보이며 switch에서 처리하지 않은 값을 경고받을 수 있습니다. 값을 자동으로 증가시켜 주므로 상태 코드 정의에 편리합니다. 다만 C에서는 열거형 변수에 범위 밖 정수를 넣는 것을 막지 않습니다.</p></details>
+  <details><summary>Q8. typedef와 #define으로 형 별칭을 만드는 것의 차이는?</summary>
+  <p>typedef는 컴파일러가 처리하는 진짜 형 이름이고 #define은 텍스트 치환입니다. 대표적으로 <code>#define PCHAR char *</code>로 <code>PCHAR a, b;</code>를 선언하면 b는 char가 되지만, typedef로 만든 이름이면 둘 다 포인터가 됩니다. typedef는 범위 규칙을 따르고 함수 포인터 같은 복잡한 형을 읽기 쉽게 만들 때 특히 유용합니다.</p></details>
+  <details><summary>Q9. 구조체 안에 자기 자신을 멤버로 둘 수 없는 이유는? 포인터는 왜 되나요?</summary>
+  <p>자기 자신을 멤버로 가지면 크기 계산이 무한히 재귀되어 크기를 정할 수 없습니다. 구조체 정의가 끝나기 전까지 그 형은 불완전형이고, 불완전형의 객체는 멤버가 될 수 없습니다. 반면 포인터는 가리키는 대상과 무관하게 크기가 정해져 있으므로(64비트에서 8바이트) 불완전형을 가리키는 포인터는 멤버로 둘 수 있습니다. 이것이 연결 리스트와 트리의 기초입니다.</p></details>
+  <details><summary>Q10. 지역 구조체 변수의 주소를 반환하면 어떻게 되나요?</summary>
+  <p>지역 변수는 스택 프레임에 있고 함수가 반환되면 수명이 끝나므로, 그 주소는 댕글링 포인터가 됩니다. 역참조는 미정의 동작이며, 당장은 값이 남아 있어 정상처럼 보이다가 다음 함수 호출이 스택을 덮어쓰면 값이 바뀝니다. 구조체를 값으로 반환하거나, 호출자가 버퍼를 제공하거나, 동적 할당 후 반환하고 호출자가 해제하도록 합니다.</p></details>
+</div>
+
+<h2 id="exercises">연습문제</h2>
+
+<div class="ex"><p class="ex-title">연습문제 17-1 출력 예측 <span class="lv">난이도 ★☆☆</span></p>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+struct P { int x, y; };
+int main(void)
+{
+    struct P a = { 1, 2 }, b = a, *p = &amp;b;
+    p-&gt;x = 10;
+    b.y += a.x;
+    printf("%d %d %d %d\n", a.x, a.y, b.x, b.y);
+    return 0;
+}</code></pre>
+<details><summary>정답과 해설 보기</summary>
+<p>출력: <code>1 2 10 3</code>. b는 a의 사본으로 시작합니다(1, 2). p는 b를 가리키므로 <code>p-&gt;x = 10</code>은 b.x를 10으로 바꿉니다. b.y는 2 + a.x(1) = 3입니다. a는 한 번도 바뀌지 않았습니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 17-2 크기 계산 <span class="lv">난이도 ★★☆</span></p>
+<p>x86-64 리눅스에서 다음 구조체의 sizeof와 각 멤버의 offsetof를 구하십시오.</p>
+<pre><code class="language-c">struct R {
+    short     a;
+    double    b;
+    char      c[3];
+    int       d;
+    char     *e;
+};</code></pre>
+<details><summary>정답과 해설 보기</summary>
+<p>a@0(2) → b는 8 정렬, 패딩 6 → b@8~15 → c@16~18 → d는 4 정렬, 19를 20으로, d@20~23 → e는 8 정렬, 24는 8의 배수, e@24~31 → 크기 32(최대 정렬 8의 배수). 패딩은 6 + 1 = 7바이트입니다. 큰 것부터 배치하면 b, e, d, a, c 순으로 8+8+4+2+3=25 → 32. 이 경우에는 순서를 바꿔도 꼬리 패딩 때문에 32로 같습니다. 크기를 줄이는 효과가 항상 있는 것은 아니라는 점도 기억하십시오.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 17-3 버그 찾기 <span class="lv">난이도 ★★☆</span></p>
+<p>다음 코드는 계좌 잔액을 초기화하려 하지만 잔액이 바뀌지 않습니다. 이유와 수정 방법은?</p>
+<pre><code class="language-c">struct Account { char no[16]; long long bal; };
+void reset(struct Account a) { a.bal = 0; }
+int main(void) { struct Account x = { "110", 500 }; reset(x); printf("%lld\n", x.bal); }</code></pre>
+<details><summary>정답과 해설 보기</summary>
+<p>구조체를 값으로 넘겨 함수 안의 a는 x의 사본입니다. 사본의 bal을 0으로 바꿔도 x는 그대로이므로 500이 출력됩니다. 또한 <code>&lt;stdio.h&gt;</code>가 없어 printf 선언이 누락되었고, main의 return 문도 없습니다(main은 생략 시 0 반환이 보장되지만 명시가 권장됩니다).</p>
+<figure class="code good"><figcaption>정답 코드</figcaption><pre><code class="language-c">#include &lt;stdio.h&gt;
+struct Account { char no[16]; long long bal; };
+void reset(struct Account *a) { a-&gt;bal = 0; }
+int main(void)
+{
+    struct Account x = { "110", 500 };
+    reset(&amp;x);
+    printf("%lld\n", x.bal);   /* 0 */
+    return 0;
+}</code></pre></figure>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 17-4 빈칸 채우기 <span class="lv">난이도 ★☆☆</span></p>
+<p>포인터 q로 tx의 거래 연도를 2027로 바꾸는 문장을 세 가지 방법으로 쓰십시오.</p>
+<pre><code class="language-c">struct Date { int y, m, d; };
+struct Tx { long no; struct Date date; } tx, *q = &amp;tx;</code></pre>
+<details><summary>정답과 해설 보기</summary>
+<p>(1) <code>q-&gt;date.y = 2027;</code> (2) <code>(*q).date.y = 2027;</code> (3) <code>tx.date.y = 2027;</code> 추가로 <code>(&amp;q-&gt;date)-&gt;y = 2027;</code>도 됩니다. q는 포인터이므로 첫 접근은 <code>-&gt;</code>, date는 구조체 변수이므로 그다음은 <code>.</code>입니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 17-5 코드 작성: 최대 잔액 계좌 <span class="lv">난이도 ★★☆</span></p>
+<p><code>const struct Account *find_max(const struct Account a[], int n)</code>를 작성하십시오. n이 0이면 NULL을 반환합니다.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>복사 없이 가장 큰 원소의 주소를 반환합니다. 반환형에 const를 붙여 호출자가 이 포인터로 원본을 바꾸지 못하게 합니다.</p>
+<figure class="code good"><figcaption>정답 코드</figcaption><pre><code class="language-c">const struct Account *find_max(const struct Account a[], int n)
+{
+    if (n &lt;= 0) return NULL;
+    const struct Account *best = &amp;a[0];
+    for (int i = 1; i &lt; n; i++)
+        if (a[i].balance &gt; best-&gt;balance)
+            best = &amp;a[i];
+    return best;
+}</code></pre></figure>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 17-6 공용체 출력 예측 <span class="lv">난이도 ★★☆</span></p>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+union V { int i; unsigned char c[4]; };
+int main(void)
+{
+    union V v;
+    v.i = 0;
+    v.c[0] = 0x01;
+    v.c[1] = 0x01;
+    printf("%d %zu\n", v.i, sizeof v);
+    return 0;
+}</code></pre>
+<details><summary>정답과 해설 보기</summary>
+<p>리틀 엔디안 x86-64에서 <code>257 4</code>입니다. c[0]은 최하위 바이트(1), c[1]은 그다음 바이트(256의 자리)이므로 1 + 256 = 257입니다. 빅 엔디안이라면 0x01010000 = 16842752가 됩니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 17-7 열거형 값 <span class="lv">난이도 ★☆☆</span></p>
+<p><code>enum E { A, B = 5, C, D = 2, E2 };</code>에서 A, B, C, D, E2의 값은?</p>
+<details><summary>정답과 해설 보기</summary>
+<p>A=0, B=5, C=6, D=2, E2=3. 값을 지정하지 않은 상수는 바로 앞 상수 + 1입니다. 열거 상수끼리 값이 겹쳐도(예: 다른 상수가 3이어도) 오류는 아니지만, switch에서 중복 case 오류의 원인이 될 수 있으니 주의합니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 17-8 금융 응용: 이자 지급 <span class="lv">난이도 ★★★</span></p>
+<p>계좌 배열에서 상태가 정상인 계좌에만 연 이율(만분율 정수, 예: 250 = 2.50%)로 월 이자를 지급하는 함수 <code>long long pay_interest(struct Account a[], int n, int rate_bp)</code>를 작성하십시오. 월 이자 = 잔액 × 이율 / 10000 / 12, 원 미만 버림. 총 지급 이자를 반환합니다.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>실수 연산 대신 정수로 계산합니다. 곱셈을 먼저 하고 나눗셈을 나중에 해야 정밀도가 유지되지만, 곱셈 결과가 long long 범위를 넘지 않는지 확인해야 합니다. 잔액 1조 원(10<sup>12</sup>) × 250 = 2.5×10<sup>14</sup>로 범위(약 9.2×10<sup>18</sup>) 안이므로 안전합니다. 예: 잔액 1,200,000원, 250bp이면 1,200,000 × 250 / 120000 = 2500원입니다.</p>
+<figure class="code good"><figcaption>정답 코드</figcaption><pre><code class="language-c">long long pay_interest(struct Account a[], int n, int rate_bp)
+{
+    long long total = 0;
+    for (int i = 0; i &lt; n; i++) {
+        if (a[i].status != ACC_NORMAL || a[i].balance &lt;= 0) continue;
+        long long it = a[i].balance * rate_bp / (10000LL * 12);   /* 원 미만 버림 */
+        a[i].balance += it;
+        total += it;
+    }
+    return total;
+}</code></pre></figure>
+<p>실무에서는 세금(이자소득세) 원천징수, 일별 잔액 기준 일할 계산, 단수 처리 규칙(절사·반올림)이 상품마다 정해져 있습니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 17-9 버그 찾기: 전문 필드 <span class="lv">난이도 ★★★</span></p>
+<pre><code class="language-c">struct Msg { char type[4]; char date[8]; char acc[16]; };
+struct Msg m;
+strcpy(m.type, "0200");
+strcpy(m.date, "20261028");
+strcpy(m.acc,  "110-234-5678901234");</code></pre>
+<p>어떤 문제가 있습니까?</p>
+<details><summary>정답과 해설 보기</summary>
+<p>(1) <code>strcpy(m.type, "0200")</code>은 널 문자까지 5바이트를 써서 date[0]을 덮습니다(다음 strcpy가 다시 덮으므로 우연히 드러나지 않음). (2) date도 9바이트를 써서 acc[0]을 덮습니다. (3) 계좌번호 문자열은 18자 + 널 = 19바이트로 acc[16]을 3바이트 넘쳐 구조체 밖을 침범합니다(버퍼 오버플로, 미정의 동작). 고정 길이 필드는 <code>memset</code>으로 공백 채움 후 길이를 확인하고 <code>memcpy</code>로 정확한 바이트만 복사해야 하며, 입력 길이가 필드보다 길면 오류 처리해야 합니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 17-10 코드 작성: 태그 있는 공용체 <span class="lv">난이도 ★★★</span></p>
+<p>거래 금액을 원화(정수 원)나 외화(통화코드 3글자 + 센트 단위 정수)로 담는 <code>struct Amount</code>를 태그 있는 공용체로 설계하고, 출력 함수를 작성하십시오. 외화 12345센트 USD는 "USD 123.45"로 출력합니다.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>통화 종류를 태그로 두고, 공용체에 원화용 정수와 외화용 구조체를 겹칩니다. 센트 단위 정수를 100으로 나눈 몫과 나머지로 소수점을 표현하면 부동소수점을 쓰지 않아도 됩니다(음수 금액은 부호를 따로 처리해야 합니다).</p>
+<figure class="code good"><figcaption>정답 코드</figcaption><pre><code class="language-c">#include &lt;stdio.h&gt;
+enum Cur { KRW, FX };
+struct Amount {
+    enum Cur kind;
+    union {
+        long long won;
+        struct { char code[4]; long long cents; } fx;
+    } u;
+};
+void print_amount(const struct Amount *a)
+{
+    if (a-&gt;kind == KRW)
+        printf("KRW %lld\n", a-&gt;u.won);
+    else
+        printf("%s %lld.%02lld\n", a-&gt;u.fx.code,
+               a-&gt;u.fx.cents / 100, a-&gt;u.fx.cents % 100);
+}
+int main(void)
+{
+    struct Amount x = { .kind = FX, .u.fx = { "USD", 12345 } };
+    struct Amount y = { .kind = KRW, .u.won = 50000 };
+    print_amount(&amp;x);   /* USD 123.45 */
+    print_amount(&amp;y);   /* KRW 50000 */
+    return 0;
+}</code></pre></figure>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 17-11 서술형 <span class="lv">난이도 ★★☆</span></p>
+<p>"구조체를 파일에 <code>fwrite(&amp;rec, sizeof rec, 1, fp)</code>로 그대로 저장하면 다른 서버에서 읽을 때 문제가 생길 수 있다"고 합니다. 그 이유를 세 가지 이상 드십시오.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>(1) 컴파일러·옵션·아키텍처에 따라 패딩 위치와 크기가 다를 수 있습니다. (2) 정수의 엔디안이 다를 수 있습니다. (3) <code>long</code>처럼 플랫폼마다 크기가 다른 형이 있습니다(64비트 리눅스 8바이트, 64비트 윈도우 4바이트). (4) 포인터 멤버는 주소만 저장되므로 다른 프로세스에서는 의미가 없습니다. (5) 패딩에 쓰레기값이 저장되어 민감 정보가 파일에 남을 수 있습니다. 그래서 이식성이 필요한 파일은 고정 폭 정수형(<code>int64_t</code>)과 명시적 직렬화(필드별 바이트 기록)나 텍스트 형식을 사용합니다. 18장에서 자세히 다룹니다.</p>
+</details></div>
+
+</main>
+<aside class="rail" aria-label="이 페이지 목차"></aside>
+</div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-c.min.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>

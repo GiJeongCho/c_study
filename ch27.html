@@ -1,0 +1,1360 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ch27 네트워크 소켓 프로그래밍 · C언어 금융 IT 마스터</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+KR:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-ch="ch27">
+<header class="topbar">
+  <button class="menu-btn" type="button" aria-expanded="false" aria-controls="sidebar">목차</button>
+  <a class="brand" href="index.html"><b>C</b>금융 IT 마스터</a>
+  <span class="where"></span>
+  <span class="progress"></span>
+</header>
+<div class="layout">
+<nav id="sidebar" class="sidebar" aria-label="과정 목차"></nav>
+<div class="page">
+<main class="content">
+
+<header class="ch-head">
+  <p class="eyebrow">PART 2 · 금융 IT 베테랑 트랙 · CHAPTER</p>
+  <div class="bignum">27</div>
+  <h1>네트워크 소켓 프로그래밍</h1>
+  <p class="lede">24장에서 만든 전문은 결국 네트워크를 타고 다른 기관으로 갑니다. 대외계 개발자의 하루는 "전문이 안 와요", "응답이 늦어요", "같은 거래가 두 번 들어왔어요"라는 전화로 채워집니다. 이 장에서는 TCP의 동작 원리부터 시작해, 부분 읽기·타임아웃·재송신·중복 응답까지 처리하는 실전 전문 송수신 서버를 직접 만듭니다.</p>
+  <div class="goals"><p class="goals-title">이 장에서 배울 것</p><ul>
+    <li>OSI 7계층과 TCP/IP 4계층, TCP와 UDP의 차이를 설명합니다.</li>
+    <li>3-way handshake, 4-way handshake, TIME_WAIT, CLOSE_WAIT의 의미와 장애와의 관계를 이해합니다.</li>
+    <li><code>socket/bind/listen/accept/connect</code>로 에코 서버와 클라이언트를 만듭니다.</li>
+    <li>TCP가 바이트 스트림이라 메시지 경계가 없다는 사실과, 길이 헤더 기반 프레이밍으로 해결하는 법을 익힙니다.</li>
+    <li>부분 읽기·쓰기를 처리하는 <code>readn/writen</code>, <code>SO_RCVTIMEO</code>와 <code>poll</code> 기반 타임아웃을 구현합니다.</li>
+    <li>fork 기반 동시 서버와 select/poll 기반 서버를 만들고 장단점을 비교합니다.</li>
+    <li>대외기관 연동에서 타임아웃·재송신·중복 응답·망 장애를 처리하는 설계와 keepalive를 익힙니다.</li>
+    <li>중복 방지 캐시를 갖춘 이체 전문 서버와 클라이언트 전체 예제를 완성합니다.</li>
+  </ul></div>
+</header>
+
+<h2 id="s27-1"><span class="num">27-1</span>TCP 소켓 기초</h2>
+
+<h3 id="s27-1-1">네트워크 계층 구조 — OSI 7계층과 TCP/IP</h3>
+<p>네트워크 통신은 여러 층으로 나뉘어 각 층이 자기 일만 합니다. 편지를 보낼 때 우리는 내용(응용)만 쓰고, 봉투에 주소를 적는 일(네트워크), 우체국 차량이 실제로 나르는 일(물리)은 신경 쓰지 않는 것과 같습니다. 이 분업 덕분에 전문 처리 프로그램은 상대가 광케이블 너머에 있든 같은 데이터센터에 있든 똑같은 코드로 통신합니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 330" width="700" role="img" aria-label="OSI 7계층과 TCP/IP 4계층 비교 및 캡슐화">
+  <text x="110" y="20" text-anchor="middle" class="bold">OSI 7계층</text>
+  <rect class="box" x="30" y="30" width="160" height="30"/><text x="110" y="50" text-anchor="middle" class="small">7 응용</text>
+  <rect class="box" x="30" y="60" width="160" height="30"/><text x="110" y="80" text-anchor="middle" class="small">6 표현</text>
+  <rect class="box" x="30" y="90" width="160" height="30"/><text x="110" y="110" text-anchor="middle" class="small">5 세션</text>
+  <rect class="hl" x="30" y="120" width="160" height="30"/><text x="110" y="140" text-anchor="middle" class="small">4 전송</text>
+  <rect class="hl2" x="30" y="150" width="160" height="30"/><text x="110" y="170" text-anchor="middle" class="small">3 네트워크</text>
+  <rect class="box" x="30" y="180" width="160" height="30"/><text x="110" y="200" text-anchor="middle" class="small">2 데이터링크</text>
+  <rect class="box" x="30" y="210" width="160" height="30"/><text x="110" y="230" text-anchor="middle" class="small">1 물리</text>
+  <text x="310" y="20" text-anchor="middle" class="bold">TCP/IP 4계층</text>
+  <rect class="box" x="230" y="30" width="160" height="90"/><text x="310" y="70" text-anchor="middle" class="small">응용</text><text x="310" y="88" text-anchor="middle" class="small mono">전문, HTTP, FTP</text>
+  <rect class="hl" x="230" y="120" width="160" height="30"/><text x="310" y="140" text-anchor="middle" class="small mono">전송: TCP / UDP</text>
+  <rect class="hl2" x="230" y="150" width="160" height="30"/><text x="310" y="170" text-anchor="middle" class="small mono">인터넷: IP</text>
+  <rect class="box" x="230" y="180" width="160" height="60"/><text x="310" y="214" text-anchor="middle" class="small">네트워크 접근 (이더넷)</text>
+  <text x="560" y="20" text-anchor="middle" class="bold">캡슐화</text>
+  <rect class="box" x="560" y="40" width="120" height="26"/><text x="620" y="58" text-anchor="middle" class="small">전문 160B</text>
+  <rect class="hl" x="500" y="80" width="60" height="26"/><text x="530" y="98" text-anchor="middle" class="small">TCP</text>
+  <rect class="box" x="560" y="80" width="120" height="26"/><text x="620" y="98" text-anchor="middle" class="small">전문</text>
+  <rect class="hl2" x="440" y="120" width="60" height="26"/><text x="470" y="138" text-anchor="middle" class="small">IP</text>
+  <rect class="hl" x="500" y="120" width="60" height="26"/><text x="530" y="138" text-anchor="middle" class="small">TCP</text>
+  <rect class="box" x="560" y="120" width="120" height="26"/><text x="620" y="138" text-anchor="middle" class="small">전문</text>
+  <rect class="box" x="410" y="160" width="30" height="26"/><text x="425" y="178" text-anchor="middle" class="small">Eth</text>
+  <rect class="hl2" x="440" y="160" width="60" height="26"/><text x="470" y="178" text-anchor="middle" class="small">IP</text>
+  <rect class="hl" x="500" y="160" width="60" height="26"/><text x="530" y="178" text-anchor="middle" class="small">TCP</text>
+  <rect class="box" x="560" y="160" width="120" height="26"/><text x="620" y="178" text-anchor="middle" class="small">전문</text>
+  <text x="350" y="275" text-anchor="middle" class="small">소켓 API는 응용 계층과 전송 계층 사이의 창구: 우리는 "전문 바이트"만 넘기고 TCP·IP 헤더는 커널이 붙인다</text>
+  <text x="350" y="300" text-anchor="middle" class="small mute">IP는 "어느 컴퓨터로"(주소), TCP는 "어느 프로그램으로"(포트) + 순서·재전송·흐름 제어</text>
+</svg>
+<figcaption>그림 27-1 OSI 7계층, TCP/IP 4계층, 그리고 전문이 헤더에 싸여 내려가는 캡슐화</figcaption>
+</figure>
+
+<div class="tbl"><table>
+<thead><tr><th>계층</th><th>역할</th><th>식별자</th><th>전문 통신에서의 예</th></tr></thead>
+<tbody>
+<tr><td>응용</td><td>업무 데이터의 의미</td><td>-</td><td>24장의 160바이트 이체 전문</td></tr>
+<tr><td>전송(TCP)</td><td>프로세스 간 신뢰성 있는 바이트 전달</td><td>포트 번호</td><td>대외계 서버의 9100번 포트</td></tr>
+<tr><td>인터넷(IP)</td><td>호스트 간 패킷 전달(경로 선택)</td><td>IP 주소</td><td>중계 기관 서버 10.20.30.40</td></tr>
+<tr><td>네트워크 접근</td><td>같은 링크 안의 프레임 전달</td><td>MAC 주소</td><td>전용회선 장비, 스위치</td></tr>
+</tbody></table></div>
+
+<h3 id="s27-1-2">TCP와 UDP</h3>
+<div class="tbl"><table>
+<thead><tr><th>항목</th><th>TCP</th><th>UDP</th></tr></thead>
+<tbody>
+<tr><td>연결</td><td>연결 지향(handshake 후 통신)</td><td>비연결(바로 전송)</td></tr>
+<tr><td>신뢰성</td><td>손실 시 재전송, 순서 보장, 중복 제거</td><td>보장 없음(유실·순서 바뀜 가능)</td></tr>
+<tr><td>데이터 단위</td><td><strong>바이트 스트림</strong>(메시지 경계 없음)</td><td>데이터그램(메시지 경계 보존)</td></tr>
+<tr><td>흐름·혼잡 제어</td><td>있음</td><td>없음</td></tr>
+<tr><td>오버헤드</td><td>큼(헤더 20바이트 이상, 연결 관리)</td><td>작음(헤더 8바이트)</td></tr>
+<tr><td>금융권 용도</td><td>이체·승인·대외 전문 등 거의 모든 거래</td><td>시세 멀티캐스트 방송, 모니터링 지표 일부</td></tr>
+</tbody></table></div>
+<p>돈이 오가는 전문은 한 바이트도 잃어서는 안 되므로 TCP를 씁니다. 반면 증권 시세처럼 "최신 값이 중요하고, 놓친 과거 값은 다음 값으로 대체되는" 데이터는 UDP 멀티캐스트로 수많은 수신자에게 한꺼번에 뿌리기도 합니다. 이 장은 TCP에 집중합니다.</p>
+
+<h3 id="s27-1-3">3-way handshake — 연결 수립</h3>
+<p>TCP는 데이터를 보내기 전에 양쪽이 서로의 <strong>초기 순서 번호(ISN, Initial Sequence Number)</strong>를 교환하고 확인하는 절차를 거칩니다. 세 번 오가므로 3-way handshake라고 부릅니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 300" width="700" role="img" aria-label="TCP 3-way handshake">
+  <rect class="hl" x="40" y="20" width="160" height="40" rx="6"/><text x="120" y="45" text-anchor="middle" class="bold small">클라이언트 (대외계)</text>
+  <rect class="hl2" x="500" y="20" width="160" height="40" rx="6"/><text x="580" y="45" text-anchor="middle" class="bold small">서버 (중계 기관)</text>
+  <path class="line" d="M120 60 V 280"/><path class="line" d="M580 60 V 280"/>
+  <text x="30" y="90" text-anchor="end" class="small mono">SYN_SENT</text>
+  <path class="arrow" d="M120 90 L 580 130"/>
+  <text x="350" y="100" text-anchor="middle" class="small mono">SYN, seq=x</text>
+  <text x="670" y="135" class="small mono">SYN_RCVD</text>
+  <path class="arrow" d="M580 150 L 120 190"/>
+  <text x="350" y="160" text-anchor="middle" class="small mono">SYN+ACK, seq=y, ack=x+1</text>
+  <text x="30" y="195" text-anchor="end" class="small mono">ESTAB</text>
+  <path class="arrow" d="M120 210 L 580 250"/>
+  <text x="350" y="222" text-anchor="middle" class="small mono">ACK, ack=y+1</text>
+  <text x="670" y="255" class="small mono">ESTAB</text>
+  <text x="350" y="292" text-anchor="middle" class="small mute">connect()는 SYN+ACK를 받으면 반환, accept()는 완성된 연결을 큐에서 꺼낸다</text>
+</svg>
+<figcaption>그림 27-2 3-way handshake와 각 단계의 연결 상태</figcaption>
+</figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — 왜 두 번이 아니라 세 번일까?</p>
+<p>TCP 연결은 양방향입니다. 클라이언트→서버 방향과 서버→클라이언트 방향 각각에 대해 "내 시작 번호는 이것이다(SYN)"와 "네 시작 번호를 잘 받았다(ACK)"가 필요하므로 원래 네 개의 메시지가 필요합니다. 서버의 ACK와 SYN을 한 패킷(SYN+ACK)에 실어 세 번으로 줄인 것입니다. 두 번만 하면 서버는 자기 SYN이 클라이언트에 도착했는지 알 수 없고, 네트워크에 오래 떠돌던 <strong>옛 연결의 SYN</strong>이 뒤늦게 도착했을 때 서버가 쓸데없이 연결을 열어 자원을 낭비할 수 있습니다. 세 번째 ACK가 "지금 살아 있는 클라이언트가 이 연결을 원한다"는 확인입니다. 시작 번호를 무작위로 고르는 것도 옛 연결의 패킷과 섞이지 않고, 공격자가 순서 번호를 추측해 끼어들지 못하게 하기 위함입니다.</p>
+</div>
+
+<div class="box tip"><p class="box-title" data-tag="잠깐">여기서 잠깐 — listen backlog와 SYN 큐</p>
+<p>서버 커널은 handshake가 진행 중인 연결(SYN 큐)과 완료되었지만 아직 <code>accept</code>되지 않은 연결(accept 큐)을 관리합니다. <code>listen(fd, backlog)</code>의 backlog는 주로 accept 큐 크기에 영향을 줍니다. 서버가 <code>accept</code>를 늦게 하면 큐가 차고, 그 뒤 들어오는 클라이언트는 연결이 지연되거나 실패합니다. 월말 오전 9시처럼 접속이 몰리는 순간 "연결은 되는데 응답이 늦다" 또는 "연결 타임아웃"이 나면 accept 루프의 지연과 backlog를 의심합니다(리눅스에서는 <code>ss -ltn</code>의 Recv-Q가 대기 중 연결 수).</p>
+</div>
+
+<h3 id="s27-1-4">4-way handshake와 TIME_WAIT, CLOSE_WAIT</h3>
+<p>연결 종료는 네 번의 메시지로 이루어집니다. 양방향을 <strong>각각</strong> 닫기 때문입니다. 먼저 닫는 쪽(active close)이 FIN을 보내면 "나는 더 보낼 데이터가 없다"는 뜻이고, 상대는 ACK한 뒤 자기 할 일을 마치고 나서 자기 FIN을 보냅니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 340" width="700" role="img" aria-label="TCP 4-way handshake와 TIME_WAIT">
+  <rect class="hl" x="40" y="20" width="160" height="40" rx="6"/><text x="120" y="45" text-anchor="middle" class="bold small">먼저 닫는 쪽</text>
+  <rect class="hl2" x="500" y="20" width="160" height="40" rx="6"/><text x="580" y="45" text-anchor="middle" class="bold small">나중에 닫는 쪽</text>
+  <path class="line" d="M120 60 V 320"/><path class="line" d="M580 60 V 320"/>
+  <text x="110" y="82" text-anchor="end" class="small mono">close()</text>
+  <text x="30" y="98" text-anchor="end" class="small mono">FIN_WAIT_1</text>
+  <path class="arrow" d="M120 90 L 580 120"/><text x="350" y="98" text-anchor="middle" class="small mono">FIN</text>
+  <text x="670" y="125" class="small mono warn-t">CLOSE_WAIT</text>
+  <path class="arrow" d="M580 135 L 120 165"/><text x="350" y="142" text-anchor="middle" class="small mono">ACK</text>
+  <text x="30" y="170" text-anchor="end" class="small mono">FIN_WAIT_2</text>
+  <text x="590" y="190" class="small mute">남은 데이터 전송 후 close()</text>
+  <path class="arrow" d="M580 205 L 120 235"/><text x="350" y="212" text-anchor="middle" class="small mono">FIN</text>
+  <text x="670" y="210" class="small mono">LAST_ACK</text>
+  <text x="30" y="240" text-anchor="end" class="small mono warn-t">TIME_WAIT</text>
+  <path class="arrow" d="M120 250 L 580 280"/><text x="350" y="258" text-anchor="middle" class="small mono">ACK</text>
+  <text x="670" y="285" class="small mono">CLOSED</text>
+  <rect class="hl2" x="130" y="290" width="200" height="26" rx="4"/><text x="230" y="308" text-anchor="middle" class="small">2×MSL 대기 후 CLOSED</text>
+  <text x="350" y="335" text-anchor="middle" class="small mute">CLOSE_WAIT가 오래 남는다 = 상대가 닫았는데 내 프로그램이 close()를 안 한다</text>
+</svg>
+<figcaption>그림 27-3 4-way handshake와 TIME_WAIT, CLOSE_WAIT 상태</figcaption>
+</figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — TIME_WAIT은 왜 존재하고, 왜 2MSL이나 기다릴까?</p>
+<p>MSL(Maximum Segment Lifetime)은 패킷이 네트워크에서 살아 있을 수 있는 최대 시간입니다(구현에 따라 30초~2분, 리눅스의 TIME_WAIT은 60초 고정). 먼저 닫은 쪽이 바로 CLOSED가 되지 않고 2MSL 동안 기다리는 이유는 두 가지입니다. ① <strong>마지막 ACK 유실 대비</strong>: 마지막 ACK가 유실되면 상대는 FIN을 다시 보냅니다. 이때 내가 이미 연결 정보를 지웠다면 RST로 응답하게 되어 상대는 정상 종료를 확인하지 못합니다. ② <strong>지연 패킷 격리</strong>: 같은 (IP, 포트) 조합으로 곧바로 새 연결이 생기면, 옛 연결에서 늦게 도착한 패킷이 새 연결의 데이터로 오인될 수 있습니다. 2MSL을 기다리면 옛 패킷은 모두 소멸합니다.</p>
+<p>실무 영향: 서버를 재기동했는데 <code>bind: Address already in use</code>가 나는 것은 이전 프로세스의 연결이 TIME_WAIT으로 남아 있기 때문입니다. 리슨 소켓에 <code>SO_REUSEADDR</code>를 설정하면 해결됩니다. 또 클라이언트가 거래마다 연결을 새로 맺고 끊으면 클라이언트 쪽에 TIME_WAIT이 수만 개 쌓여 <strong>임시 포트(ephemeral port)가 고갈</strong>될 수 있습니다. 대외 전문 통신이 연결을 유지하며 재사용하는(persistent connection) 방식을 선호하는 이유입니다.</p>
+</div>
+
+<div class="box fin"><p class="box-title" data-tag="금융 실무">은행 시스템에서는 — CLOSE_WAIT 수천 개</p>
+<p>어느 카드 승인 중계 서버에서 <code>netstat -an | grep CLOSE_WAIT | wc -l</code> 결과가 매일 수천씩 늘어났습니다. CLOSE_WAIT은 "상대는 FIN을 보내 연결을 닫았는데, 우리 프로그램이 아직 <code>close()</code>를 호출하지 않은" 상태입니다. 즉 <strong>100% 우리 애플리케이션의 버그</strong>입니다. 원인은 <code>read</code>가 0(상대 종료)을 반환했을 때 오류로 보지 않고 "데이터 없음"으로 처리해 다음 요청을 계속 기다리던 코드였습니다. 소켓은 닫히지 않은 채 fd만 차지했고, 결국 26장에서 본 fd 한도 장애로 이어졌습니다. <strong><code>read/recv</code>가 0을 반환하면 상대가 연결을 닫은 것이므로 즉시 <code>close</code></strong>해야 합니다. TIME_WAIT 다수는 정상 동작인 경우가 많지만, CLOSE_WAIT 다수는 버그입니다.</p>
+</div>
+
+<h3 id="s27-1-5">소켓 API — 서버와 클라이언트의 호출 순서</h3>
+<p>소켓(socket)은 네트워크 통신의 끝점을 나타내는 파일 디스크립터입니다. 26장에서 본 fd와 똑같이 <code>read/write/close</code>를 쓸 수 있습니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 330" width="700" role="img" aria-label="TCP 서버와 클라이언트 소켓 API 호출 순서">
+  <text x="150" y="20" text-anchor="middle" class="bold">서버</text>
+  <text x="550" y="20" text-anchor="middle" class="bold">클라이언트</text>
+  <rect class="box" x="90" y="30" width="120" height="30" rx="4"/><text x="150" y="50" text-anchor="middle" class="small mono">socket()</text>
+  <rect class="box" x="90" y="70" width="120" height="30" rx="4"/><text x="150" y="90" text-anchor="middle" class="small mono">bind(:9100)</text>
+  <rect class="box" x="90" y="110" width="120" height="30" rx="4"/><text x="150" y="130" text-anchor="middle" class="small mono">listen()</text>
+  <rect class="hl" x="90" y="150" width="120" height="30" rx="4"/><text x="150" y="170" text-anchor="middle" class="small mono">accept() 대기</text>
+  <rect class="hl2" x="90" y="210" width="120" height="30" rx="4"/><text x="150" y="230" text-anchor="middle" class="small mono">read() / write()</text>
+  <rect class="box" x="90" y="270" width="120" height="30" rx="4"/><text x="150" y="290" text-anchor="middle" class="small mono">close()</text>
+  <path class="arrow-m" d="M150 60 V 70"/><path class="arrow-m" d="M150 100 V 110"/><path class="arrow-m" d="M150 140 V 150"/><path class="arrow-m" d="M150 180 V 210"/><path class="arrow-m" d="M150 240 V 270"/>
+  <rect class="box" x="490" y="30" width="120" height="30" rx="4"/><text x="550" y="50" text-anchor="middle" class="small mono">socket()</text>
+  <rect class="hl" x="490" y="150" width="120" height="30" rx="4"/><text x="550" y="170" text-anchor="middle" class="small mono">connect()</text>
+  <rect class="hl2" x="490" y="210" width="120" height="30" rx="4"/><text x="550" y="230" text-anchor="middle" class="small mono">write() / read()</text>
+  <rect class="box" x="490" y="270" width="120" height="30" rx="4"/><text x="550" y="290" text-anchor="middle" class="small mono">close()</text>
+  <path class="arrow-m" d="M550 60 V 150"/><path class="arrow-m" d="M550 180 V 210"/><path class="arrow-m" d="M550 240 V 270"/>
+  <path class="arrow" d="M490 165 H 210"/><text x="350" y="158" text-anchor="middle" class="small">3-way handshake</text>
+  <path class="arrow" d="M490 220 H 210"/><text x="350" y="214" text-anchor="middle" class="small">요청 전문</text>
+  <path class="arrow" d="M210 232 H 490"/><text x="350" y="248" text-anchor="middle" class="small">응답 전문</text>
+  <path class="arrow-m" d="M490 285 H 210"/><text x="350" y="280" text-anchor="middle" class="small">FIN</text>
+  <text x="350" y="322" text-anchor="middle" class="small mute">accept()는 "새 연결 전용" fd를 반환한다. 리슨 fd는 계속 다음 연결을 기다린다</text>
+</svg>
+<figcaption>그림 27-4 TCP 서버·클라이언트의 소켓 API 호출 순서</figcaption>
+</figure>
+
+<div class="tbl"><table>
+<thead><tr><th>함수</th><th>역할</th><th>주의점</th></tr></thead>
+<tbody>
+<tr><td><code>socket(AF_INET, SOCK_STREAM, 0)</code></td><td>TCP 소켓 생성</td><td>IPv6는 <code>AF_INET6</code></td></tr>
+<tr><td><code>setsockopt(SO_REUSEADDR)</code></td><td>TIME_WAIT 중에도 포트 재사용</td><td><code>bind</code> 전에 호출</td></tr>
+<tr><td><code>bind(fd, addr, len)</code></td><td>IP·포트 지정</td><td>포트는 <code>htons</code>로 네트워크 순서 (24장)</td></tr>
+<tr><td><code>listen(fd, backlog)</code></td><td>수동 대기 상태로 전환</td><td></td></tr>
+<tr><td><code>accept(fd, addr, &amp;len)</code></td><td>완성된 연결 하나를 꺼내 새 fd 반환</td><td>블로킹, 시그널 시 EINTR</td></tr>
+<tr><td><code>connect(fd, addr, len)</code></td><td>서버에 연결 요청</td><td>기본 타임아웃이 매우 길다(수십 초~분)</td></tr>
+<tr><td><code>read/recv</code>, <code>write/send</code></td><td>데이터 송수신</td><td><strong>요청한 만큼 처리된다는 보장 없음</strong></td></tr>
+<tr><td><code>close</code> / <code>shutdown</code></td><td>연결 종료 / 한 방향만 종료</td><td>fork 서버에서는 부모·자식 모두 닫아야 FIN이 나감</td></tr>
+</tbody></table></div>
+
+<h3 id="s27-1-6">에코 서버와 클라이언트</h3>
+<p>받은 데이터를 그대로 돌려주는 에코(echo) 서버는 네트워크 프로그래밍의 "Hello, World"입니다. 한 번에 한 클라이언트만 처리하는 가장 단순한 <strong>반복(iterative) 서버</strong>부터 만듭니다.</p>
+
+<figure class="code"><figcaption>echo_server.c — 반복 에코 서버</figcaption>
+<pre><code class="language-c">#define _POSIX_C_SOURCE 200809L
+#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+#include &lt;errno.h&gt;
+#include &lt;signal.h&gt;
+#include &lt;unistd.h&gt;
+#include &lt;arpa/inet.h&gt;
+#include &lt;netinet/in.h&gt;
+#include &lt;sys/socket.h&gt;
+
+#define PORT 9000
+
+int main(void)
+{
+    int ls, c, on = 1;
+    struct sockaddr_in sa, ca;
+    socklen_t clen;
+    char buf[1024], ip[INET_ADDRSTRLEN];
+    ssize_t n;
+
+    signal(SIGPIPE, SIG_IGN);                     /* 26장: 소켓 서버의 첫 줄 */
+
+    if ((ls = socket(AF_INET, SOCK_STREAM, 0)) &lt; 0) { perror("socket"); return 1; }
+    setsockopt(ls, SOL_SOCKET, SO_REUSEADDR, &amp;on, sizeof on);
+
+    memset(&amp;sa, 0, sizeof sa);
+    sa.sin_family = AF_INET;
+    sa.sin_addr.s_addr = htonl(INADDR_ANY);       /* 모든 인터페이스 */
+    sa.sin_port = htons(PORT);                    /* 네트워크 바이트 순서! */
+    if (bind(ls, (struct sockaddr *)&amp;sa, sizeof sa) &lt; 0) { perror("bind"); return 1; }
+    if (listen(ls, 128) &lt; 0) { perror("listen"); return 1; }
+    printf("echo server on %d\n", PORT);
+
+    for (;;) {
+        clen = sizeof ca;
+        c = accept(ls, (struct sockaddr *)&amp;ca, &amp;clen);
+        if (c &lt; 0) {
+            if (errno == EINTR) continue;
+            perror("accept");
+            continue;                             /* 일시적 오류(EMFILE 등)로 서버를 죽이지 않음 */
+        }
+        inet_ntop(AF_INET, &amp;ca.sin_addr, ip, sizeof ip);
+        printf("connected %s:%d\n", ip, ntohs(ca.sin_port));
+
+        while ((n = read(c, buf, sizeof buf)) &gt; 0) {   /* 0 = 상대 종료 */
+            if (write(c, buf, (size_t)n) != n) break;  /* 27-2에서 writen으로 개선 */
+        }
+        if (n &lt; 0) perror("read");
+        close(c);                                 /* CLOSE_WAIT 방지 */
+        printf("closed %s\n", ip);
+    }
+}</code></pre></figure>
+
+<figure class="code"><figcaption>echo_client.c — 에코 클라이언트</figcaption>
+<pre><code class="language-c">#define _POSIX_C_SOURCE 200809L
+#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+#include &lt;unistd.h&gt;
+#include &lt;arpa/inet.h&gt;
+#include &lt;sys/socket.h&gt;
+
+int main(void)
+{
+    struct sockaddr_in sa;
+    const char *msg = "hello bank";
+    char buf[1024];
+    ssize_t n;
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+
+    memset(&amp;sa, 0, sizeof sa);
+    sa.sin_family = AF_INET;
+    sa.sin_port = htons(9000);
+    if (inet_pton(AF_INET, "127.0.0.1", &amp;sa.sin_addr) != 1) return 1;
+    if (connect(fd, (struct sockaddr *)&amp;sa, sizeof sa) &lt; 0) { perror("connect"); return 1; }
+
+    write(fd, msg, strlen(msg));
+    n = read(fd, buf, sizeof buf - 1);        /* 주의: 10바이트가 한 번에 온다는 보장은 없다 */
+    if (n &gt; 0) { buf[n] = '\0'; printf("echo: %s\n", buf); }
+    close(fd);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과 (서버 터미널 / 클라이언트 터미널)</figcaption>
+<pre>[server] echo server on 9000
+[server] connected 127.0.0.1:51724
+[server] closed 127.0.0.1
+[client] echo: hello bank</pre></figure>
+<p>클라이언트 포트(51724)는 운영체제가 임시 포트 범위에서 골라 주는 값이라 실행마다 다릅니다. 이 클라이언트는 로컬 테스트에서는 항상 잘 동작하지만, 주석에 쓴 것처럼 <strong>원리적으로 틀린 코드</strong>입니다. 다음 절에서 이유를 봅니다.</p>
+
+<h3 id="s27-1-7">TCP는 바이트 스트림이다 — 메시지 경계가 없다</h3>
+<p>TCP에서 가장 중요하고 가장 많이 오해되는 사실입니다. <strong>보내는 쪽의 <code>write</code> 호출 단위가 받는 쪽의 <code>read</code> 호출 단위와 일치하지 않습니다.</strong> TCP는 "바이트의 순서"만 보장할 뿐, 어디서 끊어서 전달할지는 커널과 네트워크 상황(MSS, 버퍼, Nagle 알고리즘, 혼잡 제어)이 결정합니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 250" width="700" role="img" aria-label="TCP 바이트 스트림에서 write와 read 단위 불일치">
+  <text x="10" y="22" class="bold small">송신: write 두 번 (전문 160B × 2)</text>
+  <rect class="hl" x="10" y="32" width="320" height="34"/><text x="170" y="54" text-anchor="middle" class="small">전문 A (160)</text>
+  <rect class="hl2" x="330" y="32" width="320" height="34"/><text x="490" y="54" text-anchor="middle" class="small">전문 B (160)</text>
+  <text x="10" y="100" class="bold small">커널·네트워크를 지나며 바이트 흐름만 남음</text>
+  <rect class="box" x="10" y="110" width="640" height="24"/>
+  <text x="330" y="127" text-anchor="middle" class="small mono">A A A A A A A A A A A A A A A A B B B B B B B B B B B B B B B B</text>
+  <text x="10" y="166" class="bold small">수신: read 결과 (예시 — 매번 달라질 수 있음)</text>
+  <rect class="hl" x="10" y="176" width="200" height="34"/><text x="110" y="198" text-anchor="middle" class="small">read → 100B (A 일부)</text>
+  <rect class="hl" x="210" y="176" width="120" height="34"/>
+  <rect class="hl2" x="330" y="176" width="320" height="34"/>
+  <text x="430" y="198" text-anchor="middle" class="small">read → 220B (A 나머지 60 + B 전체)</text>
+  <text x="350" y="240" text-anchor="middle" class="small warn-t">"read 한 번 = 전문 하나"라는 가정은 틀렸다 → 길이 헤더로 경계를 직접 복원해야 한다</text>
+</svg>
+<figcaption>그림 27-5 write 경계와 read 경계는 다르다: 반쪽 전문(partial read)과 붙은 전문</figcaption>
+</figure>
+
+<p>받는 쪽에서 일어날 수 있는 일은 세 가지입니다.</p>
+<ul>
+  <li><strong>쪼개짐(partial read)</strong>: 160바이트 전문이 100 + 60으로 나뉘어 도착.</li>
+  <li><strong>붙음(coalescing)</strong>: 전문 두 개가 한 번의 <code>read</code>로 함께 도착.</li>
+  <li><strong>둘 다</strong>: 앞 전문의 꼬리 + 다음 전문 전체 + 그다음 전문의 머리.</li>
+</ul>
+<p>로컬 루프백(127.0.0.1)이나 한산한 개발망에서는 작은 메시지가 거의 항상 한 덩어리로 도착하기 때문에, 잘못된 코드가 테스트를 모두 통과합니다. 그러다 운영망의 지연·혼잡·큰 전문을 만나면 터집니다. 24장 금융 실무 박스의 "4바이트 밀림 장애"도, 이 절의 문제도 같은 뿌리입니다.</p>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — 쓰기 쪽도 다 써지지 않을 수 있을까?</p>
+<p>그렇습니다. 블로킹 소켓에서 <code>write</code>는 보통 전부 쓸 때까지 기다리지만, 시그널에 의해 중간에 끊기면 <strong>일부만 쓰고 그 바이트 수를 반환</strong>할 수 있습니다. 논블로킹 소켓에서는 커널 송신 버퍼에 들어갈 만큼만 쓰고 반환하는 것이 일상입니다. 그래서 <code>write</code>의 반환값이 요청한 길이보다 작으면 나머지를 이어서 써야 합니다. 반환값을 확인하지 않는 코드는 전문 꼬리를 조용히 잃어버리고, 상대는 영원히 나머지 바이트를 기다리게 됩니다. 이 두 문제(부분 읽기, 부분 쓰기)를 해결하는 것이 다음 절의 <code>readn</code>/<code>writen</code>입니다.</p>
+</div>
+
+<div class="ex"><p class="ex-title">예제 27-1 <span class="lv">난이도 ★★☆</span></p>
+<p>클라이언트가 <code>write(fd, "ABC", 3); write(fd, "DEF", 3);</code>을 실행했습니다. 서버가 <code>char b[10]; n = read(c, b, 10);</code>을 한 번 실행할 때 가능한 n의 값을 모두 쓰세요(오류 제외).</p>
+<details><summary>정답과 해설 보기</summary>
+<p>1, 2, 3, 4, 5, 6 모두 가능하며, 상대가 연결을 닫은 뒤라면 0도 가능합니다(데이터를 이미 다 읽은 경우). 현실에서 자주 보이는 값은 3(첫 write만 도착)과 6(둘 다 도착)이지만, TCP는 그 사이 어떤 경계도 금지하지 않습니다. 따라서 "ABC"와 "DEF"를 구분하려면 응용 계층에서 경계 정보를 넣어야 합니다: 고정 길이(항상 3바이트), 길이 헤더, 또는 구분자(예: 줄바꿈).</p>
+</details></div>
+
+<h2 id="s27-2"><span class="num">27-2</span>전문 송수신 서버 만들기</h2>
+
+<h3 id="s27-2-1">길이 헤더 기반 프레이밍</h3>
+<p>바이트 스트림에서 메시지 경계를 복원하는 일을 <strong>프레이밍(framing)</strong>이라고 합니다. 방법은 세 가지가 있습니다.</p>
+<div class="tbl"><table>
+<thead><tr><th>방식</th><th>원리</th><th>장점</th><th>단점</th></tr></thead>
+<tbody>
+<tr><td>고정 길이</td><td>모든 메시지가 정확히 N바이트</td><td>가장 단순</td><td>거래 종류마다 길이가 다르면 사용 불가</td></tr>
+<tr><td>구분자</td><td>메시지 끝에 특수 바이트(예: <code>\n</code>, ETX 0x03)</td><td>텍스트 프로토콜에 자연스러움</td><td>데이터 안에 구분자가 나오면 이스케이프 필요, 한 바이트씩 검사</td></tr>
+<tr><td><strong>길이 헤더</strong></td><td>앞 N바이트에 뒤따를 길이를 기록</td><td>임의 데이터 가능, 정확히 필요한 만큼만 읽음</td><td>길이 필드 손상 시 이후 전체가 어긋남 → 상한 검증 필수</td></tr>
+</tbody></table></div>
+<p>금융 전문은 거의 대부분 <strong>길이 헤더</strong> 방식이며, 24장의 공통 헤더 첫 필드 "전문길이 N(4)"가 바로 그것입니다. 수신 절차는 항상 같습니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 200" width="700" role="img" aria-label="길이 헤더 기반 수신 절차">
+  <rect class="hl2" x="20" y="40" width="80" height="44" rx="4"/><text x="60" y="60" text-anchor="middle" class="small mono">"0156"</text><text x="60" y="76" text-anchor="middle" class="small">4바이트</text>
+  <rect class="hl" x="100" y="40" width="400" height="44" rx="4"/><text x="300" y="66" text-anchor="middle" class="small">나머지 156바이트 (전문종별코드 ... 예비)</text>
+  <rect class="hl2" x="500" y="40" width="80" height="44" rx="4"/><text x="540" y="60" text-anchor="middle" class="small mono">"0156"</text><text x="540" y="76" text-anchor="middle" class="small">다음 전문</text>
+  <text x="60" y="112" text-anchor="middle" class="small">① 정확히 4B 읽기</text>
+  <text x="200" y="112" text-anchor="middle" class="small">② 숫자 검증·상한 검사</text>
+  <text x="380" y="112" text-anchor="middle" class="small">③ 정확히 156B 읽기</text>
+  <text x="560" y="112" text-anchor="middle" class="small">④ 다시 ①부터</text>
+  <rect class="bad" x="160" y="140" width="380" height="34" rx="4"/>
+  <text x="350" y="162" text-anchor="middle" class="small">길이가 "ABCD"이거나 9999 초과 → 연결을 끊는다 (재동기화 불가)</text>
+</svg>
+<figcaption>그림 27-6 길이 헤더 기반 프레이밍의 수신 절차</figcaption>
+</figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — 길이 필드가 이상하면 왜 연결을 끊어야 할까?</p>
+<p>길이 필드가 깨졌다는 것은 지금 읽고 있는 위치가 전문의 시작이 아닐 수도 있다는 뜻입니다. 바이트 스트림에는 "다음 전문 시작" 표시가 따로 없으므로, 어디서부터 다시 읽어야 정상 경계인지 알 방법이 없습니다. 억지로 계속 읽으면 이후 모든 전문을 엉뚱하게 해석하는 연쇄 장애가 됩니다. 그래서 프레이밍 오류는 <strong>연결 단위의 치명적 오류</strong>로 보고 즉시 연결을 끊고, 상대(또는 우리)가 재연결해 깨끗한 상태로 다시 시작합니다. 또 길이 상한 검사가 없으면 악의적이거나 깨진 길이 "9999999"를 믿고 거대한 메모리를 할당하거나 버퍼 오버플로가 날 수 있습니다. 바이너리 길이(4바이트 정수)를 쓰는 규격에서는 이 위험이 더 큽니다(최대 약 40억).</p>
+</div>
+
+<h3 id="s27-2-2">readn과 writen — 부분 읽기·쓰기 처리</h3>
+<p>"정확히 n바이트를 읽을 때까지 반복해서 읽는다"는 함수를 만들어 두면 프레이밍이 쉬워집니다. 리처드 스티븐스의 『UNIX Network Programming』에서 유래한 이름 <code>readn</code>/<code>writen</code>은 업계 공용어가 되었습니다.</p>
+
+<figure class="code"><figcaption>net.c (1) — readn / writen</figcaption>
+<pre><code class="language-c">#define _POSIX_C_SOURCE 200809L
+#include &lt;errno.h&gt;
+#include &lt;unistd.h&gt;
+#include &lt;sys/types.h&gt;
+
+/* 정확히 n바이트를 읽는다.
+   반환: n = 성공, 0 ~ n-1 = 그만큼 읽고 상대가 연결 종료(EOF), -1 = 오류 */
+ssize_t readn(int fd, void *buf, size_t n)
+{
+    char *p = buf;
+    size_t left = n;
+    while (left &gt; 0) {
+        ssize_t r = read(fd, p, left);
+        if (r &lt; 0) {
+            if (errno == EINTR) continue;   /* 시그널로 끊김: 다시 읽기 */
+            return -1;
+        }
+        if (r == 0)                         /* EOF: 상대가 FIN을 보냄 */
+            break;
+        p += r;
+        left -= (size_t)r;
+    }
+    return (ssize_t)(n - left);
+}
+
+/* 정확히 n바이트를 쓴다. 반환: n = 성공, -1 = 오류 */
+ssize_t writen(int fd, const void *buf, size_t n)
+{
+    const char *p = buf;
+    size_t left = n;
+    while (left &gt; 0) {
+        ssize_t w = write(fd, p, left);
+        if (w &lt; 0) {
+            if (errno == EINTR) continue;
+            return -1;                      /* EPIPE: 상대 종료 (SIGPIPE 무시 상태) */
+        }
+        p += w;
+        left -= (size_t)w;
+    }
+    return (ssize_t)n;
+}</code></pre></figure>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 — 반환값 0을 오류로 취급하지 않기</p>
+<p><code>readn</code>이 n보다 작은 값을 반환했다면 상대가 전문 중간에 연결을 끊은 것입니다. 이를 "성공"으로 처리해 반쪽 전문을 파싱하면 안 됩니다. 반대로 전문 시작 전(0바이트)에 EOF가 온 것은 상대가 정상적으로 연결을 닫은 것이므로 오류 로그 없이 조용히 닫는 것이 좋습니다. 두 경우를 구분하면 장애 분석이 훨씬 쉬워집니다: "정상 종료" vs "전문 수신 중 연결 끊김(망 장애 의심)".</p>
+</div>
+
+<h3 id="s27-2-3">타임아웃 — SO_RCVTIMEO와 select/poll</h3>
+<p>블로킹 <code>read</code>는 데이터가 올 때까지 <strong>영원히</strong> 기다립니다. 상대 기관 서버가 멈췄거나, 중간 방화벽이 연결을 조용히 버렸다면(FIN도 RST도 오지 않음) 우리 프로세스도 영원히 멈춥니다. 고객은 이체 버튼을 누른 채 무한 로딩을 보게 됩니다. 그래서 모든 네트워크 대기에는 <strong>타임아웃</strong>이 필요합니다.</p>
+
+<p><strong>방법 1 — SO_RCVTIMEO/SO_SNDTIMEO</strong>: 소켓 옵션으로 각 <code>read</code>/<code>write</code> 호출의 최대 대기 시간을 지정합니다. 시간이 지나면 -1과 <code>EAGAIN</code>(또는 <code>EWOULDBLOCK</code>)을 반환합니다.</p>
+<figure class="code"><figcaption>SO_RCVTIMEO 설정</figcaption>
+<pre><code class="language-c">struct timeval tv = { 5, 0 };     /* 5초 */
+setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &amp;tv, sizeof tv);
+/* 이후 read()가 5초 동안 아무 데이터도 못 받으면 -1, errno = EAGAIN */</code></pre></figure>
+<p>간단하지만 한계가 있습니다. 타임아웃이 <strong>read 호출 하나당</strong> 적용되므로, 상대가 4초마다 1바이트씩 보내면 160바이트 전문을 받는 데 640초가 걸려도 타임아웃이 나지 않습니다. 전문 하나 전체에 대한 마감 시간이 필요합니다.</p>
+
+<p><strong>방법 2 — poll(또는 select)로 마감 시각 관리</strong>: 읽기 전에 <code>poll</code>로 "남은 시간 안에 읽을 데이터가 생기는지" 기다리고, 전문 하나의 시작 시점부터 전체 경과 시간을 계산합니다.</p>
+
+<figure class="code"><figcaption>net.c (2) — 전문 단위 마감 시간이 있는 readn_timeout, recv_msg, connect_timeout</figcaption>
+<pre><code class="language-c">#include &lt;poll.h&gt;
+#include &lt;time.h&gt;
+#include &lt;fcntl.h&gt;
+#include &lt;string.h&gt;
+#include &lt;arpa/inet.h&gt;
+#include &lt;sys/socket.h&gt;
+#include "fld.h"
+
+static long long now_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &amp;ts);           /* 25장: 경과 시간은 MONOTONIC */
+    return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+/* ms 밀리초 안에 정확히 n바이트를 읽는다.
+   반환: n 성공, 0~n-1 EOF, -1 오류 (타임아웃이면 errno = ETIMEDOUT) */
+ssize_t readn_timeout(int fd, void *buf, size_t n, int ms)
+{
+    char *p = buf;
+    size_t got = 0;
+    long long deadline = now_ms() + ms;
+
+    while (got &lt; n) {
+        struct pollfd pf = { fd, POLLIN, 0 };
+        long long left = deadline - now_ms();
+        int pr;
+        ssize_t r;
+
+        if (left &lt;= 0) { errno = ETIMEDOUT; return -1; }
+        pr = poll(&amp;pf, 1, (int)left);
+        if (pr &lt; 0) { if (errno == EINTR) continue; return -1; }
+        if (pr == 0) { errno = ETIMEDOUT; return -1; }
+
+        r = read(fd, p + got, n - got);             /* 읽을 게 있으니 블록되지 않음 */
+        if (r &lt; 0) { if (errno == EINTR) continue; return -1; }
+        if (r == 0) break;                          /* EOF */
+        got += (size_t)r;
+    }
+    return (ssize_t)got;
+}
+
+/* 길이 헤더 4바이트(ASCII 숫자, 자기 제외) + 본문을 읽어 buf에 통째로 담는다.
+   반환: 전체 길이, 0 = 전문 시작 전 정상 종료, -1 = 오류/타임아웃/형식 오류 */
+int recv_msg(int fd, char *buf, size_t bufsz, int ms)
+{
+    long long len;
+    ssize_t r;
+
+    if (bufsz &lt; 5) return -1;
+    r = readn_timeout(fd, buf, 4, ms);
+    if (r == 0) return 0;                           /* 상대가 깨끗하게 닫음 */
+    if (r != 4) return -1;
+    if (fld_get_num(buf, 4, &amp;len) != FLD_OK || len &lt;= 0 || (size_t)len &gt; bufsz - 4)
+        return -1;                                  /* 프레이밍 오류: 연결 끊어야 함 */
+    r = readn_timeout(fd, buf + 4, (size_t)len, ms);
+    if (r != len) return -1;                        /* 본문 수신 중 끊김/타임아웃 */
+    return (int)(4 + len);
+}
+
+/* 타임아웃 있는 connect: 논블로킹 connect + poll(POLLOUT) */
+int connect_timeout(const char *ip, int port, int ms)
+{
+    struct sockaddr_in sa;
+    int fd, flags, err = 0, e;
+    socklen_t elen = sizeof err;
+
+    if ((fd = socket(AF_INET, SOCK_STREAM, 0)) &lt; 0) return -1;
+    memset(&amp;sa, 0, sizeof sa);
+    sa.sin_family = AF_INET;
+    sa.sin_port = htons((unsigned short)port);
+    if (inet_pton(AF_INET, ip, &amp;sa.sin_addr) != 1) { errno = EINVAL; goto fail; }
+
+    flags = fcntl(fd, F_GETFL, 0);
+    fcntl(fd, F_SETFL, flags | O_NONBLOCK);          /* 잠시 논블로킹으로 */
+    if (connect(fd, (struct sockaddr *)&amp;sa, sizeof sa) &lt; 0) {
+        struct pollfd pf = { fd, POLLOUT, 0 };
+        int pr;
+        if (errno != EINPROGRESS) goto fail;
+        do { pr = poll(&amp;pf, 1, ms); } while (pr &lt; 0 &amp;&amp; errno == EINTR);
+        if (pr == 0) { errno = ETIMEDOUT; goto fail; }
+        if (pr &lt; 0) goto fail;
+        if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &amp;err, &amp;elen) &lt; 0) goto fail;
+        if (err) { errno = err; goto fail; }        /* ECONNREFUSED 등 */
+    }
+    fcntl(fd, F_SETFL, flags);                       /* 다시 블로킹으로 */
+    return fd;
+fail:
+    e = errno; close(fd); errno = e;
+    return -1;
+}</code></pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — connect에는 왜 별도의 타임아웃 처리가 필요할까?</p>
+<p>상대 서버가 꺼져 있으면 보통 즉시 RST가 와서 <code>ECONNREFUSED</code>로 빨리 실패합니다. 하지만 상대 IP가 아예 응답하지 않으면(서버 다운, 방화벽이 패킷을 버림, 회선 단절) 우리 커널은 SYN을 여러 번 재전송하며 기다립니다. 리눅스 기본 설정(<code>tcp_syn_retries</code> = 6)에서는 이 대기가 <strong>2분 이상</strong>이 될 수 있습니다. 그 사이 거래 프로세스는 아무 일도 못 합니다. 그래서 논블로킹으로 바꿔 <code>connect</code>를 시작하고(<code>EINPROGRESS</code>), <code>poll</code>로 우리가 정한 시간만 기다린 뒤, 쓰기 가능해지면 <code>SO_ERROR</code>로 실제 성공·실패를 확인합니다. 쓰기 가능 이벤트는 실패할 때도 오기 때문에 <code>SO_ERROR</code> 확인이 필수입니다.</p>
+</div>
+
+<div class="box fin"><p class="box-title" data-tag="금융 실무">은행 시스템에서는 — 타임아웃 값은 계단식으로</p>
+<p>모바일 앱 → 채널계 → 계정계 → 대외계 → 중계 기관으로 이어지는 호출 사슬에서 각 구간의 타임아웃은 <strong>바깥쪽이 안쪽보다 길어야</strong> 합니다. 예: 대외기관 응답 대기 20초, 대외계를 부르는 계정계 25초, 채널계 30초, 앱 35초. 만약 앱이 15초에 포기했는데 안쪽에서는 20초까지 기다려 결국 이체가 성공하면, 고객은 "실패" 화면을 보고 다시 이체해 <strong>이중 이체</strong>가 됩니다. 안쪽이 먼저 타임아웃 나서 명확한 결과(실패 또는 "처리 중 — 결과 확인 필요")를 바깥으로 돌려줘야 합니다. 어느 은행에서는 대외계 타임아웃을 늘리는 변경을 하면서 채널계 타임아웃을 함께 늘리지 않아, 몇 주간 "앱에서는 실패, 실제로는 성공"인 이체가 하루 수십 건씩 발생한 일이 있습니다.</p>
+</div>
+
+<h3 id="s27-2-4">fork 기반 동시 서버</h3>
+<p>27-1의 반복 서버는 한 클라이언트를 처리하는 동안 다른 클라이언트가 기다려야 합니다. 가장 오래되고 직관적인 해결책은 <strong>연결마다 자식 프로세스를 하나씩</strong> 만드는 것입니다. 26장에서 배운 fork, SIGCHLD, 좀비 처리가 모두 등장합니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 220" width="700" role="img" aria-label="fork 기반 동시 서버 구조">
+  <rect class="hl" x="20" y="80" width="150" height="60" rx="6"/>
+  <text x="95" y="104" text-anchor="middle" class="small bold">부모: accept 루프</text>
+  <text x="95" y="124" text-anchor="middle" class="small mono">리슨 fd만 가짐</text>
+  <path class="arrow" d="M170 100 L 300 40"/><path class="arrow" d="M170 110 L 300 110"/><path class="arrow" d="M170 120 L 300 180"/>
+  <text x="235" y="60" class="small mono">fork</text>
+  <rect class="hl2" x="300" y="20" width="180" height="40" rx="6"/><text x="390" y="45" text-anchor="middle" class="small">자식 1 ↔ 클라이언트 A</text>
+  <rect class="hl2" x="300" y="90" width="180" height="40" rx="6"/><text x="390" y="115" text-anchor="middle" class="small">자식 2 ↔ 클라이언트 B</text>
+  <rect class="hl2" x="300" y="160" width="180" height="40" rx="6"/><text x="390" y="185" text-anchor="middle" class="small">자식 3 ↔ 클라이언트 C</text>
+  <text x="590" y="70" text-anchor="middle" class="small">장점: 격리, 단순한 코드</text>
+  <text x="590" y="95" text-anchor="middle" class="small">(한 자식이 죽어도 무관)</text>
+  <text x="590" y="135" text-anchor="middle" class="small warn-t">단점: 연결당 프로세스</text>
+  <text x="590" y="160" text-anchor="middle" class="small warn-t">fork 비용, 상태 공유 어려움</text>
+</svg>
+<figcaption>그림 27-7 연결마다 자식 프로세스를 만드는 fork 기반 동시 서버</figcaption>
+</figure>
+
+<figure class="code"><figcaption>fork_server.c — 전문 에코 동시 서버</figcaption>
+<pre><code class="language-c">#define _POSIX_C_SOURCE 200809L
+#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+#include &lt;errno.h&gt;
+#include &lt;signal.h&gt;
+#include &lt;unistd.h&gt;
+#include &lt;sys/wait.h&gt;
+#include &lt;netinet/in.h&gt;
+#include &lt;sys/socket.h&gt;
+#include "net.h"     /* readn, writen, recv_msg ... */
+
+static volatile sig_atomic_t g_stop = 0;
+
+static void on_chld(int s)
+{
+    int saved = errno;
+    (void)s;
+    while (waitpid(-1, NULL, WNOHANG) &gt; 0)   /* 끝난 자식 모두 거두기 */
+        ;
+    errno = saved;
+}
+static void on_term(int s) { (void)s; g_stop = 1; }
+
+static void serve(int c)                     /* 자식 프로세스의 본업 */
+{
+    char buf[4 + 9999];
+    int n;
+    while ((n = recv_msg(c, buf, sizeof buf, 30000)) &gt; 0) {   /* 30초 무응답이면 종료 */
+        if (writen(c, buf, (size_t)n) != n)  /* 실제 서버라면 여기서 거래 처리 */
+            break;
+    }
+}
+
+int main(void)
+{
+    struct sigaction sa;
+    struct sockaddr_in addr;
+    int ls, on = 1;
+
+    memset(&amp;sa, 0, sizeof sa);
+    sigemptyset(&amp;sa.sa_mask);
+    sa.sa_handler = on_chld; sa.sa_flags = SA_RESTART;  /* accept가 자식 종료로 끊기지 않게 */
+    sigaction(SIGCHLD, &amp;sa, NULL);
+    sa.sa_handler = on_term; sa.sa_flags = 0;           /* 종료 신호는 accept를 깨워야 함 */
+    sigaction(SIGTERM, &amp;sa, NULL);
+    sigaction(SIGINT, &amp;sa, NULL);
+    sa.sa_handler = SIG_IGN; sa.sa_flags = 0;
+    sigaction(SIGPIPE, &amp;sa, NULL);
+
+    ls = socket(AF_INET, SOCK_STREAM, 0);
+    setsockopt(ls, SOL_SOCKET, SO_REUSEADDR, &amp;on, sizeof on);
+    memset(&amp;addr, 0, sizeof addr);
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    addr.sin_port = htons(9100);
+    if (bind(ls, (struct sockaddr *)&amp;addr, sizeof addr) &lt; 0 || listen(ls, 128) &lt; 0) {
+        perror("bind/listen"); return 1;
+    }
+
+    while (!g_stop) {
+        pid_t pid;
+        int c = accept(ls, NULL, NULL);
+        if (c &lt; 0) {
+            if (errno == EINTR) continue;    /* SIGTERM이면 루프 조건에서 빠져나감 */
+            perror("accept");
+            continue;
+        }
+        if ((pid = fork()) &lt; 0) {            /* fork 실패: 이 연결만 포기 */
+            perror("fork");
+            close(c);
+            continue;
+        }
+        if (pid == 0) {                      /* 자식 */
+            close(ls);                       /* 자식은 리슨 소켓 불필요 */
+            serve(c);
+            close(c);
+            _exit(0);
+        }
+        close(c);                            /* 부모는 연결 소켓 불필요 (중요!) */
+    }
+    close(ls);
+    return 0;
+}</code></pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — 부모가 close(c)를 빼먹으면?</p>
+<p>fork 후 연결 소켓 <code>c</code>는 부모와 자식 양쪽의 fd 테이블에 있고, 같은 커널 소켓 객체를 가리킵니다(참조 카운트 2). 자식이 처리를 마치고 <code>close(c)</code>를 해도 참조 카운트가 1로 줄 뿐 <strong>FIN이 나가지 않습니다</strong>. 클라이언트는 서버가 연결을 끊지 않으니 계속 기다리고, 부모 프로세스에는 닫히지 않은 소켓 fd가 연결마다 하나씩 쌓여 결국 fd 한도에 도달합니다. "자식은 리슨 소켓을 닫고, 부모는 연결 소켓을 닫는다"는 fork 서버의 철칙입니다.</p>
+</div>
+
+<div class="box tip"><p class="box-title" data-tag="잠깐">여기서 잠깐 — pre-fork 모델</p>
+<p>연결마다 fork하면 연결 수립이 잦은 환경에서 fork 비용이 쌓입니다. 금융 미들웨어는 흔히 서버 시작 시 자식 프로세스 N개를 <strong>미리</strong> 만들어 두고(pre-fork), 각 자식이 같은 리슨 소켓에서 직접 <code>accept</code>하는 구조를 씁니다. 커널이 들어오는 연결을 대기 중인 자식 중 하나에게 나눠 줍니다. 처리 프로세스 수가 고정되어 부하가 폭주해도 서버 자원이 무한정 늘지 않는다는 장점도 있습니다. 26장의 메시지 큐로 요청을 분배하는 구조도 같은 목적입니다.</p>
+</div>
+
+<h3 id="s27-2-5">select 기반 서버 — 한 프로세스로 여러 연결 처리</h3>
+<p>대외계 게이트웨이는 보통 상대 기관과 몇 개의 <strong>오래 유지되는 연결</strong>을 맺고, 그 위로 전문이 끊임없이 오갑니다. 연결 수는 적고 메시지는 많으며, 연결끼리 상태(중복 캐시, 일련번호, 통계)를 공유해야 합니다. 이런 환경에서는 <strong>I/O 다중화(multiplexing)</strong>가 잘 맞습니다. <code>select</code>나 <code>poll</code>로 "여러 fd 중 읽을 데이터가 있는 것"을 한꺼번에 기다렸다가, 준비된 fd만 처리합니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 230" width="700" role="img" aria-label="select 기반 I/O 다중화 서버">
+  <rect class="hl" x="250" y="90" width="200" height="56" rx="8"/>
+  <text x="350" y="114" text-anchor="middle" class="small bold">select / poll</text>
+  <text x="350" y="132" text-anchor="middle" class="small">준비된 fd만 알려 줌</text>
+  <rect class="box" x="20" y="20" width="130" height="32" rx="4"/><text x="85" y="41" text-anchor="middle" class="small mono">리슨 fd 3</text>
+  <rect class="hl2" x="20" y="70" width="130" height="32" rx="4"/><text x="85" y="91" text-anchor="middle" class="small mono">연결 fd 4 (읽기 가능)</text>
+  <rect class="box" x="20" y="120" width="130" height="32" rx="4"/><text x="85" y="141" text-anchor="middle" class="small mono">연결 fd 5</text>
+  <rect class="hl2" x="20" y="170" width="130" height="32" rx="4"/><text x="85" y="191" text-anchor="middle" class="small mono">연결 fd 6 (읽기 가능)</text>
+  <path class="arrow-m" d="M150 36 L 250 100"/><path class="arrow-m" d="M150 86 L 250 110"/><path class="arrow-m" d="M150 136 L 250 125"/><path class="arrow-m" d="M150 186 L 250 136"/>
+  <path class="arrow" d="M450 118 H 520"/>
+  <rect class="box" x="520" y="60" width="160" height="120" rx="6"/>
+  <text x="600" y="84" text-anchor="middle" class="small bold">연결별 수신 버퍼</text>
+  <text x="600" y="108" text-anchor="middle" class="small mono">conn[4].buf, have</text>
+  <text x="600" y="128" text-anchor="middle" class="small mono">conn[6].buf, have</text>
+  <text x="600" y="152" text-anchor="middle" class="small">완성된 전문만 처리</text>
+  <text x="350" y="215" text-anchor="middle" class="small mute">블로킹 readn을 쓰면 느린 연결 하나가 전체를 멈춘다 → 받은 만큼 버퍼에 쌓고 전문이 완성될 때 처리</text>
+</svg>
+<figcaption>그림 27-8 select로 여러 연결을 감시하고 연결별 버퍼로 전문을 조립하는 구조</figcaption>
+</figure>
+
+<figure class="code"><figcaption>select_server.c — 연결별 버퍼로 전문을 조립하는 다중화 서버</figcaption>
+<pre><code class="language-c">#define _POSIX_C_SOURCE 200809L
+#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+#include &lt;errno.h&gt;
+#include &lt;signal.h&gt;
+#include &lt;unistd.h&gt;
+#include &lt;sys/select.h&gt;
+#include &lt;netinet/in.h&gt;
+#include &lt;sys/socket.h&gt;
+#include "fld.h"
+#include "net.h"
+
+#define MAXMSG  (4 + 9999)
+
+typedef struct {
+    int    fd;              /* -1 = 빈 칸 */
+    size_t have;            /* buf에 쌓인 바이트 수 */
+    char   buf[MAXMSG];
+} Conn;
+
+static Conn conns[FD_SETSIZE];   /* select는 fd 번호 FD_SETSIZE(보통 1024) 미만만 다룬다 */
+
+static void handle_msg(Conn *c, const char *msg, size_t len)
+{
+    /* 실제 서버는 여기서 거래 처리 후 응답. 예제는 그대로 돌려준다 */
+    if (writen(c-&gt;fd, msg, len) != (ssize_t)len)
+        fprintf(stderr, "fd %d write fail\n", c-&gt;fd);
+}
+
+/* 읽을 수 있는 연결: 읽은 만큼 쌓고, 완성된 전문을 모두 처리. 연결을 닫아야 하면 -1 */
+static int on_readable(Conn *c)
+{
+    ssize_t n = read(c-&gt;fd, c-&gt;buf + c-&gt;have, sizeof c-&gt;buf - c-&gt;have);
+    if (n == 0) return -1;                         /* 상대 종료 */
+    if (n &lt; 0) return (errno == EINTR || errno == EAGAIN) ? 0 : -1;
+    c-&gt;have += (size_t)n;
+
+    for (;;) {                                     /* 붙어서 온 전문 여러 개 처리 */
+        long long len;
+        size_t total;
+        if (c-&gt;have &lt; 4) break;                    /* 길이 헤더도 아직 다 안 옴 */
+        if (fld_get_num(c-&gt;buf, 4, &amp;len) != FLD_OK || len &lt;= 0 || len &gt; 9999)
+            return -1;                             /* 프레이밍 오류 → 연결 종료 */
+        total = 4 + (size_t)len;
+        if (c-&gt;have &lt; total) break;                /* 본문이 아직 덜 옴 (쪼개짐) */
+        handle_msg(c, c-&gt;buf, total);
+        memmove(c-&gt;buf, c-&gt;buf + total, c-&gt;have - total);   /* 남은 바이트 앞으로 */
+        c-&gt;have -= total;
+    }
+    return 0;
+}
+
+int main(void)
+{
+    int ls, on = 1, i, maxfd;
+    struct sockaddr_in a;
+
+    signal(SIGPIPE, SIG_IGN);
+    for (i = 0; i &lt; FD_SETSIZE; i++) conns[i].fd = -1;
+
+    ls = socket(AF_INET, SOCK_STREAM, 0);
+    setsockopt(ls, SOL_SOCKET, SO_REUSEADDR, &amp;on, sizeof on);
+    memset(&amp;a, 0, sizeof a);
+    a.sin_family = AF_INET; a.sin_addr.s_addr = htonl(INADDR_ANY); a.sin_port = htons(9100);
+    if (bind(ls, (struct sockaddr *)&amp;a, sizeof a) &lt; 0 || listen(ls, 128) &lt; 0) return 1;
+
+    for (;;) {
+        fd_set rset;
+        struct timeval tv = { 1, 0 };              /* 1초마다 깨어나 유지보수 작업 가능 */
+        int nready;
+
+        FD_ZERO(&amp;rset);                            /* select는 집합을 덮어쓰므로 매번 다시 */
+        FD_SET(ls, &amp;rset);
+        maxfd = ls;
+        for (i = 0; i &lt; FD_SETSIZE; i++)
+            if (conns[i].fd &gt;= 0) {
+                FD_SET(conns[i].fd, &amp;rset);
+                if (conns[i].fd &gt; maxfd) maxfd = conns[i].fd;
+            }
+
+        nready = select(maxfd + 1, &amp;rset, NULL, NULL, &amp;tv);
+        if (nready &lt; 0) { if (errno == EINTR) continue; perror("select"); break; }
+
+        if (FD_ISSET(ls, &amp;rset)) {                 /* 새 연결 */
+            int c = accept(ls, NULL, NULL);
+            if (c &gt;= FD_SETSIZE) close(c);         /* select 한계 초과 */
+            else if (c &gt;= 0) { conns[c].fd = c; conns[c].have = 0; }
+        }
+        for (i = 0; i &lt; FD_SETSIZE; i++) {
+            if (conns[i].fd &lt; 0 || !FD_ISSET(conns[i].fd, &amp;rset)) continue;
+            if (on_readable(&amp;conns[i]) &lt; 0) {
+                close(conns[i].fd);                /* CLOSE_WAIT 방지 */
+                conns[i].fd = -1;
+            }
+        }
+    }
+    close(ls);
+    return 0;
+}</code></pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — 다중화 서버에서는 왜 readn을 쓰면 안 될까?</p>
+<p><code>select</code>가 "fd 4에 읽을 데이터가 있다"고 알려 줘도, 그 데이터가 전문 전체라는 보장은 없습니다. 10바이트만 와 있을 수도 있습니다. 여기서 <code>readn(fd, buf, 160)</code>을 호출하면 나머지 150바이트가 올 때까지 <strong>프로세스 전체가 블록</strong>되어 다른 모든 연결이 멈춥니다. 상대가 느리거나 악의적이면 서버 전체가 마비됩니다. 그래서 다중화 서버는 "지금 와 있는 만큼만 읽어 연결별 버퍼에 쌓고, 전문이 완성되었을 때만 처리"하는 <strong>상태 기계(state machine)</strong> 방식으로 작성합니다. 위 <code>on_readable</code>의 <code>for(;;)</code> 루프가 쪼개진 전문(break로 다음 기회에)과 붙은 전문(여러 번 처리)을 모두 다룹니다. 더 엄격하게는 소켓을 <code>O_NONBLOCK</code>으로 두고 쓰기도 버퍼링합니다.</p>
+</div>
+
+<div class="tbl"><table>
+<thead><tr><th>방식</th><th>감시 가능 fd</th><th>호출당 비용</th><th>특징</th></tr></thead>
+<tbody>
+<tr><td><code>select</code></td><td>FD_SETSIZE(보통 1024) 미만 번호</td><td>O(최대 fd)</td><td>가장 이식성 높음, 매번 집합 재구성</td></tr>
+<tr><td><code>poll</code></td><td>제한 없음</td><td>O(감시 fd 수)</td><td>배열 기반, fd 번호 제한 없음</td></tr>
+<tr><td><code>epoll</code>(리눅스), <code>kqueue</code>(BSD), <code>pollset</code>(AIX)</td><td>수십만</td><td>O(준비된 fd 수)</td><td>대규모 연결용, 플랫폼 종속</td></tr>
+</tbody></table></div>
+
+<div class="ex"><p class="ex-title">예제 27-2 <span class="lv">난이도 ★★☆</span></p>
+<p><code>on_readable</code>에 다음 바이트들이 차례로 도착합니다(각 줄이 read 한 번의 결과). 각 read 후 처리되는 전문 수와 <code>have</code> 값을 쓰세요. 전문은 "0003ABC", "0002XY" 두 개입니다. (1) <code>"00"</code> (2) <code>"03AB"</code> (3) <code>"C0002XY"</code></p>
+<details><summary>정답과 해설 보기</summary>
+<p>(1) have=2, 4바이트 미만이라 처리 0건. (2) have=6, 길이 3 → total 7인데 6바이트뿐이라 처리 0건. (3) have=13, 첫 전문 total 7 처리(1건) → memmove 후 have=6 ("0002XY"), 길이 2 → total 6 처리(2건째) → have=0. 결과적으로 (3)의 read 한 번에서 전문 두 개가 처리됩니다. 이렇게 쪼개짐과 붙음이 섞여도 정확히 동작하는지 확인하려면, 테스트 클라이언트가 전문을 일부러 1바이트씩 또는 여러 개를 한 번에 보내 보는 것이 좋습니다.</p>
+</details></div>
+
+<h3 id="s27-2-6">대외기관 연동 — 재송신, 중복 응답, 망 장애</h3>
+<p>여기서부터가 진짜 금융 실무입니다. 네트워크 통신의 가장 어려운 문제는 <strong>"응답이 오지 않았을 때, 상대가 처리를 했는지 안 했는지 모른다"</strong>는 것입니다. 이체 요청을 보내고 20초를 기다렸는데 응답이 없습니다. 가능성은 세 가지입니다.</p>
+<ol class="steps">
+  <li>요청이 상대에게 도착하지 않았다 → 상대는 처리하지 않음.</li>
+  <li>요청은 도착해 처리했지만 응답이 오는 길에 사라졌거나 늦어지고 있다 → 상대는 <strong>처리함</strong>.</li>
+  <li>상대가 아직 처리 중이다 → 곧 처리될 수도 있음.</li>
+</ol>
+<p>우리 쪽에서는 이 세 경우를 구별할 수 없습니다. 이 상태를 실무에서는 <strong>"결과 불명(unknown)"</strong>이라고 부르며, 금융 통신 설계의 핵심은 결과 불명 거래를 어떻게 확정할 것인가에 있습니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 330" width="700" role="img" aria-label="타임아웃 이후 결과 불명 거래 처리 흐름">
+  <rect class="hl" x="40" y="20" width="140" height="36" rx="6"/><text x="110" y="43" text-anchor="middle" class="small bold">우리 (대외계)</text>
+  <rect class="hl2" x="520" y="20" width="140" height="36" rx="6"/><text x="590" y="43" text-anchor="middle" class="small bold">상대 기관</text>
+  <path class="line" d="M110 56 V 320"/><path class="line" d="M590 56 V 320"/>
+  <path class="arrow" d="M110 76 L 590 100"/><text x="350" y="80" text-anchor="middle" class="small mono">0200 이체 요청 seq=123</text>
+  <rect class="hl" x="600" y="104" width="90" height="26" rx="4"/><text x="645" y="122" text-anchor="middle" class="small">처리 완료</text>
+  <path class="arrow-m" d="M590 134 L 400 148"/><text x="420" y="134" class="small warn-t">응답 유실/지연</text>
+  <rect class="bad" x="20" y="150" width="180" height="28" rx="4"/><text x="110" y="169" text-anchor="middle" class="small">20초 타임아웃 → 결과 불명</text>
+  <path class="arrow" d="M110 196 L 590 220"/><text x="350" y="200" text-anchor="middle" class="small mono">결과 조회 (원거래 seq=123)</text>
+  <path class="arrow" d="M590 236 L 110 260"/><text x="350" y="242" text-anchor="middle" class="small mono">원거래 정상처리됨 0000</text>
+  <rect class="hl" x="20" y="268" width="180" height="28" rx="4"/><text x="110" y="287" text-anchor="middle" class="small">성공으로 확정</text>
+  <text x="350" y="316" text-anchor="middle" class="small mute">조회도 실패하면: 규격에 따라 망취소(0420 취소 통지) 반복 송신, 또는 마감 후 대사(25장)에서 확정</text>
+</svg>
+<figcaption>그림 27-9 응답 타임아웃 후 결과 불명 거래를 조회로 확정하는 흐름</figcaption>
+</figure>
+
+<div class="tbl"><table>
+<thead><tr><th>상황</th><th>잘못된 대응</th><th>올바른 대응</th></tr></thead>
+<tbody>
+<tr><td>응답 타임아웃</td><td>"실패"로 단정하고 고객 계좌 출금 취소 → 실제로는 상대가 입금 처리하여 <strong>돈이 복제</strong>됨</td><td>"결과 불명"으로 상태 저장 → 결과 조회 또는 망취소로 확정 → 확정 전까지 고객에게 "처리 중" 안내</td></tr>
+<tr><td>재송신이 필요할 때</td><td>새 일련번호로 다시 보냄 → 상대는 새 거래로 처리 → <strong>이중 이체</strong></td><td><strong>같은 일련번호</strong>로 재송신(규격이 허용하면, 재송신 플래그 포함) → 상대는 중복으로 인식하고 첫 처리 결과를 다시 응답</td></tr>
+<tr><td>늦게 도착한 이전 응답</td><td>현재 대기 중인 다른 거래의 응답으로 오인</td><td>응답의 일련번호로 원거래를 찾아 매칭, 이미 확정된 거래면 로그만 남기고 폐기</td></tr>
+<tr><td>같은 요청을 두 번 받음(상대가 재송신)</td><td>두 번 처리</td><td>(기관, 일자, 일련번호) 중복 캐시로 첫 응답을 그대로 재전송</td></tr>
+<tr><td>연결 끊김(RST, EOF)</td><td>프로세스 종료, 수동 재기동</td><td>미응답 거래를 결과 불명으로 표시, 지수 백오프로 자동 재연결, 경보</td></tr>
+</tbody></table></div>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — "두 장군 문제"와 금융 통신</p>
+<p>컴퓨터 과학에는 <strong>두 장군 문제(Two Generals' Problem)</strong>라는 유명한 결과가 있습니다. 신뢰할 수 없는 통신로로 연결된 두 장군이 "내일 공격하자"는 합의에 확실히 도달하는 방법은 존재하지 않는다는 것입니다. "알았다"는 답장도 유실될 수 있고, 그 답장에 대한 확인도 유실될 수 있어 끝이 없습니다. TCP도 이 문제를 해결하지 못합니다. TCP는 바이트가 상대 <strong>커널</strong>까지 도착했음을 보장할 뿐, 상대 <strong>애플리케이션이 처리하고 DB에 커밋했는지</strong>는 알려 주지 않습니다. 그래서 금융 통신은 "완벽한 실시간 합의"를 포기하고, ① 멱등한 재송신(같은 키), ② 사후 조회, ③ 취소 통지, ④ 마감 후 대사라는 여러 겹의 <strong>사후 정합성 확보 장치</strong>로 최종적인 일치를 보장합니다. 25장의 대사가 왜 반드시 필요한지가 여기서 연결됩니다.</p>
+</div>
+
+<div class="box fin"><p class="box-title" data-tag="금융 실무">은행 시스템에서는 — 타임아웃 거래를 자동 실패 처리한 대가</p>
+<p>어느 금융회사의 대외계 프로그램은 상대 기관 응답이 15초 안에 오지 않으면 거래를 "실패"로 처리하고 고객 출금을 자동 취소(입금 복원)하도록 만들어져 있었습니다. 평소에는 타임아웃이 하루 몇 건뿐이었고 대사에서 수작업으로 정리했습니다. 그런데 어느 날 상대 기관 시스템의 응답 지연이 30분간 이어지면서 수천 건이 타임아웃 처리되었고, 그중 대부분은 상대 쪽에서 <strong>정상 처리</strong>된 거래였습니다. 고객 계좌에는 출금이 취소되어 돈이 돌아왔고, 받는 계좌에도 입금이 되었습니다. 이를 바로잡는 데 며칠이 걸렸고 일부는 고객 협조가 필요했습니다. 이후 타임아웃은 "결과 불명"이라는 별도 상태로 관리되었고, 자동 결과 조회와 운영자 확인을 거쳐서만 확정하도록 바뀌었습니다. <strong>"모르면 모른다고 기록하라"</strong>가 이 사고의 교훈입니다.</p>
+</div>
+
+<div class="box tip"><p class="box-title" data-tag="잠깐">여기서 잠깐 — 망관리 전문(0800)</p>
+<p>대외기관 연결에는 업무 전문 외에 <strong>망관리 전문</strong>이 오갑니다. 업무 개시(sign-on), 업무 종료(sign-off), 그리고 일정 간격(예: 30초~수 분)으로 주고받는 <strong>회선 상태 확인(echo test)</strong> 전문입니다. 거래가 없는 새벽에도 연결이 살아 있는지 확인하고, 중간 방화벽이 유휴 연결을 끊지 않게 합니다. 응답이 정해진 횟수만큼 없으면 연결을 끊고 재연결하며 운영자에게 경보를 보냅니다. 다음 절의 TCP keepalive와 역할이 겹치지만, 애플리케이션 수준 확인이라 "상대 프로그램이 살아서 응답한다"까지 확인한다는 점이 다릅니다.</p>
+</div>
+
+<h3 id="s27-2-7">keepalive — 죽은 연결 찾아내기</h3>
+<p>TCP 연결은 양쪽이 아무것도 보내지 않으면 패킷이 전혀 오가지 않습니다. 그 사이 상대 서버의 전원이 나가거나, 중간 방화벽이 세션 테이블에서 연결을 지워 버리면(유휴 시간 초과), 우리 쪽은 그 사실을 <strong>전혀 모릅니다</strong>. 연결은 ESTABLISHED로 보이지만 실제로는 죽어 있습니다(half-open). 다음에 전문을 보내면 그제야 재전송을 반복하다가 수 분 뒤 오류가 납니다.</p>
+<p><strong>TCP keepalive</strong>는 일정 시간 데이터가 없으면 커널이 빈 확인 패킷을 보내 상대가 살아 있는지 점검하는 기능입니다. 기본값은 2시간 후 시작이라 금융 환경에는 너무 깁니다. 소켓별로 조정합니다.</p>
+
+<figure class="code"><figcaption>keepalive.c — 소켓별 keepalive 설정 (리눅스)</figcaption>
+<pre><code class="language-c">#include &lt;netinet/in.h&gt;
+#include &lt;netinet/tcp.h&gt;   /* TCP_KEEPIDLE 등: 리눅스. 다른 OS는 이름이 다를 수 있음 */
+#include &lt;sys/socket.h&gt;
+
+int set_keepalive(int fd, int idle_sec, int intvl_sec, int cnt)
+{
+    int on = 1;
+    if (setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &amp;on, sizeof on) &lt; 0) return -1;
+#ifdef TCP_KEEPIDLE
+    /* idle_sec 동안 조용하면 확인 시작 */
+    if (setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, &amp;idle_sec, sizeof idle_sec) &lt; 0) return -1;
+    /* 응답이 없으면 intvl_sec 간격으로 */
+    if (setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &amp;intvl_sec, sizeof intvl_sec) &lt; 0) return -1;
+    /* cnt번 연속 무응답이면 연결을 끊고 read/write가 ETIMEDOUT 반환 */
+    if (setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &amp;cnt, sizeof cnt) &lt; 0) return -1;
+#endif
+    return 0;
+}
+/* 예: set_keepalive(fd, 60, 10, 3) → 무통신 60초 후 확인, 최대 60+10*3 = 90초 안에 죽은 연결 탐지 */</code></pre></figure>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 — keepalive를 응답 타임아웃으로 착각</p>
+<p>keepalive는 <strong>유휴 연결</strong>의 생존 확인이지, "요청을 보냈는데 응답이 늦는" 상황의 타임아웃이 아닙니다. 상대 서버 커널은 살아 있어 keepalive에 응답하지만 애플리케이션이 멈춰 전문을 처리하지 않는 경우, keepalive로는 영원히 탐지되지 않습니다. 따라서 ① 거래 단위 응답 타임아웃(27-2-3) ② 애플리케이션 echo 전문 ③ TCP keepalive를 <strong>모두</strong> 조합합니다. 또 방화벽의 유휴 세션 정리 시간(예: 30분)보다 keepalive 간격이 짧아야 방화벽이 연결을 지우지 않습니다.</p>
+</div>
+
+<h3 id="s27-2-8">이체 전문 서버 전체 예제</h3>
+<p>지금까지 배운 모든 것을 합쳐, 24장의 160바이트 이체 전문을 처리하는 서버와 클라이언트를 완성합니다. 서버는 다음 기능을 갖춥니다.</p>
+<ul>
+  <li><code>poll</code> 기반 단일 프로세스 서버 (중복 캐시와 계좌 잔액을 한 곳에서 관리하기 위해)</li>
+  <li>길이 헤더 프레이밍 + 타임아웃 있는 수신(<code>recv_msg</code>)</li>
+  <li>전문 검증(길이, 종별, 거래구분, 숫자 필드), 잔액 확인과 출금, 응답코드 설정</li>
+  <li>(송신기관, 전송일자, 일련번호) 키의 <strong>중복 요청 캐시</strong>: 같은 요청이 다시 오면 처리하지 않고 첫 응답을 그대로 재전송</li>
+  <li>SIGTERM graceful shutdown, SIGPIPE 무시, CLOSE_WAIT 방지</li>
+</ul>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 260" width="700" role="img" aria-label="이체 전문 서버 처리 흐름">
+  <rect class="box" x="20" y="100" width="110" height="50" rx="6"/><text x="75" y="122" text-anchor="middle" class="small bold">recv_msg</text><text x="75" y="140" text-anchor="middle" class="small mute">160B 프레임</text>
+  <path class="arrow" d="M130 125 H 170"/>
+  <rect class="hl2" x="170" y="100" width="120" height="50" rx="6"/><text x="230" y="122" text-anchor="middle" class="small bold">중복 키 조회</text><text x="230" y="140" text-anchor="middle" class="small mono">inst+date+seq</text>
+  <path class="arrow" d="M230 100 V 50 H 560"/><text x="395" y="42" text-anchor="middle" class="small acc">있음 → 캐시된 응답 그대로 재전송 (재처리 없음)</text>
+  <path class="arrow" d="M290 125 H 330"/><text x="310" y="117" text-anchor="middle" class="small">없음</text>
+  <rect class="box" x="330" y="100" width="120" height="50" rx="6"/><text x="390" y="122" text-anchor="middle" class="small bold">process()</text><text x="390" y="140" text-anchor="middle" class="small mute">검증·잔액·출금</text>
+  <path class="arrow" d="M450 125 H 490"/>
+  <rect class="hl" x="490" y="100" width="90" height="50" rx="6"/><text x="535" y="122" text-anchor="middle" class="small bold">캐시 저장</text><text x="535" y="140" text-anchor="middle" class="small mute">응답 보관</text>
+  <path class="arrow" d="M580 125 H 610"/>
+  <rect class="hl" x="610" y="30" width="80" height="120" rx="6"/><text x="650" y="85" text-anchor="middle" class="small bold">writen</text><text x="650" y="103" text-anchor="middle" class="small">응답</text>
+  <text x="350" y="200" text-anchor="middle" class="small">응답코드: 0000 정상 / 5001 계좌없음 / 5101 잔액부족 / 9001 형식오류 / 9002 거래구분오류</text>
+  <text x="350" y="230" text-anchor="middle" class="small mute">운영 서버는 캐시를 DB 또는 공유메모리에 두어 재기동·다중 프로세스에서도 유지한다</text>
+</svg>
+<figcaption>그림 27-10 중복 캐시를 갖춘 이체 전문 서버의 처리 흐름</figcaption>
+</figure>
+
+<figure class="code"><figcaption>net.h — 공용 네트워크 함수 선언</figcaption>
+<pre><code class="language-c">#ifndef NET_H
+#define NET_H
+#include &lt;sys/types.h&gt;
+
+ssize_t readn(int fd, void *buf, size_t n);
+ssize_t writen(int fd, const void *buf, size_t n);
+ssize_t readn_timeout(int fd, void *buf, size_t n, int ms);
+int     recv_msg(int fd, char *buf, size_t bufsz, int ms);
+int     connect_timeout(const char *ip, int port, int ms);
+int     set_keepalive(int fd, int idle_sec, int intvl_sec, int cnt);
+
+#endif</code></pre></figure>
+
+<figure class="code"><figcaption>trfsvr.c — 이체 전문 서버</figcaption>
+<pre><code class="language-c">#define _POSIX_C_SOURCE 200809L
+#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+#include &lt;errno.h&gt;
+#include &lt;signal.h&gt;
+#include &lt;time.h&gt;
+#include &lt;unistd.h&gt;
+#include &lt;poll.h&gt;
+#include &lt;arpa/inet.h&gt;
+#include &lt;netinet/in.h&gt;
+#include &lt;sys/socket.h&gt;
+#include "msg_layout.h"
+#include "fld.h"
+#include "net.h"
+
+#define PORT       9100
+#define MAX_CONN   64
+#define DUP_SLOTS  1024
+#define KEYLEN     21          /* 송신기관 3 + 전송일자 8 + 일련번호 10 */
+
+static volatile sig_atomic_t g_stop = 0;
+static void on_term(int s) { (void)s; g_stop = 1; }
+
+/* ---- 중복 요청 캐시 (원형 버퍼) ------------------------------------ */
+typedef struct { int used; char key[KEYLEN]; TrfRespMsg resp; } DupEnt;
+static DupEnt dup_tbl[DUP_SLOTS];
+static int    dup_next;
+
+static void make_key(const MsgHeader *h, char key[KEYLEN])
+{
+    memcpy(key,      h-&gt;snd_inst,  3);
+    memcpy(key + 3,  h-&gt;send_date, 8);
+    memcpy(key + 11, h-&gt;seq_no,   10);
+}
+
+static const TrfRespMsg *dup_find(const char key[KEYLEN])
+{
+    int i;
+    for (i = 0; i &lt; DUP_SLOTS; i++)
+        if (dup_tbl[i].used &amp;&amp; memcmp(dup_tbl[i].key, key, KEYLEN) == 0)
+            return &amp;dup_tbl[i].resp;
+    return NULL;
+}
+
+static void dup_put(const char key[KEYLEN], const TrfRespMsg *r)
+{
+    DupEnt *e = &amp;dup_tbl[dup_next];
+    dup_next = (dup_next + 1) % DUP_SLOTS;   /* 가장 오래된 항목부터 덮어씀 */
+    e-&gt;used = 1;
+    memcpy(e-&gt;key, key, KEYLEN);
+    e-&gt;resp = *r;
+}
+
+/* ---- 데모용 계좌 원장 (실제로는 DB) -------------------------------- */
+static struct { const char *acct; long long bal; } g_acct[] = {
+    { "1002345678901", 1335000 },
+    { "1002345678902",   50000 },
+};
+
+static long long *find_bal(const char *acct)
+{
+    size_t i;
+    for (i = 0; i &lt; sizeof g_acct / sizeof g_acct[0]; i++)
+        if (strcmp(g_acct[i].acct, acct) == 0)
+            return &amp;g_acct[i].bal;
+    return NULL;
+}
+
+/* ---- 거래 처리: 요청 q → 응답 r ------------------------------------ */
+static void process(const TrfReqMsg *q, TrfRespMsg *r, long long *seq_out)
+{
+    long long len = 0, amt = 0, fee = 0, seq = 0, *bal;
+    char acct[17], dt[15];
+    const char *rc = "0000";
+    time_t t = time(NULL);
+    struct tm tm;
+
+    memset(r, ' ', sizeof *r);
+    r-&gt;h = q-&gt;h;                                       /* 헤더 복사 후 일부 변경 */
+    memcpy(r-&gt;h.msg_type, "0210", 4);
+    memcpy(r-&gt;b.from_acct, q-&gt;b.from_acct, sizeof r-&gt;b.from_acct);
+    memcpy(r-&gt;b.amount, q-&gt;b.amount, sizeof r-&gt;b.amount);
+    memcpy(r-&gt;b.fee, q-&gt;b.fee, sizeof r-&gt;b.fee);
+    memcpy(r-&gt;b.rcv_name, q-&gt;b.rcv_name, sizeof r-&gt;b.rcv_name);
+    fld_get_str(acct, sizeof acct, FLD(q-&gt;b, from_acct));
+    fld_get_num(FLD(q-&gt;h, seq_no), &amp;seq);
+
+    if (fld_get_num(FLD(q-&gt;h, len), &amp;len) != FLD_OK || len != 156
+        || memcmp(q-&gt;h.msg_type, "0200", 4) != 0)
+        rc = "9001";
+    else if (memcmp(q-&gt;h.tr_code, "100100", 6) != 0)
+        rc = "9002";
+    else if (fld_get_num(FLD(q-&gt;b, amount), &amp;amt) != FLD_OK
+             || fld_get_num(FLD(q-&gt;b, fee), &amp;fee) != FLD_OK || amt &lt;= 0)
+        rc = "9001";
+    else if ((bal = find_bal(acct)) == NULL)
+        rc = "5001";
+    else if (amt + fee &gt; *bal)
+        rc = "5101";                                   /* 잔액 부족: 출금하지 않음 */
+    else
+        *bal -= amt + fee;                             /* 실제로는 DB 트랜잭션 */
+
+    memcpy(r-&gt;h.resp_code, rc, 4);
+    bal = find_bal(acct);
+    fld_set_num(FLD(r-&gt;b, balance), bal ? *bal : 0);
+    localtime_r(&amp;t, &amp;tm);
+    strftime(dt, sizeof dt, "%Y%m%d%H%M%S", &amp;tm);
+    memcpy(r-&gt;b.proc_dt, dt, 14);
+
+    printf("seq=%lld amt=%lld rc=%s bal=%lld\n", seq, amt, rc, bal ? *bal : 0LL);
+    *seq_out = seq;
+}
+
+/* 연결 하나에서 전문 하나 처리. 연결을 닫아야 하면 -1 */
+static int handle_client(int fd)
+{
+    char buf[4 + 9999];
+    char key[KEYLEN];
+    TrfReqMsg q;
+    TrfRespMsg r;
+    const TrfRespMsg *cached;
+    long long seq;
+    int n = recv_msg(fd, buf, sizeof buf, 5000);
+
+    if (n == 0) return -1;                             /* 상대 정상 종료 */
+    if (n &lt; 0) { printf("fd=%d recv error/timeout\n", fd); return -1; }
+    if ((size_t)n != sizeof q) { printf("fd=%d bad length %d\n", fd, n); return -1; }
+    memcpy(&amp;q, buf, sizeof q);
+
+    make_key(&amp;q.h, key);
+    if ((cached = dup_find(key)) != NULL) {            /* 재송신된 같은 요청 */
+        fld_get_num(FLD(q.h, seq_no), &amp;seq);
+        printf("seq=%lld DUP -&gt; cached response resent\n", seq);
+        return writen(fd, cached, sizeof *cached) == (ssize_t)sizeof *cached ? 0 : -1;
+    }
+    process(&amp;q, &amp;r, &amp;seq);
+    dup_put(key, &amp;r);                                  /* 응답을 보내기 전에 보관 */
+    return writen(fd, &amp;r, sizeof r) == (ssize_t)sizeof r ? 0 : -1;
+}
+
+int main(void)
+{
+    struct pollfd pf[1 + MAX_CONN];
+    int nfds = 1, ls, on = 1, i;
+    struct sockaddr_in a;
+    struct sigaction sa;
+
+    setvbuf(stdout, NULL, _IOLBF, 0);                  /* 로그를 줄 단위로 즉시 출력 */
+    memset(&amp;sa, 0, sizeof sa);
+    sigemptyset(&amp;sa.sa_mask);
+    sa.sa_handler = on_term;                           /* SA_RESTART 없음: poll이 깨어남 */
+    sigaction(SIGTERM, &amp;sa, NULL);
+    sigaction(SIGINT, &amp;sa, NULL);
+    sa.sa_handler = SIG_IGN;
+    sigaction(SIGPIPE, &amp;sa, NULL);
+
+    ls = socket(AF_INET, SOCK_STREAM, 0);
+    setsockopt(ls, SOL_SOCKET, SO_REUSEADDR, &amp;on, sizeof on);
+    memset(&amp;a, 0, sizeof a);
+    a.sin_family = AF_INET;
+    a.sin_addr.s_addr = htonl(INADDR_ANY);
+    a.sin_port = htons(PORT);
+    if (bind(ls, (struct sockaddr *)&amp;a, sizeof a) &lt; 0 || listen(ls, 128) &lt; 0) {
+        perror("bind/listen");
+        return 3;
+    }
+    printf("trfsvr: listening on port %d\n", PORT);
+    pf[0].fd = ls;
+    pf[0].events = POLLIN;
+
+    while (!g_stop) {
+        int pr = poll(pf, (nfds_t)nfds, 1000);
+        if (pr &lt; 0) { if (errno == EINTR) continue; perror("poll"); break; }
+
+        if (pf[0].revents &amp; POLLIN) {                  /* 새 연결 */
+            struct sockaddr_in ca;
+            socklen_t cl = sizeof ca;
+            char ip[INET_ADDRSTRLEN];
+            int c = accept(ls, (struct sockaddr *)&amp;ca, &amp;cl);
+            if (c &gt;= 0 &amp;&amp; nfds &lt; 1 + MAX_CONN) {
+                set_keepalive(c, 60, 10, 3);
+                pf[nfds].fd = c;
+                pf[nfds].events = POLLIN;
+                pf[nfds].revents = 0;
+                nfds++;
+                inet_ntop(AF_INET, &amp;ca.sin_addr, ip, sizeof ip);
+                printf("conn fd=%d from %s\n", c, ip);
+            } else if (c &gt;= 0) {
+                close(c);                              /* 한도 초과: 즉시 거절 */
+            }
+        }
+        for (i = 1; i &lt; nfds; i++) {
+            if (!(pf[i].revents &amp; (POLLIN | POLLHUP | POLLERR)))
+                continue;
+            if (handle_client(pf[i].fd) &lt; 0) {
+                printf("conn fd=%d closed\n", pf[i].fd);
+                close(pf[i].fd);                       /* CLOSE_WAIT 방지 */
+                pf[i] = pf[nfds - 1];                  /* 마지막 항목을 빈자리로 이동 */
+                nfds--;
+                i--;                                   /* 옮겨 온 항목도 검사 */
+            }
+        }
+    }
+    for (i = 0; i &lt; nfds; i++)
+        close(pf[i].fd);
+    printf("trfsvr: shutdown\n");
+    return 0;
+}</code></pre></figure>
+
+<p>클라이언트는 24장의 <code>build_trf_req</code>, <code>parse_trf_resp</code>, <code>fmt_won</code>을 <code>static</code>을 떼어 <code>trf_msg.c</code>로 분리하고 선언을 <code>trf_msg.h</code>에 두었다고 가정합니다. 세 번의 거래를 보냅니다: ① 정상 이체 ② <strong>같은 일련번호로 재송신</strong>(응답을 못 받았다고 가정한 재시도) ③ 잔액보다 큰 금액의 새 이체.</p>
+
+<figure class="code"><figcaption>trfcli.c — 이체 전문 클라이언트</figcaption>
+<pre><code class="language-c">#define _POSIX_C_SOURCE 200809L
+#include &lt;stdio.h&gt;
+#include &lt;unistd.h&gt;
+#include "msg_layout.h"
+#include "fld.h"
+#include "net.h"
+#include "trf_msg.h"     /* TrfInput, TrfResult, build_trf_req, parse_trf_resp, fmt_won */
+
+/* 0 성공, -2 결과 불명(응답 없음), 그 외 음수 오류 */
+static int do_tx(int fd, const TrfInput *in, long long seq, const char *tag)
+{
+    TrfReqMsg q;
+    TrfResult r;
+    char buf[4 + 9999], won[32];
+    int n;
+
+    if (build_trf_req(&amp;q, in, seq, "20261028", "143015") != FLD_OK)
+        return -1;
+    if (writen(fd, &amp;q, sizeof q) != (ssize_t)sizeof q)
+        return -1;
+    n = recv_msg(fd, buf, sizeof buf, 10000);         /* 10초 응답 타임아웃 */
+    if (n &lt;= 0) {
+        fprintf(stderr, "%s seq=%lld 응답 없음 → 결과 불명, 결과 조회 필요\n", tag, seq);
+        return -2;                                    /* 실패로 단정하지 않는다! */
+    }
+    if (parse_trf_resp(buf, (size_t)n, seq, &amp;r) != FLD_OK)
+        return -3;
+    fmt_won(r.balance, won);
+    printf("%s seq=%lld 응답=%s 잔액=%s원\n", tag, seq, r.resp_code, won);
+    return 0;
+}
+
+int main(void)
+{
+    TrfInput in = { "1002345678901", "004", "94370201234567",
+                    100000, 500, "홍길동", "OCT-RENT" };
+    int fd = connect_timeout("127.0.0.1", 9100, 3000);
+    if (fd &lt; 0) { perror("connect"); return 3; }
+
+    do_tx(fd, &amp;in, 123, "[1]");          /* 정상 이체 */
+    do_tx(fd, &amp;in, 123, "[2]");          /* 같은 일련번호 재송신 */
+    in.amount = 2000000;
+    do_tx(fd, &amp;in, 124, "[3]");          /* 잔액 부족 */
+    close(fd);
+    return 0;
+}</code></pre></figure>
+
+<pre><code class="language-bash">gcc -std=c11 -Wall -Wextra -o trfsvr trfsvr.c net.c fld.c
+gcc -std=c11 -Wall -Wextra -o trfcli trfcli.c trf_msg.c net.c fld.c
+./trfsvr &amp;          # 서버 실행 (다른 터미널에서 실행해도 됨)
+./trfcli</code></pre>
+
+<figure class="code out"><figcaption>실행 결과 — 클라이언트</figcaption>
+<pre>[1] seq=123 응답=0000 잔액=1,234,500원
+[2] seq=123 응답=0000 잔액=1,234,500원
+[3] seq=124 응답=5101 잔액=1,234,500원</pre></figure>
+<figure class="code out"><figcaption>실행 결과 — 서버 로그</figcaption>
+<pre>trfsvr: listening on port 9100
+conn fd=4 from 127.0.0.1
+seq=123 amt=100000 rc=0000 bal=1234500
+seq=123 DUP -&gt; cached response resent
+seq=124 amt=2000000 rc=5101 bal=1234500
+conn fd=4 closed</pre></figure>
+
+<p>결과를 해석해 봅시다. ① 첫 이체로 1,335,000원에서 100,000원 + 수수료 500원이 빠져 1,234,500원이 됩니다(24장 예제의 응답 잔액과 같습니다). ② 같은 일련번호의 재송신은 서버가 처리하지 않고 첫 응답을 그대로 돌려줍니다. 잔액이 다시 줄지 않았다는 것이 핵심입니다. 클라이언트 입장에서는 첫 응답을 받았든 못 받았든 재송신 결과로 정확한 상태를 알게 됩니다. ③ 200만 원은 잔액보다 크므로 5101(잔액 부족)이 오고 잔액은 그대로입니다. 리슨 소켓이 fd 3, 첫 연결이 fd 4인 것은 0, 1, 2가 표준 입출력이기 때문입니다(26장).</p>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — 왜 응답을 보내기 "전에" 캐시에 넣을까?</p>
+<p>순서를 바꿔 "응답 송신 → 캐시 저장"으로 하면, 송신 직후 다른 이유로 저장 전에 문제가 생겼을 때(예: 다중 프로세스 구조에서 캐시가 공유 저장소에 있고 그 저장이 실패) 거래는 처리되었는데 캐시에는 없는 상태가 됩니다. 상대가 응답을 못 받아 재송신하면 서버는 처음 보는 요청으로 알고 <strong>다시 출금</strong>합니다. 반대로 "캐시 저장 → 송신"이면 송신이 실패해도 재송신 시 캐시된 응답이 나갑니다. 25장의 "커밋 → 체크포인트" 순서와 같은 원리입니다: <strong>상태 확정을 먼저, 외부 통지는 나중에</strong>. 실제 시스템에서는 출금 반영과 응답 보관을 <strong>같은 DB 트랜잭션</strong>으로 커밋하여 둘 사이의 틈을 아예 없앱니다.</p>
+</div>
+
+<div class="box warn"><p class="box-title" data-tag="주의">이 예제의 한계 — 운영 서버로 가기 전에</p>
+<ul>
+  <li><code>handle_client</code>는 <code>recv_msg</code>로 전문 하나를 블로킹으로 읽습니다(최대 5초). 느린 연결 하나가 다른 연결을 최대 5초 지연시킬 수 있습니다. 운영 수준에서는 27-2-5의 연결별 버퍼 방식이나 pre-fork·멀티스레드(28장)를 씁니다.</li>
+  <li>중복 캐시와 잔액이 프로세스 메모리에 있어 재기동하면 사라집니다. 실제로는 DB(거래 로그 테이블의 유일 키)나 공유메모리에 둡니다.</li>
+  <li>응답 송신(<code>writen</code>)이 상대의 수신 지연으로 블록될 수 있습니다. 송신 타임아웃(<code>SO_SNDTIMEO</code>)이나 논블로킹 쓰기 버퍼가 필요합니다.</li>
+  <li>망관리(0800) 전문, 로그 마스킹(계좌번호), 접속 허용 IP 검사, 암호화(TLS 또는 전용망)가 빠져 있습니다.</li>
+</ul>
+</div>
+
+<div class="ex"><p class="ex-title">예제 27-3 <span class="lv">난이도 ★★★</span></p>
+<p>클라이언트의 [1] 거래에서 서버는 정상 처리하고 응답을 보냈지만, 응답이 네트워크에서 10초 넘게 지연되어 클라이언트가 타임아웃을 냈습니다. 그 후 클라이언트가 <strong>같은 연결</strong>로 [2] 재송신을 하면 어떤 일이 생길 수 있고, 이 예제의 <code>parse_trf_resp</code>는 이를 어떻게 막습니까?</p>
+<details><summary>정답과 해설 보기</summary>
+<p>지연되던 [1]의 응답이 [2]를 보낸 직후 도착하면, 클라이언트의 [2] 수신(<code>recv_msg</code>)은 [1]의 응답을 먼저 읽습니다. 이번에는 둘 다 seq=123이라 우연히 매칭되지만, 서버가 보낸 [2]의 캐시 응답이 뒤에 하나 더 남아 <strong>이후 [3]의 수신에서 [2]의 응답(seq=123)을 읽게 됩니다</strong>. <code>parse_trf_resp</code>는 기대 일련번호(124)와 다르므로 -13을 반환해 잘못된 매칭을 막습니다. 하지만 그 상태로는 이후 모든 응답이 하나씩 밀립니다. 그래서 실무에서는 ① 타임아웃이 난 연결은 끊고 새 연결로 재송신하거나 ② 수신 측에서 일련번호로 대기 중인 거래 테이블을 찾아 매칭하고, 매칭되지 않는 응답은 "늦은 응답"으로 로그 후 폐기하는 비동기 매칭 구조를 씁니다. 응답 순서가 요청 순서와 같다고 가정하지 않는 것이 중요합니다.</p>
+</details></div>
+
+<h2 id="summary">핵심 정리</h2>
+<ul class="summary-list">
+  <li>TCP/IP는 응용·전송·인터넷·네트워크 접근 계층으로 나뉘며, 소켓 API는 응용과 전송 계층 사이의 창구입니다. 돈이 오가는 전문은 신뢰성 있는 TCP를 씁니다.</li>
+  <li>3-way handshake는 양방향 초기 순서 번호를 교환·확인하고, 4-way handshake는 양방향을 각각 닫습니다. 먼저 닫는 쪽은 2MSL 동안 TIME_WAIT, 상대가 닫았는데 내가 안 닫으면 CLOSE_WAIT입니다. CLOSE_WAIT 누적은 애플리케이션 버그입니다.</li>
+  <li>서버는 socket → (SO_REUSEADDR) → bind → listen → accept, 클라이언트는 socket → connect. 포트·주소는 네트워크 바이트 순서로 넣습니다.</li>
+  <li>TCP는 바이트 스트림이라 write 경계와 read 경계가 다릅니다. 쪼개짐과 붙음을 모두 처리해야 하며, 금융 전문은 길이 헤더로 프레이밍합니다. 길이 필드가 이상하면 연결을 끊습니다.</li>
+  <li><code>readn/writen</code>으로 부분 읽기·쓰기와 EINTR을 처리하고, <code>read</code> 0은 상대 종료로 보고 즉시 닫습니다.</li>
+  <li>모든 네트워크 대기에는 타임아웃이 필요합니다. <code>SO_RCVTIMEO</code>는 호출 단위, <code>poll</code> + 마감 시각은 전문 단위 타임아웃, <code>connect</code>는 논블로킹 + poll + SO_ERROR로 제한합니다. 호출 사슬의 타임아웃은 바깥쪽이 더 길어야 합니다.</li>
+  <li>fork 서버는 격리가 좋고 단순하지만 부모는 연결 소켓을, 자식은 리슨 소켓을 닫고 SIGCHLD로 자식을 거둬야 합니다. select/poll 서버는 연결별 버퍼로 전문을 조립하는 상태 기계로 작성합니다.</li>
+  <li>응답 타임아웃은 "실패"가 아니라 "결과 불명"입니다. 같은 일련번호로 멱등 재송신, 결과 조회, 망취소, 마감 후 대사로 확정합니다. 늦은 응답은 일련번호로 매칭해 걸러냅니다.</li>
+  <li>서버는 (기관, 일자, 일련번호) 중복 캐시로 재송신 요청에 첫 응답을 그대로 돌려주며, 상태 확정(캐시·커밋)을 응답 송신보다 먼저 합니다.</li>
+  <li>죽은 유휴 연결은 TCP keepalive(소켓별 조정)와 애플리케이션 echo 전문으로 찾아내고, 응답 지연은 거래 타임아웃으로 따로 처리합니다.</li>
+</ul>
+
+<h2 id="interview">CS 면접 단골 질문</h2>
+<div class="box iv"><p class="box-title" data-tag="면접">이 장에서 나오는 면접 질문</p>
+  <details><summary>Q1. TCP 3-way handshake 과정을 설명하고, 왜 3번인지 말해 보세요.</summary>
+  <p>클라이언트가 SYN(seq=x)을 보내고, 서버가 SYN+ACK(seq=y, ack=x+1)로 응답하며, 클라이언트가 ACK(ack=y+1)를 보내 연결이 수립됩니다. 양방향 각각에 대해 초기 순서 번호를 알리고 확인받아야 하므로 원래 4단계지만, 서버의 SYN과 ACK를 합쳐 3단계가 됩니다. 2단계로는 서버가 자신의 SYN이 수신되었는지 확인할 수 없고, 지연된 옛 SYN에 의해 불필요한 연결이 생길 수 있습니다. <strong>꼬리 질문</strong>: "SYN flooding 공격이란?" → 마지막 ACK를 보내지 않는 SYN을 대량으로 보내 서버의 SYN 큐를 고갈시키는 공격, SYN 쿠키로 방어.</p></details>
+  <details><summary>Q2. 4-way handshake와 TIME_WAIT 상태가 필요한 이유는?</summary>
+  <p>TCP는 양방향을 독립적으로 닫기 때문에 각 방향의 FIN과 ACK로 4번의 메시지가 필요합니다. 먼저 종료한 쪽은 마지막 ACK가 유실되어 상대가 FIN을 재전송할 경우를 대비하고, 같은 포트 조합의 새 연결에 이전 연결의 지연 패킷이 섞이지 않도록 2MSL 동안 TIME_WAIT 상태로 기다립니다. 서버 재기동 시 bind 실패는 SO_REUSEADDR로 해결하고, 클라이언트의 짧은 연결 남발은 연결 재사용으로 줄입니다.</p></details>
+  <details><summary>Q3. CLOSE_WAIT이 많이 쌓이는 원인과 해결책은?</summary>
+  <p>CLOSE_WAIT은 상대가 FIN을 보내 연결을 닫았는데 우리 애플리케이션이 아직 close를 호출하지 않은 상태입니다. 따라서 원인은 거의 항상 애플리케이션 코드로, read가 0을 반환했을 때 소켓을 닫지 않거나, 오류 경로에서 close를 빠뜨리거나, fork 서버에서 부모가 연결 소켓을 닫지 않는 경우입니다. 방치하면 fd 고갈로 이어집니다. 모든 경로에서 소켓을 닫도록 코드를 고치고, fd 수와 CLOSE_WAIT 수를 모니터링합니다.</p></details>
+  <details><summary>Q4. TCP와 UDP의 차이는? 각각 언제 쓰나요?</summary>
+  <p>TCP는 연결 지향, 순서·신뢰성 보장, 흐름·혼잡 제어가 있는 바이트 스트림이고, UDP는 비연결, 신뢰성 보장 없는 데이터그램으로 메시지 경계가 보존되며 오버헤드가 작습니다. 이체·승인처럼 유실이 허용되지 않는 거래는 TCP, 실시간 시세 방송·DNS·스트리밍처럼 지연이 중요하고 일부 유실을 감수할 수 있는 경우는 UDP를 씁니다.</p></details>
+  <details><summary>Q5. TCP에서 메시지 경계 문제(점착/분할)는 왜 생기고 어떻게 해결하나요?</summary>
+  <p>TCP는 바이트 순서만 보장하는 스트림이라 송신 측 write 단위가 유지되지 않습니다. 커널 버퍼링, Nagle 알고리즘, MSS 분할, 수신 버퍼 상태에 따라 여러 메시지가 붙거나 하나가 쪼개져 도착합니다. 응용 계층에서 고정 길이, 구분자, 길이 헤더 중 하나로 프레이밍하고, 정확히 필요한 바이트만큼 반복해서 읽는 readn 또는 연결별 버퍼 누적 방식으로 처리합니다.</p></details>
+  <details><summary>Q6. 블로킹, 논블로킹, I/O 다중화(select/poll/epoll)의 차이는?</summary>
+  <p>블로킹 I/O는 데이터가 준비될 때까지 호출이 반환하지 않고, 논블로킹 I/O는 준비되지 않았으면 즉시 EAGAIN을 반환합니다. I/O 다중화는 여러 fd 중 준비된 것을 한 번의 호출로 기다려 알려 주므로, 단일 스레드로 많은 연결을 처리할 수 있습니다. select는 fd 수 제한(FD_SETSIZE)과 O(n) 스캔, poll은 수 제한이 없지만 O(n), epoll은 준비된 fd만 돌려줘 대규모 연결에 적합합니다. <strong>꼬리 질문</strong>: "레벨 트리거와 엣지 트리거?" → 레벨은 준비 상태인 동안 계속 알림, 엣지는 상태 변화 시 한 번만 알림이라 논블로킹으로 EAGAIN까지 모두 읽어야 함.</p></details>
+  <details><summary>Q7. 멀티프로세스 서버와 I/O 다중화 서버의 장단점을 비교해 보세요.</summary>
+  <p>멀티프로세스(fork/pre-fork)는 연결마다 격리되어 한 처리의 장애가 다른 연결에 영향을 주지 않고 코드가 순차적이라 단순하지만, 프로세스 생성·메모리 비용이 크고 상태 공유에 IPC가 필요합니다. 다중화 서버는 한 프로세스로 많은 연결을 적은 자원으로 처리하고 상태 공유가 쉽지만, 어떤 핸들러도 블로킹하면 안 되어 상태 기계 방식으로 작성해야 하고 하나의 버그가 전체를 멈출 수 있습니다. 금융 미들웨어는 두 방식을 조합(소수 프로세스 × 각자 다중화)하기도 합니다.</p></details>
+  <details><summary>Q8. 요청을 보냈는데 타임아웃이 나면 어떻게 처리해야 하나요? (금융 특화)</summary>
+  <p>타임아웃은 상대가 처리했는지 알 수 없는 "결과 불명" 상태이므로 실패로 단정하면 안 됩니다. 거래를 불명 상태로 기록하고, 같은 거래 고유번호로 결과 조회나 멱등 재송신을 하여 상대의 처리 결과를 확인합니다. 확인이 안 되면 규격에 따라 취소 통지를 보내고, 최종적으로 마감 후 대사로 확정합니다. 상대 시스템도 같은 고유번호의 요청은 중복으로 보고 첫 결과를 재응답하도록 멱등하게 설계되어야 합니다.</p></details>
+  <details><summary>Q9. 네트워크 바이트 순서란 무엇이며, htons를 빼먹으면 어떻게 되나요?</summary>
+  <p>네트워크 프로토콜 헤더의 다바이트 정수는 빅 엔디안으로 표현하기로 약속되어 있습니다. 리틀 엔디안 x86에서 <code>sin_port = 9100</code>처럼 htons 없이 넣으면 바이트가 뒤집혀 9100(0x238C)이 0x8C23 = 35875번 포트로 바인드됩니다. 서버는 엉뚱한 포트에서 대기하고 클라이언트는 연결 거부를 받습니다.</p></details>
+  <details><summary>Q10. TCP keepalive는 무엇이고, 애플리케이션 heartbeat와 무엇이 다른가요?</summary>
+  <p>TCP keepalive는 유휴 연결에서 커널이 주기적으로 확인 패킷을 보내 상대 호스트의 TCP 스택이 살아 있는지 확인하는 기능으로, 기본 시작 시간이 2시간이라 보통 소켓별로 줄여 씁니다. 하지만 상대 애플리케이션이 멈춰도 커널은 응답하므로 애플리케이션의 생존은 알 수 없습니다. 그래서 금융 연동에서는 애플리케이션 수준 echo 전문(heartbeat)을 함께 써서 상대 프로그램이 실제로 전문을 처리하는지 확인합니다.</p></details>
+</div>
+
+<h2 id="exercises">연습문제</h2>
+
+<div class="ex"><p class="ex-title">연습문제 27-1 상태 판단 <span class="lv">난이도 ★☆☆</span></p>
+<p><code>netstat -an</code>(또는 <code>ss -tan</code>) 결과에서 다음 상태가 많이 보일 때 각각 무엇을 의심해야 합니까? (a) 서버 쪽 TIME_WAIT 다수 (b) 서버 쪽 CLOSE_WAIT 다수 (c) 클라이언트 쪽 SYN_SENT 다수</p>
+<details><summary>정답과 해설 보기</summary>
+<p>(a) 서버가 먼저 연결을 닫는 구조이고 연결이 자주 맺고 끊어짐. 대부분 정상이지만 양이 지나치면 연결 재사용(persistent connection) 검토. (b) 상대가 닫았는데 서버 프로그램이 close를 안 함 → 코드 버그, fd 누수로 이어짐. (c) 상대 서버가 SYN에 응답하지 않음 → 상대 서버 다운, 방화벽 차단, 라우팅 문제, 또는 상대의 accept 큐 포화. connect 타임아웃 설정이 없다면 프로세스들이 오래 멈춰 있을 수 있습니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 27-2 버그 찾기 — 수신 코드 <span class="lv">난이도 ★★☆</span></p>
+<p>다음 코드는 160바이트 전문을 받는다고 주장합니다. 문제점을 모두 찾으세요.</p>
+<figure class="code bad"><figcaption>q27-2.c</figcaption><pre><code class="language-c">char msg[160];
+int n = recv(fd, msg, 160, 0);
+if (n &lt; 0) { perror("recv"); return -1; }
+process(msg);</code></pre></figure>
+<details><summary>정답과 해설 보기</summary>
+<p>① 한 번의 recv가 160바이트를 모두 받는다는 보장이 없습니다(partial read). 루프로 남은 바이트를 계속 받아야 합니다. ② <code>n == 0</code>(상대 종료)을 처리하지 않아 빈 버퍼로 <code>process</code>를 호출합니다. ③ EINTR 재시도가 없습니다. ④ 타임아웃이 없어 상대가 멈추면 영원히 블록됩니다. ⑤ 길이 헤더를 읽지 않고 160바이트로 고정해, 다른 길이의 전문이 섞이면 경계가 어긋납니다. ⑥ 전문 검증 없이 처리합니다. 올바른 형태: <code>n = recv_msg(fd, buf, sizeof buf, 5000); if (n &lt;= 0) { close... } if (n != 160) {...}</code></p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 27-3 출력 예측 — 포트 번호 <span class="lv">난이도 ★★☆</span></p>
+<p>x86-64 리눅스에서 <code>sa.sin_port = 8080;</code>(htons 없음)으로 bind했습니다. 실제로 몇 번 포트에서 대기합니까? 8080 = 0x1F90입니다.</p>
+<details><summary>정답과 해설 보기</summary>
+<p><code>sin_port</code>는 네트워크 바이트 순서(빅 엔디안)로 해석됩니다. 리틀 엔디안 메모리에 0x1F90을 저장하면 바이트 순서가 90 1F이고, 이를 빅 엔디안으로 읽으면 0x901F = 36895입니다. 서버는 36895번 포트에서 대기하므로 8080으로 접속하는 클라이언트는 연결 거부를 받습니다. <code>htons(8080)</code>을 써야 합니다. 같은 실수를 클라이언트도 하면 양쪽이 36895에서 만나 "우연히" 동작해, 다른 시스템과 연동할 때야 발견되기도 합니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 27-4 빈칸 채우기 — writen <span class="lv">난이도 ★☆☆</span></p>
+<p>다음 writen의 빈칸을 채우세요.</p>
+<figure class="code"><figcaption>q27-4.c</figcaption><pre><code class="language-c">ssize_t writen(int fd, const void *buf, size_t n)
+{
+    const char *p = buf;
+    size_t left = n;
+    while (left &gt; 0) {
+        ssize_t w = write(fd, p, left);
+        if (w &lt; 0) {
+            if (____(1)____) continue;
+            return -1;
+        }
+        p += ____(2)____;
+        left -= ____(3)____;
+    }
+    return (ssize_t)n;
+}</code></pre></figure>
+<details><summary>정답과 해설 보기</summary>
+<p>(1) <code>errno == EINTR</code> (2) <code>w</code> (3) <code>(size_t)w</code>. 쓴 만큼 포인터를 전진시키고 남은 양을 줄입니다. SIGPIPE를 무시해 두었다면 상대가 닫은 소켓에 쓸 때 -1과 <code>EPIPE</code>가 반환되어 오류로 빠져나옵니다. 무시하지 않았다면 프로세스가 SIGPIPE로 죽습니다(26장).</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 27-5 코드 작성 — 바이너리 길이 헤더 <span class="lv">난이도 ★★☆</span></p>
+<p>어떤 기관은 길이 헤더를 4바이트 빅 엔디안 부호 없는 정수(자기 제외)로 보냅니다. 최대 본문 길이는 8192입니다. 이 규격의 <code>int recv_msg_bin(int fd, unsigned char *buf, size_t bufsz, int ms)</code>을 작성하세요. 반환은 본문 길이입니다.</p>
+<details><summary>정답과 해설 보기</summary>
+<figure class="code good"><figcaption>정답 코드</figcaption><pre><code class="language-c">int recv_msg_bin(int fd, unsigned char *buf, size_t bufsz, int ms)
+{
+    unsigned char h[4];
+    uint32_t len;
+    ssize_t r = readn_timeout(fd, h, 4, ms);
+    if (r == 0) return 0;
+    if (r != 4) return -1;
+    len = get_u32be(h);                       /* 24장: 엔디안 독립 해석 */
+    if (len == 0 || len &gt; 8192 || len &gt; bufsz)
+        return -1;                            /* 상한 검사: 깨진 길이로 인한 폭주 방지 */
+    r = readn_timeout(fd, buf, len, ms);
+    return r == (ssize_t)len ? (int)len : -1;
+}</code></pre></figure>
+<p>ASCII 길이 헤더와 달리 바이너리 헤더는 어떤 4바이트든 "숫자"로 해석되므로 숫자 검증으로는 손상을 잡을 수 없습니다. 상한 검사가 유일한 방어선입니다. <code>ntohl</code>로 해도 되지만 정렬되지 않은 위치에서 <code>uint32_t</code>로 캐스팅해 읽지 않도록 주의합니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 27-6 fork 서버 분석 <span class="lv">난이도 ★★☆</span></p>
+<p>fork_server.c에서 SIGCHLD 핸들러에 <code>SA_RESTART</code>를 주지 않으면 어떤 현상이 생기고, 현재 코드는 그 경우에도 안전합니까?</p>
+<details><summary>정답과 해설 보기</summary>
+<p>자식이 종료될 때마다 SIGCHLD가 와서 부모의 블로킹 <code>accept</code>가 -1과 <code>EINTR</code>로 깨어납니다. 현재 코드는 <code>if (errno == EINTR) continue;</code>로 다시 루프를 돌아 accept를 재호출하므로 안전합니다. 다만 EINTR 처리가 없는 코드였다면 "accept: Interrupted system call" 오류를 찍고 연결 처리를 건너뛰는 버그가 됩니다. SA_RESTART는 편의를 주지만 모든 시스템 콜이 재시작되는 것은 아니므로(예: 타임아웃이 설정된 소켓 호출, select/poll은 플랫폼에 따라 재시작되지 않음) EINTR 처리를 항상 넣는 것이 원칙입니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 27-7 프레이밍 테스트 <span class="lv">난이도 ★★☆</span></p>
+<p>select_server의 프레이밍이 올바른지 검증하는 테스트 클라이언트를 설계하세요. 어떤 송신 패턴들을 포함해야 합니까?</p>
+<details><summary>정답과 해설 보기</summary>
+<p>① 정상: 전문 하나씩 송신 ② 1바이트씩 쪼개서 송신(각 write 사이에 짧은 sleep을 넣어 실제로 쪼개져 도착하게) ③ 여러 전문을 하나의 버퍼로 붙여 한 번에 송신 ④ 앞 전문의 꼬리 + 다음 전문의 머리를 한 번에 송신 ⑤ 길이 헤더만 보내고 본문 전에 연결 종료(서버가 깨끗이 닫는지) ⑥ 길이 헤더에 "ABCD", "0000", "9999"(상한) 같은 경계·오류 값 ⑦ 최대 길이 전문 ⑧ 수백 개 연결을 동시에 열고 각각 천천히 송신(한 연결이 다른 연결을 막지 않는지). 각 경우 서버가 정확히 같은 전문을 돌려주는지 바이트 단위로 비교합니다. 로컬 테스트에서는 쪼개짐이 잘 일어나지 않으므로 ②④처럼 의도적으로 만들어야 합니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 27-8 결과 불명 처리 설계 <span class="lv">난이도 ★★★</span></p>
+<p>대외계 송신 프로그램에서 거래 상태를 관리하는 상태 전이를 설계하세요. 상태는 최소한 "요청생성, 송신완료, 정상, 오류, 결과불명, 취소"를 포함해야 하며, 각 전이를 일으키는 사건을 쓰세요.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>요청생성 → (전문 송신 성공) → 송신완료. 요청생성 → (연결 실패, 송신 전 오류) → 오류(상대에 도달하지 않았음이 확실하므로 안전하게 실패 처리). 송신완료 → (정상 응답 0000) → 정상. 송신완료 → (오류 응답코드) → 오류. 송신완료 → (응답 타임아웃, 송신 후 연결 끊김) → 결과불명. 결과불명 → (결과 조회 응답: 처리됨) → 정상. 결과불명 → (결과 조회 응답: 미처리) → 오류. 결과불명 → (조회 불가, 업무 규정 시간 초과) → 취소 통지 송신 → 취소. 결과불명/취소 → (마감 후 대사 결과) → 최종 확정. 핵심은 "송신 전 실패"와 "송신 후 무응답"을 구분하는 것이며, 후자는 절대 바로 오류로 보내지 않습니다. 각 상태 변경은 DB에 먼저 기록한 뒤 다음 행동을 합니다(재기동 후 복구 가능).</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 27-9 서버 확장 — 0800 echo 전문 <span class="lv">난이도 ★★☆</span></p>
+<p>trfsvr에 망관리 echo 전문을 추가하세요. 요청은 공통 헤더 60바이트만 있는 전문(전문길이 "0056", 종별 "0800", 거래구분 "000000")이고, 서버는 종별을 "0810", 응답코드 "0000"으로 바꿔 그대로 돌려줍니다. <code>handle_client</code>를 어떻게 고쳐야 합니까?</p>
+<details><summary>정답과 해설 보기</summary>
+<p>현재 <code>handle_client</code>는 수신 길이가 <code>sizeof(TrfReqMsg)</code>가 아니면 연결을 끊습니다. 공통 헤더를 먼저 보고 분기하도록 바꿉니다.</p>
+<figure class="code good"><figcaption>수정 부분</figcaption><pre><code class="language-c">    if ((size_t)n &gt;= sizeof(MsgHeader) &amp;&amp; memcmp(buf + 4, "0800", 4) == 0) {
+        MsgHeader h;
+        if ((size_t)n != sizeof h) return -1;          /* echo는 헤더만 */
+        memcpy(&amp;h, buf, sizeof h);
+        memcpy(h.msg_type, "0810", 4);
+        memcpy(h.resp_code, "0000", 4);
+        return writen(fd, &amp;h, sizeof h) == (ssize_t)sizeof h ? 0 : -1;
+    }
+    if ((size_t)n != sizeof q) { printf("fd=%d bad length %d\n", fd, n); return -1; }</code></pre></figure>
+<p><code>buf + 4</code>가 전문종별코드 위치(offset 4)입니다. 실제 시스템은 전문종별·거래구분으로 처리 함수를 찾는 <strong>디스패치 테이블</strong>(함수 포인터 배열, 15장)을 두어 거래가 늘어나도 if 문이 길어지지 않게 합니다. echo 전문은 중복 캐시에 넣을 필요가 없습니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 27-10 종합 — 장애 시나리오 분석 <span class="lv">난이도 ★★★</span></p>
+<p>오전 10시 정각부터 대외기관으로 나가는 이체의 약 5%가 20초 타임아웃으로 결과 불명이 되었습니다. 상대 기관은 "우리 쪽 처리 시간은 평균 0.3초로 정상"이라고 합니다. 우리 쪽에서 확인해야 할 항목을 계층별(애플리케이션, 소켓/OS, 네트워크)로 쓰세요.</p>
+<details><summary>정답과 해설 보기</summary>
+<p><strong>애플리케이션</strong>: 송신 프로세스 수와 대기 큐 길이(26장 메시지 큐 used-bytes), 응답 매칭 로직(응답은 왔는데 일련번호 매칭 실패로 버리고 있지 않은지 — 로그의 "늦은 응답/미매칭 응답" 수), 10시에 시작한 배치·배포가 있었는지, 응답 수신 스레드/프로세스가 다른 작업에 막혀 있지 않은지.<br>
+<strong>소켓/OS</strong>: <code>ss -tn</code>의 Send-Q/Recv-Q(Recv-Q가 쌓여 있으면 우리가 늦게 읽는 것, Send-Q가 쌓이면 상대나 네트워크가 못 받는 것), 재전송 통계(<code>netstat -s</code>의 retransmit 증가), fd 수와 CLOSE_WAIT, CPU·메모리 포화.<br>
+<strong>네트워크</strong>: 특정 회선·경로에서만 발생하는지(이중화 회선 중 하나의 품질 저하), 방화벽 세션 테이블 포화, 패킷 손실률, 10시에 다른 대량 트래픽(파일 전송) 시작 여부.<br>
+그리고 결과 불명 건은 즉시 결과 조회로 확정하고, 대사로 최종 확인합니다. "상대는 정상"이라는 말은 상대 애플리케이션 처리 시간만 의미할 수 있으므로, 양쪽의 송수신 시각 로그를 일련번호로 맞대어 어느 구간에서 시간이 쓰였는지 찾는 것이 가장 확실한 방법입니다.</p>
+</details></div>
+
+</main>
+<aside class="rail" aria-label="이 페이지 목차"></aside>
+</div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-c.min.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>

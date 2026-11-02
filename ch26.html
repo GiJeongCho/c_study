@@ -1,0 +1,1226 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ch26 유닉스 시스템 프로그래밍 · C언어 금융 IT 마스터</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+KR:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-ch="ch26">
+<header class="topbar">
+  <button class="menu-btn" type="button" aria-expanded="false" aria-controls="sidebar">목차</button>
+  <a class="brand" href="index.html"><b>C</b>금융 IT 마스터</a>
+  <span class="where"></span>
+  <span class="progress"></span>
+</header>
+<div class="layout">
+<nav id="sidebar" class="sidebar" aria-label="과정 목차"></nav>
+<div class="page">
+<main class="content">
+
+<header class="ch-head">
+  <p class="eyebrow">PART 2 · 금융 IT 베테랑 트랙 · CHAPTER</p>
+  <div class="bignum">26</div>
+  <h1>유닉스 시스템 프로그래밍</h1>
+  <p class="lede">은행 계정계와 대외계의 C 프로그램은 대부분 유닉스(AIX, HP-UX, Solaris)나 리눅스 위에서 수십·수백 개의 프로세스로 돌아갑니다. 프로세스를 띄우고 거두는 법, 운영자가 보내는 종료 신호에 안전하게 반응하는 법, 프로세스끼리 데이터를 나누는 법을 모르면 미들웨어 로그 한 줄도 제대로 읽을 수 없습니다. 이 장은 금융 C 개발자의 "운영체제 문해력"을 길러 줍니다.</p>
+  <div class="goals"><p class="goals-title">이 장에서 배울 것</p><ul>
+    <li>프로세스의 메모리 구조, 시스템 콜과 라이브러리 함수의 차이, 파일 디스크립터를 이해합니다.</li>
+    <li><code>fork</code>/<code>exec</code>/<code>wait</code>로 프로세스를 만들고 거두며, 좀비·고아 프로세스가 생기는 이유와 해결법을 압니다.</li>
+    <li>서버 프로그램을 데몬으로 만드는 절차를 구현합니다.</li>
+    <li>SIGINT, SIGTERM, SIGCHLD, SIGPIPE, SIGSEGV의 의미와 <code>sigaction</code> 사용법, async-signal-safe 규칙을 익힙니다.</li>
+    <li>거래 처리 중 종료 신호를 받아도 데이터가 깨지지 않는 graceful shutdown 패턴을 구현합니다.</li>
+    <li>파이프, FIFO, 공유메모리, 세마포어, 메시지 큐의 원리와 차이를 비교합니다.</li>
+    <li>금융 미들웨어처럼 공유메모리에 환율·코드 테이블을 캐시하는 구조를 만들고, <code>ipcs</code>/<code>ipcrm</code>으로 운영합니다.</li>
+  </ul></div>
+</header>
+
+<h2 id="s26-1"><span class="num">26-1</span>프로세스와 시그널</h2>
+
+<h3 id="s26-1-1">프로세스란 무엇인가</h3>
+<p><strong>프로그램(program)</strong>은 디스크에 저장된 실행 파일이고, <strong>프로세스(process)</strong>는 그 프로그램이 메모리에 올라가 실행 중인 상태입니다. 요리책(프로그램) 한 권으로 여러 요리사(프로세스)가 동시에 각자 요리할 수 있는 것처럼, 하나의 실행 파일 <code>trfsvr</code>로 프로세스 50개를 띄울 수 있습니다. 각 프로세스는 운영체제가 부여한 고유 번호 <strong>PID</strong>와 자신을 만든 부모의 번호 <strong>PPID</strong>를 가지며, 무엇보다 <strong>자기만의 독립된 가상 주소 공간</strong>을 가집니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 300" width="700" role="img" aria-label="프로세스 가상 주소 공간 구조">
+  <text x="160" y="20" text-anchor="middle" class="bold">프로세스 A의 가상 주소 공간</text>
+  <rect class="hl2" x="60" y="30" width="200" height="40"/><text x="160" y="55" text-anchor="middle" class="small">커널 영역 (접근 불가)</text>
+  <rect class="hl" x="60" y="70" width="200" height="40"/><text x="160" y="95" text-anchor="middle" class="small">스택 ↓ (지역 변수)</text>
+  <rect class="box" x="60" y="110" width="200" height="40"/><text x="160" y="135" text-anchor="middle" class="small mute">빈 공간 / 공유 라이브러리·mmap</text>
+  <rect class="hl" x="60" y="150" width="200" height="36"/><text x="160" y="173" text-anchor="middle" class="small">힙 ↑ (malloc)</text>
+  <rect class="box" x="60" y="186" width="200" height="30"/><text x="160" y="206" text-anchor="middle" class="small">BSS (0 초기화 전역)</text>
+  <rect class="box" x="60" y="216" width="200" height="30"/><text x="160" y="236" text-anchor="middle" class="small">Data (초기화된 전역)</text>
+  <rect class="box" x="60" y="246" width="200" height="30"/><text x="160" y="266" text-anchor="middle" class="small">Text (기계어 코드)</text>
+  <text x="50" y="276" text-anchor="end" class="small mono">낮은 주소</text>
+  <text x="50" y="40" text-anchor="end" class="small mono">높은 주소</text>
+  <rect class="box" x="400" y="60" width="140" height="60" rx="6"/>
+  <text x="470" y="85" text-anchor="middle" class="small bold">프로세스 B</text>
+  <text x="470" y="104" text-anchor="middle" class="small mute">별도의 주소 공간</text>
+  <path class="arrow-m" d="M260 130 H 400"/>
+  <text x="330" y="122" text-anchor="middle" class="small warn-t">직접 접근 불가</text>
+  <rect class="hl2" x="400" y="180" width="280" height="80" rx="6"/>
+  <text x="540" y="204" text-anchor="middle" class="small bold">PCB (커널이 관리)</text>
+  <text x="540" y="224" text-anchor="middle" class="small mono">PID, PPID, 상태, 레지스터</text>
+  <text x="540" y="244" text-anchor="middle" class="small mono">fd 테이블, 시그널 처리 정보</text>
+</svg>
+<figcaption>그림 26-1 프로세스의 가상 주소 공간과 커널이 관리하는 프로세스 정보(PCB)</figcaption>
+</figure>
+
+<p>프로세스 A의 주소 0x7ffd1000과 프로세스 B의 주소 0x7ffd1000은 <strong>서로 다른 물리 메모리</strong>를 가리킵니다. 운영체제가 페이지 테이블로 가상 주소를 물리 주소에 따로 매핑하기 때문입니다. 그래서 한 프로세스가 포인터를 잘못 써서 메모리를 망가뜨려도 다른 프로세스는 안전합니다. 이 격리가 금융 미들웨어가 "프로세스 여러 개" 구조를 선호하는 큰 이유입니다. 한 거래 처리 프로세스가 SIGSEGV로 죽어도 나머지 49개는 계속 거래를 받습니다. 대신 프로세스끼리 데이터를 주고받으려면 운영체제가 제공하는 특별한 통로, 즉 26-2절의 IPC가 필요합니다.</p>
+
+<div class="box tip"><p class="box-title" data-tag="잠깐">여기서 잠깐 — 프로세스 상태 확인 명령</p>
+<pre><code class="language-bash">ps -ef | grep trfsvr          # 전체 프로세스 중 trfsvr (UID PID PPID ... CMD)
+ps -o pid,ppid,stat,rss,cmd -p 41233   # 특정 프로세스의 상태(STAT), 메모리(RSS)
+ls -l /proc/41233/fd          # (리눅스) 열린 파일 디스크립터 목록
+pstree -p 41000               # 부모-자식 트리</code></pre>
+<p>STAT 열의 <code>R</code>은 실행 중, <code>S</code>는 대기(sleep), <code>D</code>는 디스크 I/O 등으로 중단 불가 대기, <code>Z</code>는 좀비, <code>T</code>는 정지입니다. 장애 상황에서 프로세스가 <code>D</code> 상태로 오래 머물면 스토리지·NFS 문제를 의심합니다.</p>
+</div>
+
+<h3 id="s26-1-2">시스템 콜과 라이브러리 함수</h3>
+<p><strong>시스템 콜(system call)</strong>은 프로세스가 커널에게 일을 부탁하는 공식 창구입니다. 파일 읽기(<code>read</code>), 프로세스 생성(<code>fork</code>), 메모리 매핑(<code>mmap</code>), 소켓 통신(<code>send</code>)처럼 하드웨어나 다른 프로세스와 관련된 일은 사용자 프로그램이 직접 할 수 없고 반드시 시스템 콜을 거칩니다. <strong>라이브러리 함수</strong>는 C 표준 라이브러리(libc) 등에 있는 일반 함수로, 사용자 공간에서 실행되며 필요할 때 내부적으로 시스템 콜을 호출합니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 230" width="700" role="img" aria-label="라이브러리 함수와 시스템 콜 계층">
+  <rect class="box" x="20" y="20" width="660" height="40" rx="4"/>
+  <text x="350" y="45" text-anchor="middle">응용 프로그램: printf("%d", x); strlen(s); fopen(...); read(fd, ...);</text>
+  <rect class="hl" x="20" y="76" width="420" height="40" rx="4"/>
+  <text x="230" y="101" text-anchor="middle" class="small">libc: printf, fopen, malloc (버퍼링·서식 처리) / strlen (순수 계산)</text>
+  <rect class="hl2" x="460" y="76" width="220" height="40" rx="4"/>
+  <text x="570" y="101" text-anchor="middle" class="small">시스템 콜 래퍼: read, write, fork</text>
+  <path class="dash" d="M20 135 H 680"/>
+  <text x="690" y="132" text-anchor="end" class="small mute">사용자 모드 ↑ / 커널 모드 ↓ (트랩, 모드 전환)</text>
+  <rect class="box" x="20" y="150" width="660" height="40" rx="4"/>
+  <text x="350" y="175" text-anchor="middle">커널: 파일시스템, 프로세스 관리, 메모리 관리, 네트워크 스택</text>
+  <path class="arrow-m" d="M230 116 V 150"/><path class="arrow-m" d="M570 116 V 150"/>
+  <text x="350" y="215" text-anchor="middle" class="small mute">strlen은 커널에 내려가지 않는다. printf는 버퍼가 찰 때 write 시스템 콜을 호출한다.</text>
+</svg>
+<figcaption>그림 26-2 라이브러리 함수, 시스템 콜 래퍼, 커널의 계층</figcaption>
+</figure>
+
+<div class="tbl"><table>
+<thead><tr><th>구분</th><th>시스템 콜</th><th>라이브러리 함수</th></tr></thead>
+<tbody>
+<tr><td>실행 위치</td><td>커널 모드</td><td>사용자 모드</td></tr>
+<tr><td>예</td><td><code>open read write close fork execve waitpid kill mmap socket</code></td><td><code>fopen fread printf malloc strlen qsort</code></td></tr>
+<tr><td>매뉴얼 절</td><td><code>man 2 read</code></td><td><code>man 3 fread</code></td></tr>
+<tr><td>오류 보고</td><td>보통 -1 반환 + <code>errno</code> 설정</td><td>함수마다 다름 (NULL, EOF 등)</td></tr>
+<tr><td>비용</td><td>모드 전환 비용 큼</td><td>일반 함수 호출 수준</td></tr>
+<tr><td>표준</td><td>POSIX</td><td>ISO C 표준(일부는 POSIX)</td></tr>
+</tbody></table></div>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 — errno를 늦게 읽기</p>
+<p><code>errno</code>는 실패한 직후에만 의미가 있습니다. 시스템 콜이 실패한 뒤 로그 함수(<code>fprintf</code> 등)를 먼저 호출하면 그 함수가 내부에서 다른 시스템 콜을 하며 <code>errno</code>를 바꿀 수 있습니다. 실패 직후 <code>int e = errno;</code>로 저장하세요. 또 성공한 호출은 <code>errno</code>를 0으로 되돌리지 않으므로 "<code>errno != 0</code>이면 실패"라는 판단은 틀립니다. 반환값으로 실패를 판단하고 원인만 <code>errno</code>로 봅니다. 참고로 <code>errno</code>는 스레드마다 따로 있는(thread-local) 값입니다.</p>
+</div>
+
+<h3 id="s26-1-3">파일 디스크립터</h3>
+<p>유닉스 철학은 "모든 것은 파일이다"입니다. 일반 파일뿐 아니라 터미널, 파이프, 소켓, 장치도 모두 <code>open</code>(또는 <code>socket</code>, <code>pipe</code>)으로 열면 작은 정수 하나를 돌려받습니다. 이것이 <strong>파일 디스크립터(file descriptor, fd)</strong>입니다. fd는 프로세스별 <strong>fd 테이블의 인덱스</strong>이고, 테이블의 각 칸은 커널의 <strong>열린 파일 테이블</strong> 항목(현재 offset, 열기 모드)을 가리키며, 그 항목은 다시 실제 파일(inode)을 가리킵니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 250" width="700" role="img" aria-label="파일 디스크립터 테이블 구조">
+  <text x="80" y="20" text-anchor="middle" class="bold small">프로세스 fd 테이블</text>
+  <rect class="box" x="30" y="30" width="100" height="30"/><text x="80" y="50" text-anchor="middle" class="small mono">0 stdin</text>
+  <rect class="box" x="30" y="60" width="100" height="30"/><text x="80" y="80" text-anchor="middle" class="small mono">1 stdout</text>
+  <rect class="box" x="30" y="90" width="100" height="30"/><text x="80" y="110" text-anchor="middle" class="small mono">2 stderr</text>
+  <rect class="hl" x="30" y="120" width="100" height="30"/><text x="80" y="140" text-anchor="middle" class="small mono">3 trf.dat</text>
+  <rect class="hl2" x="30" y="150" width="100" height="30"/><text x="80" y="170" text-anchor="middle" class="small mono">4 socket</text>
+  <text x="330" y="20" text-anchor="middle" class="bold small">열린 파일 테이블 (커널)</text>
+  <rect class="hl" x="250" y="110" width="160" height="50" rx="4"/>
+  <text x="330" y="132" text-anchor="middle" class="small">offset=1830, O_RDONLY</text>
+  <text x="330" y="150" text-anchor="middle" class="small mute">참조 카운트</text>
+  <rect class="hl2" x="250" y="175" width="160" height="40" rx="4"/>
+  <text x="330" y="200" text-anchor="middle" class="small">TCP 연결 상태</text>
+  <path class="arrow" d="M130 135 H 250"/>
+  <path class="arrow" d="M130 165 C 190 165, 190 195, 250 195"/>
+  <text x="590" y="20" text-anchor="middle" class="bold small">inode / 장치</text>
+  <rect class="box" x="510" y="110" width="160" height="50" rx="4"/>
+  <text x="590" y="140" text-anchor="middle" class="small">/data/trf.dat 실제 파일</text>
+  <path class="arrow-m" d="M410 135 H 510"/>
+  <text x="350" y="240" text-anchor="middle" class="small mute">fork하면 자식은 fd 테이블을 복사받고 같은 "열린 파일 항목"을 공유한다 → offset도 공유</text>
+</svg>
+<figcaption>그림 26-3 fd 테이블 → 열린 파일 테이블 → inode의 3단 구조</figcaption>
+</figure>
+
+<ul>
+  <li>0, 1, 2는 관례적으로 표준 입력·출력·오류이며, <code>open</code>은 항상 <strong>비어 있는 가장 작은 번호</strong>를 돌려줍니다. 그래서 <code>close(1); open("log", ...)</code>을 하면 그 파일이 표준 출력이 됩니다. <code>dup2(fd, 1)</code>은 이를 명시적으로 하는 시스템 콜입니다.</li>
+  <li>프로세스가 열 수 있는 fd 수에는 한도가 있습니다(<code>ulimit -n</code>, 보통 1024 또는 운영 설정값). 소켓을 닫지 않는 <strong>fd 누수</strong>가 있으면 며칠 뒤 <code>EMFILE</code>(Too many open files)로 새 연결을 받지 못합니다. 메모리 누수만큼 흔한 금융 서버 장애 원인입니다.</li>
+  <li><code>exec</code>로 다른 프로그램을 실행해도 열린 fd는 기본적으로 유지됩니다. 의도치 않게 자식에게 소켓이 새지 않도록 <code>O_CLOEXEC</code> 플래그를 씁니다.</li>
+</ul>
+
+<div class="box fin"><p class="box-title" data-tag="금융 실무">은행 시스템에서는 — 사흘마다 멈추는 대외계 게이트웨이</p>
+<p>어느 대외계 게이트웨이가 정확히 사흘에 한 번꼴로 새 연결을 받지 못하고 멈췄습니다. 재기동하면 멀쩡해서 "주기적 재기동"으로 버티고 있었는데, 원인은 상대 기관 응답 타임아웃이 나는 경로에서 소켓을 <code>close</code>하지 않고 <code>return</code>하는 코드였습니다. 하루 수백 건의 타임아웃이 쌓여 fd 한도 1024에 도달하는 데 사흘이 걸렸던 것입니다. <code>ls /proc/PID/fd | wc -l</code>을 시간대별로 기록하는 모니터링을 추가하자 증가 추세가 바로 보였습니다. <strong>fd 수는 메모리 사용량처럼 반드시 모니터링해야 하는 지표</strong>입니다. 그리고 오류 경로마다 자원을 정리하는 <code>goto cleanup</code> 패턴(18장)을 습관화해야 합니다.</p>
+</div>
+
+<h3 id="s26-1-4">fork, exec, wait</h3>
+<p>유닉스에서 새 프로세스를 만드는 방법은 독특합니다. 새 프로그램을 바로 띄우는 대신 ① <code>fork()</code>로 <strong>자기 자신을 복제</strong>하고 ② 복제된 자식이 <code>exec()</code> 계열 함수로 <strong>다른 프로그램으로 변신</strong>하며 ③ 부모는 <code>wait()</code>로 자식이 끝나기를 기다려 종료 상태를 거둡니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 250" width="700" role="img" aria-label="fork exec wait 흐름">
+  <rect class="hl" x="20" y="100" width="120" height="44" rx="6"/>
+  <text x="80" y="127" text-anchor="middle" class="small bold">부모 (PID 100)</text>
+  <path class="arrow" d="M140 122 H 200"/>
+  <text x="170" y="112" text-anchor="middle" class="small mono">fork()</text>
+  <path class="arrow" d="M200 122 L 260 60"/>
+  <path class="arrow" d="M200 122 L 260 190"/>
+  <rect class="hl" x="260" y="38" width="170" height="44" rx="6"/>
+  <text x="345" y="58" text-anchor="middle" class="small bold">부모 계속</text>
+  <text x="345" y="74" text-anchor="middle" class="small mono">fork() == 101</text>
+  <rect class="hl2" x="260" y="168" width="170" height="44" rx="6"/>
+  <text x="345" y="188" text-anchor="middle" class="small bold">자식 (PID 101)</text>
+  <text x="345" y="204" text-anchor="middle" class="small mono">fork() == 0</text>
+  <path class="arrow" d="M430 190 H 480"/>
+  <text x="455" y="182" text-anchor="middle" class="small mono">exec</text>
+  <rect class="box" x="480" y="168" width="110" height="44" rx="6"/>
+  <text x="535" y="188" text-anchor="middle" class="small bold">batch_hdt</text>
+  <text x="535" y="204" text-anchor="middle" class="small mute">새 프로그램</text>
+  <path class="arrow-m" d="M590 190 H 640 V 82"/>
+  <text x="650" y="140" class="small mono">exit(2)</text>
+  <path class="arrow" d="M430 60 H 640"/>
+  <text x="535" y="52" text-anchor="middle" class="small mono">waitpid(101, &amp;st, 0) 대기</text>
+  <rect class="hl" x="600" y="86" width="90" height="36" rx="6"/>
+  <text x="645" y="109" text-anchor="middle" class="small">st → 2 수확</text>
+  <text x="350" y="240" text-anchor="middle" class="small mute">fork는 한 번 호출되어 두 번 반환한다: 부모에게는 자식 PID, 자식에게는 0</text>
+</svg>
+<figcaption>그림 26-4 fork → exec → exit → waitpid 흐름</figcaption>
+</figure>
+
+<figure class="code"><figcaption>run_job.c — 배치 작업 하나를 자식 프로세스로 실행하고 종료 코드 받기</figcaption>
+<pre><code class="language-c">#define _POSIX_C_SOURCE 200809L
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;string.h&gt;
+#include &lt;errno.h&gt;
+#include &lt;unistd.h&gt;
+#include &lt;sys/types.h&gt;
+#include &lt;sys/wait.h&gt;
+
+/* argv[0]을 실행하고 종료 코드를 반환. 시그널로 죽으면 128+시그널번호, 실행 실패 -1 */
+int run_job(char *const argv[])
+{
+    int st;
+    pid_t pid = fork();
+
+    if (pid &lt; 0) {                         /* fork 실패: 프로세스 수 한도, 메모리 부족 */
+        perror("fork");
+        return -1;
+    }
+    if (pid == 0) {                        /* ---- 자식 ---- */
+        execvp(argv[0], argv);             /* 성공하면 절대 반환하지 않는다 */
+        fprintf(stderr, "exec %s: %s\n", argv[0], strerror(errno));
+        _exit(127);                        /* exit가 아니라 _exit (아래 WHY) */
+    }
+    /* ---- 부모 ---- */
+    while (waitpid(pid, &amp;st, 0) &lt; 0) {    /* 시그널로 끊기면 다시 기다림 */
+        if (errno != EINTR) { perror("waitpid"); return -1; }
+    }
+    if (WIFEXITED(st))                     /* 정상 종료: exit/return 값 */
+        return WEXITSTATUS(st);
+    if (WIFSIGNALED(st))                   /* 시그널로 죽음 */
+        return 128 + WTERMSIG(st);
+    return -1;
+}
+
+int main(void)
+{
+    char *job1[] = { "./batch_hdt", "trf_20261028.dat", NULL };
+    char *job2[] = { "./recon", "ours.csv", "theirs.csv", NULL };
+    int rc;
+
+    rc = run_job(job1);
+    printf("job1 rc=%d\n", rc);
+    if (rc != 0) return 1;                 /* 선행 작업 실패 → 후속 실행 안 함 */
+    rc = run_job(job2);
+    printf("job2 rc=%d\n", rc);
+    return rc &gt; 1;                         /* 경고(1)까지는 정상 취급 */
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과 (25장의 예제 파일 기준, 자식 출력 포함)</figcaption>
+<pre>파일일자 20261028 기관 088
+Data 3건, 합계 42000원 (입금 17000 / 출금 25000)
+Trailer 검증 OK
+job1 rc=0
+MATCH      A001 10000
+DIFF       A002 ours=25000 theirs=20000
+ONLY_THEIR A003 5000
+ONLY_OURS  A004 7000
+MATCH      A005 3000
+match=2 diff=1 only_ours=1 only_theirs=1
+job2 rc=1</pre></figure>
+<p>이것이 25장에서 말한 "배치 스케줄러"의 가장 작은 형태입니다. 실제 스케줄러도 본질적으로 fork → exec → waitpid → 종료 코드 판정을 반복합니다.</p>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — fork는 프로세스 전체를 복사하는데 왜 빠를까? (Copy-on-Write)</p>
+<p>1GB 메모리를 쓰는 프로세스가 <code>fork</code>할 때마다 1GB를 복사한다면 엄청나게 느릴 것입니다. 현대 유닉스는 <strong>쓰기 시 복사(Copy-on-Write, CoW)</strong>를 씁니다. <code>fork</code> 직후 부모와 자식은 같은 물리 페이지를 공유하고, 그 페이지들을 읽기 전용으로 표시해 둡니다. 어느 한쪽이 페이지에 쓰려고 하면 페이지 폴트가 나고, 커널이 그 순간 그 페이지 하나(보통 4KB)만 복사해 줍니다. 곧바로 <code>exec</code>하는 자식은 거의 아무것도 복사하지 않고 새 프로그램으로 바뀌므로 비용이 매우 작습니다. 그래도 페이지 테이블 복사 비용은 있어서, 거대한 프로세스에서 자주 fork하는 것은 피합니다(<code>posix_spawn</code>이 대안).</p>
+</div>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — 자식에서 exec 실패 시 왜 exit가 아니라 _exit일까?</p>
+<p><code>fork</code>는 부모의 stdio 버퍼까지 그대로 복사합니다. 부모가 <code>printf("처리 시작 ")</code>처럼 아직 출력되지 않은 내용을 버퍼에 가지고 있었다면 자식도 같은 내용을 가집니다. 자식이 <code>exit()</code>를 호출하면 stdio 버퍼를 비우면서(flush) 그 내용을 <strong>한 번 더</strong> 출력하고, <code>atexit</code>로 등록된 부모의 정리 함수(임시 파일 삭제, DB 연결 종료 등)까지 실행해 버립니다. <code>_exit()</code>은 이런 사용자 공간 정리를 하지 않고 즉시 커널에 종료를 요청합니다. 그래서 fork된 자식이 exec 없이 끝날 때는 <code>_exit</code>을 씁니다.</p>
+<figure class="code bad"><figcaption>잘못된 예 — 출력이 두 번 나온다</figcaption>
+<pre><code class="language-c">printf("start ");          /* 개행이 없어 버퍼에 남아 있다 */
+fork();
+printf("end\n");           /* 부모와 자식 모두 "start end" 출력 */</code></pre></figure>
+<p>터미널에서도 <code>start end</code>가 두 줄 나옵니다. <code>"start\n"</code>으로 바꾸면 터미널(줄 버퍼)에서는 한 번만 나오지만, 출력을 파일로 리다이렉트하면(완전 버퍼) 다시 두 번 나옵니다. 그래서 fork 직전에는 <code>fflush(NULL)</code>로 모든 출력 버퍼를 비우는 것이 정석입니다.</p>
+</div>
+
+<div class="ex"><p class="ex-title">예제 26-1 <span class="lv">난이도 ★★☆</span></p>
+<p>다음 코드는 "hello"를 몇 번 출력합니까? 출력은 터미널이라고 가정합니다.</p>
+<figure class="code"><figcaption>q26-1.c</figcaption><pre><code class="language-c">int main(void)
+{
+    fork();
+    fork();
+    fork();
+    printf("hello\n");
+    return 0;
+}</code></pre></figure>
+<details><summary>정답과 해설 보기</summary>
+<p>8번입니다. fork 한 번마다 프로세스 수가 두 배가 됩니다: 1 → 2 → 4 → 8. 각 프로세스가 <code>printf</code>를 한 번씩 실행합니다. 개행이 있고 터미널이라 버퍼 중복 문제는 없습니다. 출력 순서는 스케줄링에 따라 매번 다를 수 있고, 부모가 자식을 기다리지 않으므로 셸 프롬프트가 중간에 섞여 나올 수도 있습니다. 실무에서 루프 안에 fork를 잘못 넣으면 이렇게 프로세스가 기하급수적으로 늘어나는 <strong>fork 폭탄</strong>이 되어 서버 전체가 멈춥니다. <code>ulimit -u</code>로 사용자별 프로세스 수 한도를 거는 이유입니다.</p>
+</details></div>
+
+<h3 id="s26-1-5">좀비 프로세스와 고아 프로세스</h3>
+<p>자식 프로세스가 종료되면 커널은 메모리 등 대부분의 자원을 회수하지만, <strong>PID와 종료 상태</strong>는 부모가 <code>wait</code>로 가져갈 때까지 남겨 둡니다. 부모가 거두기 전까지의 이 상태를 <strong>좀비(zombie)</strong>라고 부릅니다(<code>ps</code>에서 STAT <code>Z</code>, <code>&lt;defunct&gt;</code>). 반대로 부모가 먼저 죽으면 자식은 <strong>고아(orphan)</strong>가 되고, 커널은 이를 PID 1(init 또는 systemd, 또는 지정된 subreaper)에게 입양시킵니다. 입양한 부모가 대신 <code>wait</code>해 주므로 고아는 좀비로 남지 않습니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 220" width="700" role="img" aria-label="좀비와 고아 프로세스">
+  <text x="170" y="20" text-anchor="middle" class="bold">좀비: 자식이 먼저 종료, 부모가 wait 안 함</text>
+  <rect class="hl" x="40" y="40" width="110" height="40" rx="6"/><text x="95" y="65" text-anchor="middle" class="small">부모 (실행 중)</text>
+  <rect class="bad" x="190" y="40" width="130" height="40" rx="6"/><text x="255" y="65" text-anchor="middle" class="small">자식 Z &lt;defunct&gt;</text>
+  <path class="arrow-m" d="M150 60 H 190"/>
+  <text x="180" y="105" text-anchor="middle" class="small">PID·종료상태가 프로세스 테이블에 남음</text>
+  <text x="180" y="125" text-anchor="middle" class="small warn-t">수천 개 쌓이면 PID 고갈 → fork 실패</text>
+  <text x="530" y="20" text-anchor="middle" class="bold">고아: 부모가 먼저 종료</text>
+  <rect class="box" x="400" y="40" width="110" height="40" rx="6"/><text x="455" y="65" text-anchor="middle" class="small mute">부모 (종료)</text>
+  <rect class="hl2" x="560" y="40" width="120" height="40" rx="6"/><text x="620" y="65" text-anchor="middle" class="small">자식 (실행 중)</text>
+  <rect class="hl" x="560" y="140" width="120" height="40" rx="6"/><text x="620" y="165" text-anchor="middle" class="small">PID 1 (init)</text>
+  <path class="arrow" d="M620 140 V 80"/>
+  <text x="530" y="120" text-anchor="middle" class="small">새 부모로 입양 → 나중에 대신 wait</text>
+  <text x="350" y="210" text-anchor="middle" class="small mute">좀비는 kill로 죽일 수 없다(이미 죽어 있음). 부모가 거두거나 부모가 죽어야 사라진다.</text>
+</svg>
+<figcaption>그림 26-5 좀비 프로세스와 고아 프로세스</figcaption>
+</figure>
+
+<div class="box fix"><p class="box-title" data-tag="해결">이렇게 해결합니다 — 좀비를 남기지 않는 세 가지 방법</p>
+<ol class="steps">
+  <li><strong>동기적으로 기다리기</strong>: 위 <code>run_job</code>처럼 <code>waitpid(pid, &amp;st, 0)</code>로 끝날 때까지 기다립니다. 순차 배치에 적합합니다.</li>
+  <li><strong>SIGCHLD에서 거두기</strong>: 자식이 끝나면 부모에게 SIGCHLD가 옵니다. 핸들러 또는 메인 루프에서 <code>while (waitpid(-1, &amp;st, WNOHANG) &gt; 0)</code>로 끝난 자식을 <strong>모두</strong> 거둡니다. 27장의 fork 기반 동시 서버가 이 방식입니다.</li>
+  <li><strong>종료 상태가 필요 없으면</strong>: <code>SIGCHLD</code>의 처리를 <code>SIG_IGN</code>으로 설정하면(POSIX.1-2001 이상) 커널이 자식을 자동으로 거둡니다. 단, 이후 <code>wait</code>은 자식의 종료 상태를 받을 수 없습니다.</li>
+</ol>
+</div>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 — SIGCHLD 핸들러에서 wait 한 번만 호출</p>
+<p>유닉스 표준 시그널은 <strong>쌓이지 않습니다(not queued)</strong>. 자식 세 개가 거의 동시에 죽으면 SIGCHLD는 한 번만 전달될 수 있습니다. 핸들러에서 <code>wait(&amp;st)</code>를 한 번만 하면 나머지 둘은 좀비로 남습니다. 반드시 <code>WNOHANG</code>과 함께 반환값이 0 이하가 될 때까지 반복해야 합니다.</p>
+</div>
+
+<h3 id="s26-1-6">데몬화</h3>
+<p><strong>데몬(daemon)</strong>은 터미널과 무관하게 백그라운드에서 계속 실행되는 서버 프로세스입니다. 금융 미들웨어의 거래 처리 서버, 대외계 게이트웨이, 파일 전송 에이전트가 모두 데몬입니다. 운영자가 SSH로 접속해 서버를 띄우고 로그아웃해도 살아 있어야 하고, 터미널의 Ctrl+C나 연결 끊김(SIGHUP)의 영향을 받으면 안 됩니다.</p>
+
+<figure class="code"><figcaption>daemonize.c — 고전적인 데몬화 절차</figcaption>
+<pre><code class="language-c">#define _XOPEN_SOURCE 700
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;fcntl.h&gt;
+#include &lt;unistd.h&gt;
+#include &lt;signal.h&gt;
+#include &lt;sys/stat.h&gt;
+
+int daemonize(void)
+{
+    pid_t pid;
+    int fd;
+
+    fflush(NULL);                       /* fork 전에 출력 버퍼 비우기 */
+
+    /* 1. fork 후 부모 종료: 셸에 즉시 제어권 반환, 자식은 프로세스 그룹 리더가 아님 */
+    if ((pid = fork()) &lt; 0) return -1;
+    if (pid &gt; 0) _exit(0);
+
+    /* 2. 새 세션 생성: 제어 터미널과 분리 (그룹 리더가 아니어야 성공) */
+    if (setsid() &lt; 0) return -1;
+
+    /* 3. SIGHUP 무시 후 한 번 더 fork: 세션 리더가 아니게 되어 터미널을 다시 얻을 수 없음 */
+    signal(SIGHUP, SIG_IGN);
+    if ((pid = fork()) &lt; 0) return -1;
+    if (pid &gt; 0) _exit(0);
+
+    /* 4. 파일 생성 마스크 초기화: 상속받은 umask에 좌우되지 않게 */
+    umask(027);
+
+    /* 5. 작업 디렉터리를 루트로: 마운트 해제를 막지 않게 */
+    if (chdir("/") &lt; 0) return -1;
+
+    /* 6. 표준 입출력을 /dev/null로: 터미널에 쓰다가 SIGTTOU/EIO 나는 것 방지 */
+    fd = open("/dev/null", O_RDWR);
+    if (fd &lt; 0) return -1;
+    dup2(fd, STDIN_FILENO);
+    dup2(fd, STDOUT_FILENO);
+    dup2(fd, STDERR_FILENO);
+    if (fd &gt; STDERR_FILENO) close(fd);
+    return 0;                           /* 이제부터는 로그 파일로만 기록 */
+}</code></pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — 왜 fork를 두 번 할까?</p>
+<p>유닉스에서 <strong>세션 리더</strong>가 터미널 장치를 열면 그 터미널이 제어 터미널로 붙을 수 있습니다(System V 계열 동작). 첫 번째 fork + <code>setsid()</code>로 터미널과 분리된 새 세션의 리더가 되었지만, 리더인 채로 남아 있으면 나중에 실수로 터미널 장치를 열 때 다시 제어 터미널을 얻을 위험이 있습니다. 두 번째 fork로 만든 손자 프로세스는 세션 리더가 아니므로 그럴 가능성이 원천적으로 사라집니다. 또 첫 번째 fork는 <code>setsid</code>가 "프로세스 그룹 리더는 호출할 수 없다"는 제약을 피하기 위해 필요합니다(셸이 실행한 프로세스는 보통 그룹 리더입니다).</p>
+</div>
+
+<div class="box tip"><p class="box-title" data-tag="잠깐">여기서 잠깐 — systemd 시대의 데몬</p>
+<p>최근 리눅스에서는 systemd 같은 서비스 관리자가 프로세스를 띄우고 감시합니다. 이 경우 프로그램이 스스로 데몬화하지 <strong>않고</strong> 포그라운드로 실행되는 것이 권장됩니다(<code>Type=simple</code>). 서비스 관리자가 터미널 분리, 로그 수집, 비정상 종료 시 재시작을 대신 해 줍니다. 하지만 AIX·HP-UX 같은 상용 유닉스와 오래된 금융 미들웨어 환경에서는 여전히 자체 데몬화 코드가 표준이므로 둘 다 알아야 합니다. 어느 쪽이든 PID 파일(<code>/var/run/trfsvr.pid</code>)을 25장의 락 파일 방식으로 관리하면 중복 기동을 막을 수 있습니다.</p>
+</div>
+
+<h3 id="s26-1-7">시그널의 종류</h3>
+<p><strong>시그널(signal)</strong>은 프로세스에게 비동기적으로 전달되는 짧은 알림입니다. "전화벨"에 비유할 수 있습니다. 벨이 울리면 하던 일을 잠시 멈추고 응대(핸들러 실행)하거나, 무시하거나, 기본 동작(대부분 종료)을 하게 됩니다. 운영자의 <code>kill</code> 명령, 키보드 Ctrl+C, 자식 프로세스 종료, 잘못된 메모리 접근 같은 사건이 시그널로 전달됩니다.</p>
+
+<div class="tbl"><table>
+<thead><tr><th>시그널</th><th>번호(리눅스)</th><th>발생 원인</th><th>기본 동작</th><th>금융 서버에서의 처리</th></tr></thead>
+<tbody>
+<tr><td>SIGHUP</td><td>1</td><td>터미널 연결 끊김</td><td>종료</td><td>데몬은 관례상 "설정 다시 읽기"로 사용</td></tr>
+<tr><td>SIGINT</td><td>2</td><td>Ctrl+C</td><td>종료</td><td>SIGTERM과 같이 정상 종료 처리</td></tr>
+<tr><td>SIGKILL</td><td>9</td><td><code>kill -9</code></td><td>종료</td><td><strong>잡을 수도 무시할 수도 없음</strong>. 최후 수단</td></tr>
+<tr><td>SIGSEGV</td><td>11</td><td>잘못된 메모리 접근</td><td>종료 + 코어</td><td>잡아서 계속 실행하면 안 됨. 코어 덤프로 분석</td></tr>
+<tr><td>SIGPIPE</td><td>13</td><td>닫힌 소켓/파이프에 write</td><td>종료</td><td><strong>반드시 무시(SIG_IGN)</strong>하고 write의 EPIPE로 처리</td></tr>
+<tr><td>SIGALRM</td><td>14</td><td><code>alarm()</code> 타이머 만료</td><td>종료</td><td>타임아웃 구현에 사용(27장은 select/poll 권장)</td></tr>
+<tr><td>SIGTERM</td><td>15</td><td><code>kill</code> 기본값, 서비스 중지</td><td>종료</td><td><strong>graceful shutdown</strong>의 시작 신호</td></tr>
+<tr><td>SIGUSR1/2</td><td>10/12</td><td>사용자 정의</td><td>종료</td><td>로그 레벨 변경, 통계 덤프 등</td></tr>
+<tr><td>SIGCHLD</td><td>17</td><td>자식 종료·정지</td><td>무시</td><td>자식 거두기</td></tr>
+</tbody></table></div>
+<p>시그널 번호는 플랫폼마다 다를 수 있으므로(예: SIGUSR1이 AIX에서는 30) 코드에서는 항상 이름(매크로)을 씁니다. 1, 2, 9, 15 정도는 대부분의 유닉스에서 같습니다.</p>
+
+<div class="box fin"><p class="box-title" data-tag="금융 실무">은행 시스템에서는 — 상대 기관이 연결을 끊자 서버가 사라졌다</p>
+<p>대외계 송신 프로세스가 아무 로그도 남기지 않고 사라지는 일이 가끔 있었습니다. 코어 덤프도 없고, 종료 로그도 없었습니다. 원인은 SIGPIPE였습니다. 상대 기관이 점검을 위해 TCP 연결을 끊은 직후에 우리 쪽이 그 소켓에 <code>write</code>하자 커널이 SIGPIPE를 보냈고, 기본 동작인 "조용한 종료"로 프로세스가 사라진 것입니다. 해결은 프로그램 시작 시 <code>signal(SIGPIPE, SIG_IGN)</code>(또는 <code>send</code>에 <code>MSG_NOSIGNAL</code>)을 설정하여, <code>write</code>가 -1과 <code>errno == EPIPE</code>를 반환하도록 하고 이를 "상대 연결 끊김"으로 로그를 남긴 뒤 재연결하는 것이었습니다. <strong>소켓 서버의 첫 줄은 SIGPIPE 무시</strong>라고 외워 두세요.</p>
+</div>
+
+<h3 id="s26-1-8">sigaction과 async-signal-safe</h3>
+<p>시그널 처리 방식을 등록하는 함수로 <code>signal()</code>과 <code>sigaction()</code>이 있습니다. <code>signal()</code>은 표준 C에 있지만 핸들러 실행 후 기본 동작으로 되돌아가는지, 끊긴 시스템 콜을 재시작하는지 등이 <strong>플랫폼마다 다릅니다</strong>(System V와 BSD의 역사적 차이). 실무에서는 동작이 명확히 정의된 POSIX <code>sigaction()</code>을 씁니다.</p>
+
+<figure class="code"><figcaption>sig_install.c — sigaction으로 핸들러 등록</figcaption>
+<pre><code class="language-c">#define _POSIX_C_SOURCE 200809L
+#include &lt;signal.h&gt;
+#include &lt;string.h&gt;
+
+volatile sig_atomic_t g_stop = 0;            /* 종료 요청 플래그 (다른 파일에서 extern) */
+static volatile sig_atomic_t g_reload = 0;   /* 설정 재적재 요청 플래그 */
+
+static void on_term(int sig)
+{
+    (void)sig;
+    g_stop = 1;                /* 핸들러는 플래그만 세운다. 그 이상은 하지 않는다 */
+}
+
+static void on_hup(int sig)
+{
+    (void)sig;
+    g_reload = 1;
+}
+
+int install_signals(void)
+{
+    struct sigaction sa;
+
+    memset(&amp;sa, 0, sizeof sa);
+    sa.sa_handler = on_term;
+    sigemptyset(&amp;sa.sa_mask);
+    sigaddset(&amp;sa.sa_mask, SIGHUP);   /* 핸들러 실행 중에는 SIGHUP도 잠시 막음 */
+    sa.sa_flags = 0;                  /* SA_RESTART 없음: 블로킹 호출이 EINTR로 깨어나게 */
+    if (sigaction(SIGTERM, &amp;sa, NULL) &lt; 0) return -1;
+    if (sigaction(SIGINT,  &amp;sa, NULL) &lt; 0) return -1;
+
+    sa.sa_handler = on_hup;
+    sigemptyset(&amp;sa.sa_mask);
+    sa.sa_flags = SA_RESTART;         /* 재적재 요청은 진행 중인 호출을 끊을 필요 없음 */
+    if (sigaction(SIGHUP, &amp;sa, NULL) &lt; 0) return -1;
+
+    sa.sa_handler = SIG_IGN;          /* SIGPIPE 무시 */
+    sigemptyset(&amp;sa.sa_mask);
+    sa.sa_flags = 0;
+    if (sigaction(SIGPIPE, &amp;sa, NULL) &lt; 0) return -1;
+    return 0;
+}</code></pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — 시그널 핸들러에서 printf, malloc을 쓰면 왜 안 될까?</p>
+<p>시그널은 프로그램의 <strong>아무 지점에서나</strong> 끼어듭니다. 메인 코드가 <code>malloc</code> 안에서 힙의 내부 연결 리스트를 고치는 도중, 즉 자료구조가 반쯤 바뀐 순간에 시그널이 오면 핸들러가 실행됩니다. 핸들러가 다시 <code>malloc</code>을 부르면 깨진 자료구조를 건드려 힙이 오염되거나, <code>malloc</code>이 내부 락을 잡고 있던 상태라면 같은 락을 다시 잡으려다 <strong>영원히 멈추는 교착 상태(deadlock)</strong>에 빠집니다. <code>printf</code>도 내부 버퍼와 락, 때로는 <code>malloc</code>을 쓰므로 마찬가지입니다. 이런 함수를 <strong>재진입 불가(non-reentrant)</strong>라고 합니다.</p>
+<p>POSIX는 핸들러에서 안전하게 호출할 수 있는 <strong>async-signal-safe 함수</strong> 목록을 정해 두었습니다. <code>write</code>, <code>read</code>, <code>_exit</code>, <code>waitpid</code>, <code>kill</code>, <code>sigaction</code>, <code>open</code>, <code>close</code> 등 대부분 시스템 콜 래퍼이고, <code>printf</code>, <code>malloc</code>, <code>free</code>, <code>exit</code>, <code>syslog</code>, 대부분의 pthread 함수는 들어 있지 않습니다. 그리고 핸들러가 공유하는 변수는 <code>volatile sig_atomic_t</code>여야 합니다. <code>volatile</code>은 컴파일러가 루프에서 값을 레지스터에 캐시해 변경을 놓치는 최적화를 막고, <code>sig_atomic_t</code>는 읽기·쓰기가 시그널에 의해 중간에 쪼개지지 않는 정수 타입을 보장합니다.</p>
+</div>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 — 핸들러에서 errno를 바꾸기</p>
+<p>핸들러에서 <code>waitpid</code>나 <code>write</code>를 호출하면 그 함수가 <code>errno</code>를 바꿀 수 있습니다. 메인 코드가 <code>read</code> 실패 직후 <code>errno</code>를 확인하려는 바로 그 순간에 핸들러가 끼어들어 값을 바꾸면 엉뚱한 오류 원인이 보고됩니다. 핸들러 시작에서 <code>int saved = errno;</code>, 끝에서 <code>errno = saved;</code>로 복원하는 것이 안전한 관용구입니다.</p>
+<figure class="code good"><figcaption>SIGCHLD 핸들러의 모범 형태</figcaption>
+<pre><code class="language-c">static void on_chld(int sig)
+{
+    int saved = errno;                 /* errno 보존 */
+    (void)sig;
+    while (waitpid(-1, NULL, WNOHANG) &gt; 0)
+        ;                              /* 끝난 자식을 모두 거둔다 (시그널은 쌓이지 않음) */
+    errno = saved;
+}</code></pre></figure>
+</div>
+
+<h3 id="s26-1-9">graceful shutdown — 거래 도중에 죽지 않기</h3>
+<p>운영자가 야간 배포를 위해 거래 서버에 <code>kill</code>(SIGTERM)을 보냈다고 합시다. 그 순간 서버는 이체 한 건을 처리하는 중이었습니다. 출금은 DB에 반영했고 대외기관으로 입금 요청 전문을 보내려던 참입니다. 여기서 프로세스가 즉시 죽으면 어떻게 될까요? "돈은 빠졌는데 상대에게는 가지 않은" 상태가 남고, 이를 정리하는 데 사람 손이 필요합니다. <strong>graceful shutdown</strong>은 종료 요청을 받으면 <strong>새 일은 받지 않고, 하던 일은 마무리하고, 자원을 정리한 뒤</strong> 종료하는 것입니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 230" width="700" role="img" aria-label="graceful shutdown 흐름">
+  <rect class="hl" x="10" y="80" width="130" height="50" rx="6"/>
+  <text x="75" y="102" text-anchor="middle" class="small bold">메인 루프</text>
+  <text x="75" y="120" text-anchor="middle" class="small mono">while (!g_stop)</text>
+  <rect class="hl2" x="10" y="10" width="130" height="40" rx="6"/>
+  <text x="75" y="35" text-anchor="middle" class="small">SIGTERM 도착</text>
+  <path class="arrow" d="M75 50 V 80"/>
+  <text x="150" y="65" class="small mono">g_stop = 1</text>
+  <path class="arrow" d="M140 105 H 190"/>
+  <rect class="box" x="190" y="80" width="150" height="50" rx="6"/>
+  <text x="265" y="102" text-anchor="middle" class="small bold">현재 거래 완료</text>
+  <text x="265" y="120" text-anchor="middle" class="small">응답 송신·커밋</text>
+  <path class="arrow" d="M340 105 H 380"/>
+  <rect class="box" x="380" y="80" width="150" height="50" rx="6"/>
+  <text x="455" y="102" text-anchor="middle" class="small bold">신규 접수 중단</text>
+  <text x="455" y="120" text-anchor="middle" class="small">리슨 소켓 close</text>
+  <path class="arrow" d="M530 105 H 560"/>
+  <rect class="hl" x="560" y="80" width="130" height="50" rx="6"/>
+  <text x="625" y="102" text-anchor="middle" class="small bold">정리 후 exit(0)</text>
+  <text x="625" y="120" text-anchor="middle" class="small">체크포인트·로그</text>
+  <rect class="bad" x="190" y="165" width="340" height="40" rx="6"/>
+  <text x="360" y="190" text-anchor="middle" class="small">제한 시간(예: 30초) 초과 시 운영 스크립트가 SIGKILL</text>
+</svg>
+<figcaption>그림 26-6 SIGTERM을 받은 서버의 graceful shutdown 단계</figcaption>
+</figure>
+
+<figure class="code"><figcaption>graceful.c — 종료 플래그 패턴을 쓰는 거래 처리 루프</figcaption>
+<pre><code class="language-c">#define _POSIX_C_SOURCE 200809L
+#include &lt;stdio.h&gt;
+#include &lt;errno.h&gt;
+#include &lt;signal.h&gt;
+#include &lt;unistd.h&gt;
+
+extern volatile sig_atomic_t g_stop;     /* sig_install.c */
+int  install_signals(void);
+int  wait_request(char *buf, size_t sz); /* 요청 대기: 블로킹, 시그널 시 -1/EINTR */
+int  process_tx(const char *req);        /* 거래 1건 처리: 커밋까지 한 덩어리 */
+void flush_stats(void);
+void close_resources(void);
+
+int main(void)
+{
+    char req[4096];
+    long long done = 0;
+
+    if (install_signals() &lt; 0) { perror("sigaction"); return 3; }
+
+    while (!g_stop) {                    /* 1. 루프 조건에서 플래그 확인 */
+        int n = wait_request(req, sizeof req);
+        if (n &lt; 0) {
+            if (errno == EINTR) continue;    /* 2. 시그널로 깨어남 → 루프 조건 재검사 */
+            perror("wait_request");
+            break;
+        }
+        /* 3. 거래 처리 도중에는 플래그를 보지 않는다: 시작한 거래는 끝까지 */
+        if (process_tx(req) == 0)
+            done++;
+    }
+    /* 4. 정리 단계: 여기서는 printf 등 무엇이든 써도 안전하다(핸들러 밖) */
+    fprintf(stderr, "shutdown: processed=%lld\n", done);
+    flush_stats();
+    close_resources();
+    return 0;
+}</code></pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — 왜 SA_RESTART를 끄고 EINTR을 받도록 했을까?</p>
+<p>서버가 <code>accept</code>나 <code>read</code>에서 요청을 기다리며 블로킹되어 있을 때 SIGTERM이 오면, 핸들러가 플래그를 세운 뒤 원래 호출로 돌아갑니다. 이때 <code>SA_RESTART</code>가 켜져 있으면 커널이 그 블로킹 호출을 <strong>자동으로 다시 시작</strong>하므로, 다음 요청이 올 때까지(심야라면 몇 시간) 루프 조건 <code>!g_stop</code>을 다시 볼 기회가 없습니다. <code>SA_RESTART</code>를 끄면 블로킹 호출이 -1과 <code>EINTR</code>로 즉시 반환되어 루프 조건을 확인하고 종료 단계로 넘어갑니다. 반대로 SIGHUP 같은 "알림성" 시그널은 진행 중인 I/O를 끊을 이유가 없으니 <code>SA_RESTART</code>를 켜 둡니다. (단, 시그널이 "플래그 확인 직후, 블로킹 호출 진입 직전"에 오면 놓칠 수 있는 경쟁 조건이 있습니다. 이를 완벽히 막으려면 <code>pselect</code>/<code>ppoll</code>이나 self-pipe 기법을 씁니다 — 27장에서 다룹니다.)</p>
+</div>
+
+<div class="box tip"><p class="box-title" data-tag="잠깐">여기서 잠깐 — SIGSEGV는 잡아서 살리면 안 됩니다</p>
+<p>SIGSEGV(세그멘테이션 오류)는 NULL 역참조, 해제된 메모리 접근, 배열 범위 초과, 스택 오버플로 등 <strong>이미 메모리가 오염되었다는 신호</strong>입니다. 핸들러에서 잡아 "계속 실행"하면 오염된 상태로 거래를 처리하게 되어 훨씬 큰 사고가 납니다. 올바른 대응은 ① 코어 덤프를 남기고 죽게 두기(<code>ulimit -c unlimited</code>, 코어 저장 경로 설정) ② 감시 프로세스가 자동 재기동 ③ <code>gdb ./trfsvr core.41233</code> → <code>bt</code>로 원인 분석입니다. 핸들러를 둔다면 async-signal-safe한 <code>write</code>로 최소한의 로그를 남기고 기본 동작으로 되돌린 뒤 <code>raise(sig)</code>로 다시 죽는 정도까지만 합니다.</p>
+</div>
+
+<div class="ex"><p class="ex-title">예제 26-2 <span class="lv">난이도 ★★☆</span></p>
+<p>다음 코드의 종료 플래그가 동작하지 않을 수 있는 이유는 무엇이며, 어떻게 고쳐야 합니까? (gcc -O2)</p>
+<figure class="code bad"><figcaption>q26-2.c</figcaption><pre><code class="language-c">int stop = 0;
+void h(int s) { stop = 1; printf("got signal %d\n", s); }
+int main(void) {
+    signal(SIGTERM, h);
+    while (!stop) { /* 계산만 하는 루프, 함수 호출 없음 */ }
+    return 0;
+}</code></pre></figure>
+<details><summary>정답과 해설 보기</summary>
+<p>① <code>stop</code>이 <code>volatile</code>이 아니므로, 루프 안에서 <code>stop</code>을 바꾸는 코드가 없다고 판단한 컴파일러가 <code>stop</code>을 한 번만 읽고 무한 루프(<code>while(1)</code>)로 최적화할 수 있습니다. 핸들러가 메모리의 값을 바꿔도 루프는 보지 못합니다. ② 타입이 <code>int</code>라 시그널에 대해 원자적 접근이 보장되지 않습니다(실제 대부분 플랫폼에서는 원자적이지만 표준 보장은 <code>sig_atomic_t</code>뿐). ③ 핸들러에서 <code>printf</code>를 호출하는 것은 async-signal-safe가 아닙니다. ④ <code>signal()</code> 대신 <code>sigaction()</code>을 쓰는 것이 이식성이 좋습니다. 고친 코드: <code>static volatile sig_atomic_t stop = 0;</code>, 핸들러는 <code>stop = 1;</code>만, 메시지는 루프 종료 후 메인에서 출력.</p>
+</details></div>
+
+<h2 id="s26-2"><span class="num">26-2</span>IPC: 파이프, 공유메모리, 세마포어</h2>
+<p>26-1절에서 본 것처럼 프로세스는 서로의 메모리를 볼 수 없습니다. 그런데 금융 미들웨어에서는 프로세스끼리 협력할 일이 많습니다. 채널 처리 프로세스가 받은 요청을 거래 처리 프로세스에 넘겨야 하고, 50개의 거래 프로세스가 같은 환율 테이블을 참조해야 하며, 전문일련번호 카운터를 겹치지 않게 나눠 써야 합니다. 운영체제가 제공하는 이런 통로를 <strong>IPC(Inter-Process Communication, 프로세스 간 통신)</strong>라고 합니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 240" width="700" role="img" aria-label="IPC 방식의 개념도">
+  <rect class="hl" x="20" y="30" width="140" height="60" rx="6"/>
+  <text x="90" y="56" text-anchor="middle" class="small bold">프로세스 A</text>
+  <text x="90" y="74" text-anchor="middle" class="small mute">자기 주소 공간</text>
+  <rect class="hl" x="540" y="30" width="140" height="60" rx="6"/>
+  <text x="610" y="56" text-anchor="middle" class="small bold">프로세스 B</text>
+  <text x="610" y="74" text-anchor="middle" class="small mute">자기 주소 공간</text>
+  <rect class="box" x="230" y="20" width="240" height="190" rx="8"/>
+  <text x="350" y="40" text-anchor="middle" class="small bold">커널</text>
+  <rect class="hl2" x="250" y="52" width="200" height="30" rx="4"/><text x="350" y="72" text-anchor="middle" class="small">파이프 / FIFO (바이트 스트림)</text>
+  <rect class="hl2" x="250" y="90" width="200" height="30" rx="4"/><text x="350" y="110" text-anchor="middle" class="small">메시지 큐 (메시지 단위)</text>
+  <rect class="hl2" x="250" y="128" width="200" height="30" rx="4"/><text x="350" y="148" text-anchor="middle" class="small">세마포어 (동기화 카운터)</text>
+  <rect class="hl" x="250" y="166" width="200" height="30" rx="4"/><text x="350" y="186" text-anchor="middle" class="small">공유메모리 (같은 물리 페이지)</text>
+  <path class="arrow-m" d="M160 60 H 250"/><path class="arrow-m" d="M450 60 H 540"/>
+  <path class="arrow" d="M90 90 V 181 H 250"/><path class="arrow" d="M610 90 V 181 H 450"/>
+  <text x="350" y="232" text-anchor="middle" class="small mute">복사형(파이프·큐): 커널을 거쳐 데이터 복사 / 공유형(공유메모리): 복사 없이 직접 접근, 동기화는 직접</text>
+</svg>
+<figcaption>그림 26-7 커널이 제공하는 IPC 통로들</figcaption>
+</figure>
+
+<h3 id="s26-2-1">파이프</h3>
+<p><strong>파이프(pipe)</strong>는 가장 오래되고 단순한 IPC입니다. 셸의 <code>ls | grep dat</code>에서 <code>|</code>가 바로 파이프입니다. <code>pipe(fd)</code>를 호출하면 커널 안에 작은 버퍼(리눅스 기본 64KB)가 생기고 두 개의 fd를 받습니다. <code>fd[1]</code>에 쓴 바이트는 <code>fd[0]</code>에서 읽힙니다. 이름이 없으므로 <strong>fork로 fd를 물려받은 친족 프로세스끼리만</strong> 쓸 수 있고, 한 방향으로만 흐릅니다.</p>
+
+<figure class="code"><figcaption>pipe_demo.c — 부모가 거래를 보내고 자식이 합계를 내는 파이프</figcaption>
+<pre><code class="language-c">#define _POSIX_C_SOURCE 200809L
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;unistd.h&gt;
+#include &lt;sys/wait.h&gt;
+
+int main(void)
+{
+    int fd[2], st;
+    pid_t pid;
+
+    if (pipe(fd) &lt; 0) { perror("pipe"); return 1; }
+    fflush(NULL);
+    if ((pid = fork()) &lt; 0) { perror("fork"); return 1; }
+
+    if (pid == 0) {                        /* 자식: 읽는 쪽 */
+        char line[128];
+        long long amt, sum = 0;
+        int cnt = 0;
+        FILE *in;
+        close(fd[1]);                      /* 쓰기 끝 닫기 (중요!) */
+        in = fdopen(fd[0], "r");
+        while (fgets(line, sizeof line, in))
+            if (sscanf(line, "%*s %lld", &amp;amt) == 1) { sum += amt; cnt++; }
+        printf("child: %d건, 합계 %lld\n", cnt, sum);
+        fflush(stdout);
+        _exit(0);
+    }
+
+    /* 부모: 쓰는 쪽 */
+    close(fd[0]);                          /* 읽기 끝 닫기 */
+    FILE *out = fdopen(fd[1], "w");
+    fprintf(out, "TX0001 10000\nTX0002 25000\nTX0003 7000\n");
+    fclose(out);                           /* 쓰기 끝을 닫아야 자식이 EOF를 받는다 */
+    waitpid(pid, &amp;st, 0);
+    printf("parent: child exit=%d\n", WEXITSTATUS(st));
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption>
+<pre>child: 3건, 합계 42000
+parent: child exit=0</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — 안 쓰는 쪽 끝을 왜 꼭 닫아야 할까?</p>
+<p>파이프에서 읽는 쪽이 EOF(0 반환)를 받는 조건은 "<strong>그 파이프의 쓰기 끝을 가리키는 fd가 시스템 전체에 하나도 남지 않았을 때</strong>"입니다. fork 직후에는 부모와 자식이 모두 쓰기 끝 <code>fd[1]</code>을 가지고 있습니다. 자식이 자기 <code>fd[1]</code>을 닫지 않으면, 부모가 쓰기를 끝내고 닫아도 자식 자신이 쓰기 끝을 쥐고 있으므로 자식의 <code>fgets</code>는 EOF를 받지 못하고 <strong>영원히 기다립니다</strong>. 부모는 <code>waitpid</code>로 자식을 기다리니 둘 다 멈춥니다. 반대로 읽는 쪽이 모두 닫힌 파이프에 쓰면 SIGPIPE가 발생합니다. 파이프는 버퍼가 가득 차면 쓰기가, 비어 있으면 읽기가 블록되므로 흐름 제어가 자동으로 됩니다.</p>
+</div>
+
+<div class="box tip"><p class="box-title" data-tag="잠깐">여기서 잠깐 — popen</p>
+<p><code>FILE *p = popen("sort -k2 trf.txt", "r");</code>는 pipe + fork + exec(셸)을 한 번에 해 주는 라이브러리 함수입니다. 외부 명령의 출력을 읽거나 입력을 줄 때 편리하지만, 명령 문자열이 셸에 그대로 전달되므로 <strong>외부 입력(파일명 등)을 섞으면 명령 주입(command injection) 취약점</strong>이 됩니다. 반드시 <code>pclose</code>로 닫아 자식을 거두고 종료 코드를 확인하세요.</p>
+</div>
+
+<h3 id="s26-2-2">FIFO (이름 있는 파이프)</h3>
+<p><strong>FIFO</strong>는 파일시스템에 이름을 가진 파이프입니다. <code>mkfifo /app/run/req.fifo</code>로 만들면 친족 관계가 없는 프로세스도 그 경로를 <code>open</code>해 통신할 수 있습니다. 데이터는 디스크에 저장되지 않고 커널 버퍼만 거칩니다.</p>
+<pre><code class="language-bash">mkfifo -m 600 /app/run/cmd.fifo
+ls -l /app/run/cmd.fifo        # prw------- : 첫 글자 p 가 FIFO
+echo "RELOAD RATE" &gt; /app/run/cmd.fifo     # 운영자가 데몬에 명령 전달</code></pre>
+<figure class="code"><figcaption>fifo_reader.c — FIFO로 운영 명령 받기(발췌)</figcaption>
+<pre><code class="language-c">int fd = open("/app/run/cmd.fifo", O_RDONLY);   /* 쓰는 쪽이 열 때까지 블록 */
+char cmd[128];
+ssize_t n;
+while ((n = read(fd, cmd, sizeof cmd - 1)) &gt; 0) {
+    cmd[n] = '\0';
+    if (strncmp(cmd, "RELOAD RATE", 11) == 0)
+        reload_rate_table();
+}
+/* n == 0: 모든 쓰는 쪽이 닫음. 계속 받으려면 다시 open 하거나 O_RDWR로 열어 둔다 */</code></pre></figure>
+<p>FIFO의 특징은 ① <code>open</code>이 상대방이 반대쪽을 열 때까지 블록된다는 점(<code>O_NONBLOCK</code>으로 바꿀 수 있음) ② <code>PIPE_BUF</code>(리눅스 4096바이트) 이하의 쓰기는 원자적이라 여러 쓰는 프로세스의 메시지가 섞이지 않는다는 점입니다. 운영 명령 채널이나 간단한 로그 수집에 쓰입니다.</p>
+
+<h3 id="s26-2-3">공유메모리 — System V와 POSIX</h3>
+<p><strong>공유메모리(shared memory)</strong>는 같은 물리 메모리 페이지를 여러 프로세스의 주소 공간에 매핑하는 방식입니다. 한 번 연결하면 일반 포인터로 읽고 쓰므로 커널을 거치는 복사가 없고, IPC 중 <strong>가장 빠릅니다</strong>. 대신 커널이 아무것도 조율해 주지 않으므로 여러 프로세스가 동시에 쓰는 문제(경쟁 조건)는 세마포어 등으로 프로그래머가 직접 막아야 합니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 220" width="700" role="img" aria-label="공유메모리 매핑">
+  <rect class="box" x="20" y="20" width="160" height="180" rx="6"/>
+  <text x="100" y="40" text-anchor="middle" class="small bold">프로세스 A 가상 공간</text>
+  <rect class="hl" x="40" y="100" width="120" height="40"/><text x="100" y="125" text-anchor="middle" class="small mono">0x7f3a...000</text>
+  <rect class="box" x="520" y="20" width="160" height="180" rx="6"/>
+  <text x="600" y="40" text-anchor="middle" class="small bold">프로세스 B 가상 공간</text>
+  <rect class="hl" x="540" y="70" width="120" height="40"/><text x="600" y="95" text-anchor="middle" class="small mono">0x7f91...000</text>
+  <rect class="hl2" x="270" y="90" width="160" height="60" rx="6"/>
+  <text x="350" y="115" text-anchor="middle" class="small bold">물리 메모리 페이지</text>
+  <text x="350" y="135" text-anchor="middle" class="small">환율 테이블</text>
+  <path class="arrow" d="M160 120 H 270"/>
+  <path class="arrow" d="M540 90 C 480 90, 480 120, 430 120"/>
+  <text x="350" y="185" text-anchor="middle" class="small mute">가상 주소는 프로세스마다 다를 수 있다 → 공유메모리 안에 포인터를 저장하면 안 된다(오프셋 사용)</text>
+</svg>
+<figcaption>그림 26-8 서로 다른 가상 주소가 같은 물리 페이지를 가리키는 공유메모리</figcaption>
+</figure>
+
+<figure class="code"><figcaption>shm_sysv.c — System V 공유메모리</figcaption>
+<pre><code class="language-c">#define _XOPEN_SOURCE 700
+#include &lt;stdio.h&gt;
+#include &lt;sys/ipc.h&gt;
+#include &lt;sys/shm.h&gt;
+
+#define SHM_KEYFILE "/app/trf/etc/ipc.key"   /* 존재하는 파일이어야 함 */
+
+void *attach_shm(size_t size, int create)
+{
+    key_t key = ftok(SHM_KEYFILE, 'R');      /* 파일 inode + 프로젝트 ID로 키 생성 */
+    int id;
+    void *p;
+
+    if (key == (key_t)-1) { perror("ftok"); return NULL; }
+    id = shmget(key, size, create ? (IPC_CREAT | 0640) : 0);
+    if (id &lt; 0) { perror("shmget"); return NULL; }
+    p = shmat(id, NULL, 0);                  /* 주소는 커널이 고르게 한다 */
+    if (p == (void *)-1) { perror("shmat"); return NULL; }
+    return p;                                /* 다 쓰면 shmdt(p) */
+}
+
+/* 세그먼트 삭제: 모든 프로세스가 detach한 뒤 실제로 사라진다 */
+int remove_shm(size_t size)
+{
+    key_t key = ftok(SHM_KEYFILE, 'R');
+    int id = shmget(key, size, 0);
+    return id &lt; 0 ? -1 : shmctl(id, IPC_RMID, NULL);
+}</code></pre></figure>
+
+<figure class="code"><figcaption>shm_posix.c — POSIX 공유메모리 (shm_open + mmap)</figcaption>
+<pre><code class="language-c">#define _POSIX_C_SOURCE 200809L
+#include &lt;stdio.h&gt;
+#include &lt;fcntl.h&gt;
+#include &lt;unistd.h&gt;
+#include &lt;sys/mman.h&gt;
+
+void *open_posix_shm(const char *name, size_t size, int create)
+{
+    int fd = shm_open(name, create ? (O_CREAT | O_RDWR) : O_RDWR, 0640);
+    void *p;
+    if (fd &lt; 0) { perror("shm_open"); return NULL; }
+    if (create &amp;&amp; ftruncate(fd, (off_t)size) &lt; 0) {   /* 크기 지정 */
+        perror("ftruncate"); close(fd); return NULL;
+    }
+    p = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    close(fd);                         /* 매핑 후 fd는 닫아도 매핑은 유지 */
+    return p == MAP_FAILED ? NULL : p; /* 해제: munmap(p, size), 삭제: shm_unlink(name) */
+}
+/* 리눅스에서는 /dev/shm/rate_tbl 로 보인다. 오래된 glibc는 -lrt 링크 필요 */</code></pre></figure>
+
+<div class="tbl"><table>
+<thead><tr><th>항목</th><th>System V (shmget)</th><th>POSIX (shm_open)</th></tr></thead>
+<tbody>
+<tr><td>식별</td><td>정수 key (<code>ftok</code>)</td><td>이름 문자열 <code>"/rate_tbl"</code></td></tr>
+<tr><td>조회·삭제 도구</td><td><code>ipcs -m</code>, <code>ipcrm -m</code></td><td><code>ls /dev/shm</code>, <code>rm</code> (리눅스)</td></tr>
+<tr><td>API 모양</td><td>전용 API</td><td>파일처럼 fd → <code>mmap</code></td></tr>
+<tr><td>지원 범위</td><td>모든 상용 유닉스, 오래된 미들웨어 표준</td><td>현대 시스템, 새 코드 권장</td></tr>
+<tr><td>수명</td><td>둘 다 명시적으로 삭제하거나 재부팅할 때까지 남음 (프로세스가 죽어도 남는다)</td><td></td></tr>
+</tbody></table></div>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 — 공유메모리에 포인터 저장</p>
+<p>공유메모리 안에 연결 리스트를 만들며 <code>node-&gt;next = &amp;other_node;</code>처럼 포인터를 저장하면, 그 주소는 <strong>저장한 프로세스의 가상 주소</strong>입니다. 다른 프로세스는 같은 세그먼트를 다른 주소에 붙였을 수 있으므로 그 포인터는 엉뚱한 곳을 가리킵니다. 공유메모리 안에서는 포인터 대신 <strong>세그먼트 시작으로부터의 오프셋(인덱스)</strong>을 저장합니다. 또 구조체 레이아웃이 바뀌면(필드 추가) 이미 떠 있는 프로세스와 새 프로세스가 같은 메모리를 다르게 해석하므로, 맨 앞에 <strong>매직 넘버와 레이아웃 버전</strong>을 두고 붙을 때 검사합니다.</p>
+</div>
+
+<h3 id="s26-2-4">세마포어</h3>
+<p><strong>세마포어(semaphore)</strong>는 다익스트라가 고안한 동기화 도구로, 0 이상의 정수 카운터와 두 연산으로 이루어집니다. <strong>P(wait)</strong>: 값이 0보다 크면 1 감소하고 진행, 0이면 양수가 될 때까지 대기. <strong>V(post)</strong>: 값을 1 증가하고 대기 중인 프로세스 하나를 깨움. 초기값이 1이면 한 번에 한 프로세스만 들어가는 <strong>이진 세마포어(상호 배제)</strong>, N이면 N개까지 동시에 허용하는 <strong>카운팅 세마포어</strong>(예: 대외기관 동시 연결 수 제한)가 됩니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 210" width="700" role="img" aria-label="세마포어로 임계 구역 보호">
+  <rect class="hl" x="20" y="30" width="120" height="40" rx="6"/><text x="80" y="55" text-anchor="middle" class="small">프로세스 1</text>
+  <rect class="hl" x="20" y="90" width="120" height="40" rx="6"/><text x="80" y="115" text-anchor="middle" class="small">프로세스 2</text>
+  <rect class="hl" x="20" y="150" width="120" height="40" rx="6"/><text x="80" y="175" text-anchor="middle" class="small">프로세스 3</text>
+  <rect class="hl2" x="230" y="80" width="110" height="60" rx="6"/>
+  <text x="285" y="105" text-anchor="middle" class="small bold">세마포어</text>
+  <text x="285" y="125" text-anchor="middle" class="small mono">value = 0</text>
+  <path class="arrow" d="M140 50 L 230 95"/>
+  <path class="arrow-m" d="M140 110 H 230"/>
+  <path class="arrow-m" d="M140 170 L 230 125"/>
+  <text x="185" y="150" text-anchor="middle" class="small mute">P() 대기</text>
+  <path class="arrow" d="M340 110 H 420"/>
+  <rect class="box" x="420" y="70" width="260" height="80" rx="6"/>
+  <text x="550" y="96" text-anchor="middle" class="small bold">임계 구역 (공유메모리)</text>
+  <text x="550" y="116" text-anchor="middle" class="small mono">seq = shm-&gt;next_seq++;</text>
+  <text x="550" y="136" text-anchor="middle" class="small">한 번에 한 프로세스만</text>
+  <text x="550" y="185" text-anchor="middle" class="small mute">나올 때 V() → 대기 중인 하나가 들어감</text>
+</svg>
+<figcaption>그림 26-9 이진 세마포어로 전문일련번호 채번 구역 보호</figcaption>
+</figure>
+
+<figure class="code"><figcaption>seqno_sem.c — System V 세마포어 + 공유메모리로 전문일련번호 채번</figcaption>
+<pre><code class="language-c">#define _XOPEN_SOURCE 700
+#include &lt;stdio.h&gt;
+#include &lt;errno.h&gt;
+#include &lt;sys/ipc.h&gt;
+#include &lt;sys/sem.h&gt;
+
+/* 리눅스에서는 semun을 직접 정의해야 한다 (POSIX가 그렇게 요구) */
+union semun { int val; struct semid_ds *buf; unsigned short *array; };
+
+typedef struct {
+    unsigned  magic;           /* 0x53455131 'SEQ1' */
+    long long next_seq;        /* 다음에 줄 번호 */
+} SeqShm;
+
+static int g_semid;
+
+int sem_setup(key_t key, int create)
+{
+    g_semid = semget(key, 1, create ? (IPC_CREAT | IPC_EXCL | 0640) : 0);
+    if (g_semid &lt; 0) return -1;
+    if (create) {                          /* 생성한 쪽만 초기값 1로 설정 */
+        union semun arg;
+        arg.val = 1;
+        if (semctl(g_semid, 0, SETVAL, arg) &lt; 0) return -1;
+    }
+    return 0;
+}
+
+static int sem_p(void)
+{
+    struct sembuf op = { 0, -1, SEM_UNDO };   /* SEM_UNDO: 죽으면 커널이 되돌림 */
+    while (semop(g_semid, &amp;op, 1) &lt; 0)
+        if (errno != EINTR) return -1;        /* 시그널로 끊기면 재시도 */
+    return 0;
+}
+
+static int sem_v(void)
+{
+    struct sembuf op = { 0, +1, SEM_UNDO };
+    return semop(g_semid, &amp;op, 1);
+}
+
+/* 여러 프로세스가 동시에 불러도 겹치지 않는 번호를 준다 */
+long long next_seqno(SeqShm *s)
+{
+    long long v;
+    if (sem_p() &lt; 0) return -1;
+    v = s-&gt;next_seq++;                         /* 임계 구역: 최대한 짧게 */
+    sem_v();
+    return v;
+}</code></pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — SEM_UNDO는 왜 금융권에서 중요할까?</p>
+<p>세마포어를 잡은(P) 프로세스가 V를 하기 전에 SIGSEGV나 <code>kill -9</code>로 죽었다고 합시다. 세마포어 값은 0으로 남고, 나머지 49개 프로세스는 <strong>영원히 P에서 대기</strong>합니다. 거래 서버 전체가 멈추는 것입니다. <code>SEM_UNDO</code> 플래그를 주면 커널이 프로세스별로 "이 프로세스가 세마포어를 얼마나 바꿨는지"를 기록해 두었다가, 프로세스가 어떤 이유로든 종료하면 그 변경을 자동으로 되돌립니다. POSIX 이름 있는 세마포어(<code>sem_open</code>)에는 이 기능이 없어서, 오래된 금융 미들웨어가 System V 세마포어를 고집하는 이유 중 하나가 됩니다. 단, 되돌려지는 것은 세마포어 값뿐이고 <strong>공유메모리 내용은 반쯤 수정된 채로 남을 수 있다</strong>는 점을 기억하세요. 그래서 임계 구역은 짧게, 그리고 "중간 상태"가 남아도 복구 가능한 방식으로 설계합니다.</p>
+</div>
+
+<figure class="code"><figcaption>sem_posix.c — POSIX 이름 있는 세마포어(참고)</figcaption>
+<pre><code class="language-c">#include &lt;semaphore.h&gt;
+#include &lt;fcntl.h&gt;
+
+sem_t *s = sem_open("/trf_seq_lock", O_CREAT, 0640, 1);  /* 초기값 1 */
+if (s == SEM_FAILED) { perror("sem_open"); }
+sem_wait(s);            /* P */
+/* ... 임계 구역 ... */
+sem_post(s);            /* V */
+sem_close(s);           /* 삭제는 sem_unlink("/trf_seq_lock") */</code></pre></figure>
+
+<div class="box tip"><p class="box-title" data-tag="잠깐">여기서 잠깐 — 세마포어와 뮤텍스의 차이</p>
+<p>뮤텍스(mutex)는 "잠근 사람만 열 수 있는" 소유권 개념이 있는 잠금이고, 주로 한 프로세스 안의 스레드 사이에서 씁니다(28장). 세마포어는 소유권이 없는 카운터라 A가 P하고 B가 V하는 것도 가능하며, 그래서 "작업이 끝났음을 알리는 신호" 용도로도 쓸 수 있습니다. 이진 세마포어는 뮤텍스처럼 쓸 수 있지만, 소유권 검사가 없어 실수로 다른 프로세스가 V를 하면 상호 배제가 깨집니다. 면접 단골 질문입니다.</p>
+</div>
+
+<h3 id="s26-2-5">메시지 큐</h3>
+<p><strong>메시지 큐(message queue)</strong>는 커널이 관리하는 우편함입니다. 파이프와 달리 <strong>메시지 경계가 보존</strong>되어 한 번 보낸 덩어리가 그대로 한 번에 읽히고, 각 메시지에 <strong>타입(mtype)</strong>을 붙여 받는 쪽이 원하는 타입만 골라 꺼낼 수 있습니다. 채널 프로세스가 거래 요청을 큐에 넣고, 여러 거래 처리 프로세스가 꺼내 가는 작업 분배 구조에 잘 맞습니다.</p>
+
+<figure class="code"><figcaption>msgq.c — System V 메시지 큐로 전문 전달</figcaption>
+<pre><code class="language-c">#define _XOPEN_SOURCE 700
+#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+#include &lt;errno.h&gt;
+#include &lt;sys/ipc.h&gt;
+#include &lt;sys/msg.h&gt;
+
+#define MT_TRF   1L      /* 이체 요청 */
+#define MT_INQ   2L      /* 조회 요청 */
+
+typedef struct {
+    long mtype;          /* 반드시 첫 멤버, 양수 */
+    char body[160];      /* 24장의 160바이트 전문 */
+} TxMsg;
+
+int send_tx(int qid, long type, const char *msg160)
+{
+    TxMsg m;
+    m.mtype = type;
+    memcpy(m.body, msg160, sizeof m.body);
+    /* 크기 인자는 mtype을 제외한 본문 크기. IPC_NOWAIT: 큐가 가득 차면 즉시 실패 */
+    if (msgsnd(qid, &amp;m, sizeof m.body, IPC_NOWAIT) &lt; 0) {
+        if (errno == EAGAIN) fprintf(stderr, "큐 가득 참: 처리 지연 경보\n");
+        return -1;
+    }
+    return 0;
+}
+
+int recv_tx(int qid, long want_type, char *out160)
+{
+    TxMsg m;
+    /* want_type: 0 = 아무거나, 양수 = 그 타입만, 음수 = |값| 이하 중 가장 작은 타입 */
+    ssize_t n = msgrcv(qid, &amp;m, sizeof m.body, want_type, 0);
+    if (n &lt; 0) return -1;            /* EINTR이면 종료 플래그 확인 후 재시도 */
+    memcpy(out160, m.body, (size_t)n);
+    return (int)n;
+}</code></pre></figure>
+
+<div class="box fin"><p class="box-title" data-tag="금융 실무">은행 시스템에서는 — 가득 찬 메시지 큐</p>
+<p>메시지 큐의 총 용량은 커널 파라미터(리눅스 <code>kernel.msgmnb</code>, 기본 16KB 내외)로 제한됩니다. 월말 오전처럼 거래가 몰리는 시간에 거래 처리 프로세스 몇 개가 DB 락 대기로 느려지자, 채널 프로세스가 넣는 요청이 쌓여 큐가 가득 찼습니다. 채널 프로세스는 <code>IPC_NOWAIT</code> 없이 <code>msgsnd</code>를 호출하고 있었기 때문에 그대로 블록되었고, 채널 쪽 소켓까지 막히면서 모바일 앱 전체가 "응답 없음" 상태가 되었습니다. 해결은 ① 큐 크기 상향과 모니터링(<code>ipcs -q</code>의 used-bytes, messages) ② <code>IPC_NOWAIT</code>로 즉시 실패시켜 고객에게 "잠시 후 다시 시도" 응답을 주는 <strong>부하 차단(load shedding)</strong> ③ 처리 프로세스 수 자동 조절이었습니다. 블로킹 IPC 호출에는 언제나 "상대가 영원히 안 받으면?"이라는 질문을 던져야 합니다.</p>
+</div>
+
+<h3 id="s26-2-6">IPC 방식 비교</h3>
+<div class="tbl"><table>
+<thead><tr><th>방식</th><th>데이터 형태</th><th>관계</th><th>속도</th><th>동기화</th><th>대표 용도</th></tr></thead>
+<tbody>
+<tr><td>파이프</td><td>바이트 스트림, 단방향</td><td>친족(fork)만</td><td>보통(복사 2회)</td><td>커널이 자동(블록)</td><td>부모-자식 데이터 전달, 셸 파이프라인</td></tr>
+<tr><td>FIFO</td><td>바이트 스트림</td><td>무관(경로)</td><td>보통</td><td>자동</td><td>운영 명령 채널, 간단한 수집</td></tr>
+<tr><td>메시지 큐</td><td>메시지 단위 + 타입</td><td>무관(key/이름)</td><td>보통</td><td>자동</td><td>요청 분배, 작업 큐</td></tr>
+<tr><td>공유메모리</td><td>임의 구조체</td><td>무관</td><td><strong>가장 빠름</strong>(복사 없음)</td><td><strong>직접 해야 함</strong></td><td>코드·환율 테이블 캐시, 대용량 공유 상태</td></tr>
+<tr><td>세마포어</td><td>카운터(데이터 없음)</td><td>무관</td><td>빠름</td><td>그 자체가 동기화</td><td>공유메모리 보호, 동시 수 제한</td></tr>
+<tr><td>유닉스 도메인 소켓</td><td>스트림/데이터그램</td><td>무관(경로)</td><td>보통</td><td>자동</td><td>로컬 서버-클라이언트, fd 전달</td></tr>
+<tr><td>TCP 소켓</td><td>바이트 스트림</td><td>다른 서버까지</td><td>느림(네트워크)</td><td>자동</td><td>대외기관 연동(27장)</td></tr>
+</tbody></table></div>
+
+<h3 id="s26-2-7">금융 미들웨어의 공유메모리 캐시 — 환율·코드 테이블</h3>
+<p>거래 처리 프로세스 수십 개가 매 거래마다 은행코드 테이블, 지점 테이블, 수수료 테이블, 환율을 조회합니다. 이것을 매번 DB에서 읽으면 DB 부하가 폭증하고 응답 시간이 늘어납니다. 프로세스마다 메모리에 따로 캐시하면 50개 프로세스가 같은 데이터를 50벌 들고 있게 되고, 환율이 바뀌었을 때 50개를 모두 갱신해야 합니다. 그래서 금융 미들웨어는 전통적으로 <strong>공유메모리에 참조 테이블을 한 벌 올려 두고 모든 프로세스가 읽는</strong> 구조를 씁니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 250" width="700" role="img" aria-label="공유메모리 환율 캐시 구조">
+  <rect class="box" x="20" y="90" width="110" height="56" rx="6"/>
+  <text x="75" y="114" text-anchor="middle" class="small bold">DB / 고시 파일</text>
+  <text x="75" y="132" text-anchor="middle" class="small mute">환율 원천</text>
+  <path class="arrow" d="M130 118 H 170"/>
+  <rect class="hl2" x="170" y="90" width="120" height="56" rx="6"/>
+  <text x="230" y="114" text-anchor="middle" class="small bold">로더 (writer 1개)</text>
+  <text x="230" y="132" text-anchor="middle" class="small mono">rate_publish()</text>
+  <path class="arrow" d="M290 118 H 330"/>
+  <rect class="hl" x="330" y="50" width="170" height="140" rx="8"/>
+  <text x="415" y="74" text-anchor="middle" class="small bold">공유메모리 RateShm</text>
+  <text x="415" y="96" text-anchor="middle" class="small mono">magic, layout_ver</text>
+  <text x="415" y="116" text-anchor="middle" class="small mono">seq (짝수=안정, 홀수=갱신중)</text>
+  <text x="415" y="136" text-anchor="middle" class="small mono">count, as_of</text>
+  <text x="415" y="156" text-anchor="middle" class="small mono">Rate r[64]</text>
+  <rect class="box" x="560" y="40" width="120" height="36" rx="6"/><text x="620" y="63" text-anchor="middle" class="small">거래 프로세스 1</text>
+  <rect class="box" x="560" y="100" width="120" height="36" rx="6"/><text x="620" y="123" text-anchor="middle" class="small">거래 프로세스 2</text>
+  <rect class="box" x="560" y="160" width="120" height="36" rx="6"/><text x="620" y="183" text-anchor="middle" class="small">... 50개</text>
+  <path class="arrow-m" d="M560 58 H 500"/><path class="arrow-m" d="M560 118 H 500"/><path class="arrow-m" d="M560 178 H 500"/>
+  <text x="530" y="222" text-anchor="middle" class="small mute">읽기 전용 접근, 락 없이 seq 검사로 일관된 스냅숏 확보</text>
+</svg>
+<figcaption>그림 26-10 로더 1개가 쓰고 거래 프로세스 다수가 읽는 공유메모리 환율 캐시</figcaption>
+</figure>
+
+<p>읽기가 압도적으로 많고(초당 수만 회) 쓰기는 드문(수 분에 한 번) 패턴입니다. 읽을 때마다 세마포어를 잡으면 수십 개 프로세스가 세마포어에서 줄을 서게 됩니다. 여기서는 리눅스 커널에서도 쓰는 <strong>시퀀스 락(seqlock)</strong> 기법을 씁니다. 쓰는 쪽은 시작할 때 seq를 홀수로, 끝날 때 짝수로 올립니다. 읽는 쪽은 락 없이 읽되, 읽기 전후의 seq가 같은 짝수일 때만 결과를 믿고, 아니면 다시 읽습니다.</p>
+
+<figure class="code"><figcaption>rate_shm.c — seqlock 기반 공유메모리 환율 테이블</figcaption>
+<pre><code class="language-c">#define _POSIX_C_SOURCE 200809L
+#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+#include &lt;stdint.h&gt;
+#include &lt;stdatomic.h&gt;
+#include &lt;fcntl.h&gt;
+#include &lt;unistd.h&gt;
+#include &lt;sys/mman.h&gt;
+
+#define RATE_MAGIC   0x52415445u   /* 'RATE' */
+#define RATE_LAYOUT  1u
+#define MAX_RATES    64
+
+typedef struct {
+    char      cur[4];        /* "USD", "JPY" (+ '\0') */
+    long long base;          /* 매매기준율 ×100 (1385.25 → 138525) */
+    long long buy, sell;     /* 현찰 살 때/팔 때 ×100 */
+} Rate;
+
+typedef struct {
+    uint32_t     magic;
+    uint32_t     layout_ver;
+    atomic_uint  seq;        /* 짝수: 안정, 홀수: 갱신 중 */
+    int          count;
+    char         as_of[15];  /* YYYYMMDDHHMMSS */
+    Rate         r[MAX_RATES];
+} RateShm;
+
+/* ---- writer: 로더 프로세스 하나만 호출 (단일 writer는 락 파일 등으로 보장) ---- */
+void rate_publish(RateShm *s, const Rate *src, int n, const char *as_of)
+{
+    unsigned q = atomic_load_explicit(&amp;s-&gt;seq, memory_order_relaxed);
+    atomic_store_explicit(&amp;s-&gt;seq, q + 1, memory_order_relaxed);   /* 홀수: 갱신 시작 */
+    atomic_thread_fence(memory_order_release);   /* seq 변경이 데이터 쓰기보다 먼저 보이게 */
+
+    memcpy(s-&gt;r, src, (size_t)n * sizeof *src);
+    s-&gt;count = n;
+    memcpy(s-&gt;as_of, as_of, sizeof s-&gt;as_of);
+
+    atomic_store_explicit(&amp;s-&gt;seq, q + 2, memory_order_release);   /* 짝수: 갱신 완료 */
+}
+
+/* ---- reader: 거래 프로세스들. 0 찾음, -1 없음, -2 계속 갱신 중 ---- */
+int rate_lookup(RateShm *s, const char *cur, Rate *out)
+{
+    int tries, i, found;
+    for (tries = 0; tries &lt; 1000; tries++) {
+        unsigned s1 = atomic_load_explicit(&amp;s-&gt;seq, memory_order_acquire);
+        int n;
+        if (s1 &amp; 1u)
+            continue;                         /* 갱신 중: 잠시 후 다시 */
+        n = s-&gt;count;
+        found = 0;
+        if (n &gt;= 0 &amp;&amp; n &lt;= MAX_RATES) {
+            for (i = 0; i &lt; n; i++)
+                if (memcmp(s-&gt;r[i].cur, cur, 3) == 0) { *out = s-&gt;r[i]; found = 1; break; }
+        }
+        atomic_thread_fence(memory_order_acquire);   /* 데이터 읽기가 s2보다 먼저 끝나게 */
+        if (atomic_load_explicit(&amp;s-&gt;seq, memory_order_relaxed) == s1)
+            return found ? 0 : -1;            /* 읽는 동안 변경 없음: 결과 신뢰 */
+    }
+    return -2;
+}
+
+RateShm *rate_attach(int create)
+{
+    int fd = shm_open("/rate_tbl", create ? (O_CREAT | O_RDWR) : O_RDWR, 0640);
+    RateShm *s;
+    if (fd &lt; 0) return NULL;
+    if (create &amp;&amp; ftruncate(fd, sizeof(RateShm)) &lt; 0) { close(fd); return NULL; }
+    s = mmap(NULL, sizeof(RateShm), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    close(fd);
+    if (s == MAP_FAILED) return NULL;
+    if (create) {                             /* 새로 만든 0 초기화 메모리에 헤더 기록 */
+        s-&gt;magic = RATE_MAGIC;
+        s-&gt;layout_ver = RATE_LAYOUT;
+    } else if (s-&gt;magic != RATE_MAGIC || s-&gt;layout_ver != RATE_LAYOUT) {
+        munmap(s, sizeof(RateShm));           /* 다른 버전의 레이아웃: 붙지 않는다 */
+        return NULL;
+    }
+    return s;
+}
+
+int main(void)
+{
+    Rate src[2] = {
+        { "USD", 138525, 140949, 136101 },
+        { "JPY",  91234,  92830,  89638 },   /* 100엔당 */
+    };
+    const char *want[] = { "USD", "JPY", "EUR" };
+    RateShm *s = rate_attach(1);
+    Rate r;
+    int i;
+
+    if (!s) { perror("rate_attach"); return 1; }
+    rate_publish(s, src, 2, "20261028090000");
+    printf("seq=%u count=%d as_of=%.14s\n",
+           atomic_load(&amp;s-&gt;seq), s-&gt;count, s-&gt;as_of);
+    for (i = 0; i &lt; 3; i++) {
+        if (rate_lookup(s, want[i], &amp;r) == 0)
+            printf("%s %lld.%02lld\n", r.cur, r.base / 100, r.base % 100);
+        else
+            printf("%s not found\n", want[i]);
+    }
+    munmap(s, sizeof *s);
+    shm_unlink("/rate_tbl");                  /* 데모라서 삭제. 운영에서는 남겨 둔다 */
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과 (새로 생성된 세그먼트에서 처음 실행한 경우)</figcaption>
+<pre>seq=2 count=2 as_of=20261028090000
+USD 1385.25
+JPY 912.34
+EUR not found</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — 왜 메모리 펜스(fence)가 필요할까?</p>
+<p>현대 CPU와 컴파일러는 성능을 위해 메모리 읽기·쓰기의 <strong>순서를 바꿀 수 있습니다</strong>. writer가 "seq를 홀수로 → 데이터 쓰기 → seq를 짝수로" 순서로 코드를 써도, 다른 CPU 코어에서 보기에는 데이터 쓰기 일부가 seq 홀수 변경보다 먼저 보일 수 있습니다. 그러면 reader가 "seq 짝수(안정)"를 본 상태에서 반쯤 바뀐 데이터를 읽고, 두 번째 seq 검사도 통과할 수 있습니다. <code>atomic_thread_fence</code>와 release/acquire 순서 지정은 "이 지점 앞의 메모리 연산이 뒤의 연산보다 먼저 보이게" 하는 약속을 컴파일러와 CPU에 강제합니다. 엄밀히 말해 C11 메모리 모델에서는 seqlock의 데이터 읽기 자체가 경쟁(data race)으로 분류될 여지가 있어, 커널이나 고성능 라이브러리는 데이터 필드도 relaxed 원자 연산으로 읽는 등 더 엄격하게 구현합니다. 실무에서 직접 구현하기보다는 검증된 라이브러리를 쓰고, 원리를 이해하는 데 이 코드를 활용하세요. 메모리 순서는 28장에서 더 다룹니다.</p>
+</div>
+
+<div class="box fin"><p class="box-title" data-tag="금융 실무">은행 시스템에서는 — 레이아웃 버전을 검사하지 않은 대가</p>
+<p>어느 은행에서 수수료 코드 테이블 구조체에 "우대 구분" 필드 하나를 추가한 버전을 배포했습니다. 배포 절차상 로더 프로세스가 먼저 재기동되어 공유메모리를 <strong>새 레이아웃</strong>으로 다시 채웠는데, 아직 재기동되지 않은 거래 프로세스들은 <strong>옛 레이아웃</strong>으로 같은 메모리를 읽었습니다. 필드가 하나씩 밀려서 수수료 금액 위치에서 다른 값을 읽었고, 약 20분간 일부 이체에 잘못된 수수료가 부과되었습니다. 이후 공유메모리 헤더에 매직 넘버와 레이아웃 버전을 두고, 버전이 다르면 붙기를 거부하며, 구조 변경 시에는 새 이름의 세그먼트(<code>/fee_tbl_v2</code>)를 만들어 순차 전환하도록 배포 절차를 바꾸었습니다. 위 <code>rate_attach</code>가 버전을 검사하는 이유입니다.</p>
+</div>
+
+<h3 id="s26-2-8">ipcs와 ipcrm으로 운영하기</h3>
+<p>System V IPC 자원(공유메모리, 세마포어, 메시지 큐)은 <strong>프로세스가 죽어도 커널에 남습니다</strong>. 이는 장점(프로세스 재기동 후에도 캐시 유지)이자 단점(찌꺼기 누적)입니다. 운영자는 <code>ipcs</code>로 현황을 보고 <code>ipcrm</code>으로 정리합니다.</p>
+<pre><code class="language-bash">ipcs -a                 # 모든 IPC 자원 (-m 공유메모리, -s 세마포어, -q 메시지 큐)
+ipcs -m -p              # 공유메모리를 만든 PID(cpid), 마지막 사용 PID(lpid)
+ipcs -q                 # 메시지 큐: used-bytes, messages 가 계속 늘면 소비자 문제
+ipcs -l                 # 커널 한도 (shmmax, semmni, msgmnb ...)
+ipcrm -m 32769          # shmid로 공유메모리 삭제 표시
+ipcrm -M 0x5201a3c4     # key로 삭제
+ipcrm -s 98304          # 세마포어 삭제
+sysctl kernel.shmmax kernel.sem kernel.msgmnb   # (리눅스) 한도 확인</code></pre>
+<figure class="code out"><figcaption>ipcs -m 출력 예 (리눅스)</figcaption>
+<pre>------ Shared Memory Segments --------
+key        shmid      owner      perms      bytes      nattch     status
+0x5201a3c4 32769      trfadm     640        2097152    52
+0x5201a3c5 32770      trfadm     640        65536      0          dest</pre></figure>
+<p><code>nattch</code>는 붙어 있는 프로세스 수, <code>status</code>의 <code>dest</code>는 삭제 표시가 되었지만 아직 붙은 프로세스가 있어 실제로는 남아 있는 상태입니다(위 예에서는 nattch 0이므로 곧 사라짐).</p>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 — 운영 중인 IPC를 ipcrm</p>
+<ul>
+  <li>장애 복구 중 "찌꺼기 정리"라며 <code>ipcrm</code>을 돌렸는데 그것이 <strong>살아 있는 다른 업무의 세마포어</strong>였다면, 그 업무 프로세스들의 다음 <code>semop</code>이 <code>EIDRM</code>/<code>EINVAL</code>로 실패해 업무가 중단됩니다. 삭제 전에 <code>ipcs -p</code>로 소유 프로세스와 key를 확인하고, 시스템별 key 목록을 운영 문서에 관리합니다.</li>
+  <li><code>ftok</code>는 파일의 inode 번호와 디바이스 번호 일부로 key를 만듭니다. 키 파일을 지웠다가 다시 만들면 inode가 바뀌어 <strong>다른 key</strong>가 되고, 새 프로세스는 옛 세그먼트를 찾지 못한 채 새로 만듭니다. 또 서로 다른 파일이 같은 key를 만드는 충돌도 드물게 일어납니다. 그래서 금융 미들웨어는 key를 설정 파일에 고정 숫자로 정의하는 경우가 많습니다.</li>
+  <li>권한을 <code>0666</code>으로 만들면 같은 서버의 모든 사용자가 환율 테이블을 바꿀 수 있습니다. 최소 권한(<code>0640</code>, 전용 그룹)을 씁니다.</li>
+</ul>
+</div>
+
+<div class="ex"><p class="ex-title">예제 26-3 <span class="lv">난이도 ★★☆</span></p>
+<p>전문일련번호 채번을 공유메모리 카운터로 하는데, 세마포어 없이 <code>v = s-&gt;next_seq++;</code>만 했다면 어떤 일이 생길 수 있습니까? 구체적인 실행 순서로 설명하세요.</p>
+<details><summary>정답과 해설 보기</summary>
+<p><code>s-&gt;next_seq++</code>는 기계어로 "메모리에서 읽기 → 레지스터에서 1 증가 → 메모리에 쓰기" 세 단계입니다. next_seq가 100일 때 프로세스 A가 100을 읽고, 증가 후 쓰기 전에 프로세스 B가 역시 100을 읽으면, 둘 다 100을 일련번호로 사용하고 둘 다 101을 씁니다. 같은 일련번호의 전문 두 개가 대외기관으로 나가 두 번째는 중복 전문으로 거절되거나, 응답 매칭이 꼬입니다. 이 경쟁 조건은 부하가 높을 때만 드물게 나타나 테스트에서 발견하기 어렵습니다. 세마포어로 임계 구역을 보호하거나, C11 <code>atomic_fetch_add</code>(공유메모리에서 lock-free 원자 타입이면 프로세스 간에도 동작)로 원자적 증가를 해야 합니다.</p>
+</details></div>
+
+<h2 id="summary">핵심 정리</h2>
+<ul class="summary-list">
+  <li>프로세스는 실행 중인 프로그램이며 독립된 가상 주소 공간(text, data, bss, heap, stack)을 가집니다. 격리 덕분에 한 프로세스의 메모리 오류가 다른 프로세스로 번지지 않습니다.</li>
+  <li>시스템 콜은 커널 모드로 들어가는 공식 창구(-1 + errno), 라이브러리 함수는 사용자 공간 함수입니다. errno는 실패 직후 저장합니다.</li>
+  <li>fd는 프로세스 fd 테이블의 인덱스이며 열린 파일 테이블(offset 공유)을 거쳐 inode를 가리킵니다. fd 누수는 EMFILE 장애로 이어지므로 모니터링합니다.</li>
+  <li><code>fork</code>는 Copy-on-Write로 자신을 복제하고 부모에게 자식 PID, 자식에게 0을 반환합니다. 자식은 <code>exec</code>로 다른 프로그램이 되고, 부모는 <code>waitpid</code>와 <code>WIFEXITED/WEXITSTATUS</code>로 종료 상태를 거둡니다. fork 전 <code>fflush(NULL)</code>, exec 실패 시 <code>_exit</code>.</li>
+  <li>거두지 않은 종료 자식은 좀비, 부모를 잃은 자식은 고아(PID 1이 입양)입니다. SIGCHLD에서 <code>waitpid(-1, ..., WNOHANG)</code>를 반복해 모두 거둡니다.</li>
+  <li>데몬화: fork → setsid → fork → umask → chdir("/") → 표준 입출력 /dev/null. systemd 환경에서는 포그라운드 실행이 권장됩니다.</li>
+  <li>시그널: SIGTERM/SIGINT는 graceful shutdown, SIGKILL은 잡을 수 없음, SIGPIPE는 반드시 무시, SIGSEGV는 잡아서 계속 실행 금지, SIGCHLD는 자식 거두기.</li>
+  <li><code>sigaction</code>을 쓰고, 핸들러는 <code>volatile sig_atomic_t</code> 플래그만 세웁니다. 핸들러 안에서는 async-signal-safe 함수만 호출하고 errno를 보존합니다.</li>
+  <li>IPC: 파이프(친족, 스트림), FIFO(이름 있음), 메시지 큐(메시지 경계·타입), 공유메모리(가장 빠름, 동기화 직접), 세마포어(동기화). 각각의 블로킹·용량·수명 특성을 이해하고 고릅니다.</li>
+  <li>System V 세마포어의 <code>SEM_UNDO</code>는 프로세스가 죽어도 세마포어를 복구해 줍니다. 공유메모리에는 포인터 대신 오프셋을, 맨 앞에 매직·레이아웃 버전을 둡니다.</li>
+  <li>읽기 위주 공유 캐시는 seqlock 같은 락 없는 읽기로 확장성을 얻습니다. System V IPC는 <code>ipcs</code>로 감시하고 <code>ipcrm</code>은 소유자를 확인한 뒤에만 씁니다.</li>
+</ul>
+
+<h2 id="interview">CS 면접 단골 질문</h2>
+<div class="box iv"><p class="box-title" data-tag="면접">이 장에서 나오는 면접 질문</p>
+  <details><summary>Q1. 프로세스와 스레드의 차이를 설명해 보세요.</summary>
+  <p>프로세스는 독립된 주소 공간과 자원(fd 테이블 등)을 가진 실행 단위이고, 스레드는 한 프로세스 안에서 코드·데이터·힙·fd를 공유하고 스택과 레지스터만 따로 가진 실행 흐름입니다. 프로세스는 격리가 강해 한쪽이 죽어도 다른 쪽이 안전하지만 생성·문맥 전환 비용과 통신 비용(IPC)이 큽니다. 스레드는 가볍고 메모리 공유가 쉽지만 하나의 메모리 오류가 프로세스 전체를 죽이고 동기화 버그 위험이 큽니다. 금융 미들웨어가 다중 프로세스 구조를 오래 써 온 이유가 장애 격리입니다. <strong>꼬리 질문</strong>: "멀티프로세스에서 데이터 공유는?" → IPC(공유메모리 + 세마포어 등).</p></details>
+  <details><summary>Q2. fork()의 반환값과 동작을 설명하고, Copy-on-Write가 무엇인지 말해 보세요.</summary>
+  <p><code>fork</code>는 호출한 프로세스를 복제해 자식을 만들며, 부모에게는 자식의 PID, 자식에게는 0, 실패 시 -1을 반환합니다. 자식은 부모의 메모리, fd, 시그널 설정 등을 복사받습니다. 실제 메모리 복사는 Copy-on-Write로 미뤄져서, 처음엔 같은 물리 페이지를 읽기 전용으로 공유하다가 한쪽이 쓰는 순간 그 페이지만 복사합니다. 그래서 fork 직후 exec하는 패턴이 저렴합니다.</p></details>
+  <details><summary>Q3. 좀비 프로세스와 고아 프로세스는 무엇이고, 어떻게 처리하나요?</summary>
+  <p>좀비는 종료했지만 부모가 <code>wait</code>로 종료 상태를 가져가지 않아 프로세스 테이블에 항목이 남은 상태이고, 쌓이면 PID가 고갈됩니다. 부모가 <code>waitpid</code>로 거두거나, SIGCHLD 핸들러에서 WNOHANG 루프로 거두거나, SIGCHLD를 SIG_IGN으로 설정해 해결합니다. 고아는 부모가 먼저 종료한 프로세스로, init(PID 1)이나 subreaper가 입양해 대신 거둡니다. 좀비는 이미 죽었으므로 kill로 제거할 수 없고 부모를 고치거나 부모를 종료해야 합니다.</p></details>
+  <details><summary>Q4. 시그널 핸들러에서 printf나 malloc을 호출하면 안 되는 이유는?</summary>
+  <p>시그널은 임의의 지점에서 끼어들기 때문에, 메인 흐름이 malloc이나 printf 내부에서 락을 잡거나 자료구조를 수정하는 도중일 수 있습니다. 핸들러가 같은 함수를 다시 호출하면 교착 상태나 자료구조 손상이 발생합니다. 이런 함수는 재진입 불가능하며, POSIX가 정한 async-signal-safe 함수(<code>write</code>, <code>_exit</code>, <code>waitpid</code> 등)만 호출해야 합니다. 일반적인 패턴은 핸들러에서 <code>volatile sig_atomic_t</code> 플래그만 세우고 실제 처리는 메인 루프에서 하는 것입니다.</p></details>
+  <details><summary>Q5. kill -9와 kill -15의 차이는? 서버를 내릴 때 어느 것을 먼저 써야 하나요?</summary>
+  <p>-15(SIGTERM)는 프로세스가 잡아서 정리 작업을 할 수 있는 종료 요청이고, -9(SIGKILL)는 커널이 즉시 강제 종료하며 잡거나 무시할 수 없습니다. 먼저 SIGTERM을 보내 진행 중인 거래 마무리, 커밋, 버퍼 flush, 체크포인트 저장을 하게 하고, 제한 시간 안에 끝나지 않을 때만 SIGKILL을 씁니다. SIGKILL은 정리 없이 죽으므로 임시 파일, 미커밋 트랜잭션, 세마포어(SEM_UNDO가 없으면)가 남을 수 있습니다.</p></details>
+  <details><summary>Q6. IPC의 종류와 각각의 장단점을 말해 보세요.</summary>
+  <p>파이프는 단순하지만 친족 간 단방향 바이트 스트림, FIFO는 이름으로 무관한 프로세스도 쓸 수 있는 파이프, 메시지 큐는 메시지 경계와 타입을 보존하지만 용량 한도가 있고, 공유메모리는 복사가 없어 가장 빠르지만 동기화를 직접 해야 하며, 세마포어는 데이터가 아닌 동기화 도구입니다. 소켓은 네트워크를 넘어 통신할 수 있지만 상대적으로 느립니다. 대용량 공유 상태는 공유메모리 + 세마포어, 작업 분배는 메시지 큐, 원격은 소켓이 일반적입니다.</p></details>
+  <details><summary>Q7. 세마포어와 뮤텍스의 차이는 무엇인가요?</summary>
+  <p>뮤텍스는 잠금을 획득한 주체만 해제할 수 있는 소유권 기반 상호 배제 도구이고, 세마포어는 소유권이 없는 정수 카운터로 P/V 연산을 통해 N개까지 동시 접근을 허용하거나 이벤트 신호로 쓸 수 있습니다. 이진 세마포어는 뮤텍스처럼 쓸 수 있지만 소유권 검사, 우선순위 상속 같은 뮤텍스 기능이 없습니다. <strong>꼬리 질문</strong>: "프로세스가 세마포어를 잡은 채 죽으면?" → System V의 SEM_UNDO로 커널이 복구, 그렇지 않으면 영구 대기 위험.</p></details>
+  <details><summary>Q8. 시스템 콜과 일반 함수 호출의 차이를 설명해 보세요.</summary>
+  <p>시스템 콜은 트랩 명령으로 CPU를 커널 모드로 전환해 커널 코드를 실행하고 다시 사용자 모드로 돌아오는 과정이라, 권한 검사와 모드 전환 비용이 듭니다. 일반 함수 호출은 같은 사용자 모드에서 스택 프레임만 만들고 점프합니다. 그래서 <code>fread</code>처럼 버퍼링으로 시스템 콜 횟수를 줄이는 라이브러리가 성능에 중요합니다.</p></details>
+  <details><summary>Q9. 파일 디스크립터란 무엇이며, fork 후 부모와 자식이 같은 파일을 읽으면 어떻게 되나요?</summary>
+  <p>fd는 프로세스의 fd 테이블 인덱스로, 커널의 열린 파일 항목을 가리킵니다. fork하면 자식은 fd 테이블을 복사하지만 가리키는 열린 파일 항목은 공유하므로 <strong>파일 offset도 공유</strong>됩니다. 부모가 100바이트를 읽으면 자식의 다음 읽기는 101번째 바이트부터입니다. 각자 독립적으로 읽으려면 fork 후 각자 <code>open</code>을 다시 해야 합니다.</p></details>
+  <details><summary>Q10. volatile 키워드는 무엇이며 멀티스레드 동기화에 충분한가요?</summary>
+  <p><code>volatile</code>은 컴파일러에게 그 변수를 최적화로 레지스터에 캐시하거나 접근을 생략하지 말고 매번 메모리에서 읽고 쓰라고 지시합니다. 시그널 핸들러와 공유하는 플래그나 메모리 매핑된 하드웨어 레지스터에 씁니다. 하지만 원자성이나 CPU 간 메모리 순서를 보장하지 않으므로 멀티스레드·멀티프로세스 동기화에는 부족하며, C11 <code>_Atomic</code>과 메모리 순서, 또는 뮤텍스·세마포어를 써야 합니다.</p></details>
+</div>
+
+<h2 id="exercises">연습문제</h2>
+
+<div class="ex"><p class="ex-title">연습문제 26-1 출력 예측 <span class="lv">난이도 ★☆☆</span></p>
+<p>다음 프로그램의 출력은? (터미널 출력, 부모는 자식을 기다림)</p>
+<figure class="code"><figcaption>q26-1.c</figcaption><pre><code class="language-c">int x = 10;
+int main(void)
+{
+    pid_t pid = fork();
+    if (pid == 0) { x += 5; printf("child x=%d\n", x); return 0; }
+    wait(NULL);
+    printf("parent x=%d\n", x);
+    return 0;
+}</code></pre></figure>
+<details><summary>정답과 해설 보기</summary>
+<p><code>child x=15</code> 다음 <code>parent x=10</code>. 자식은 부모의 메모리를 복사(CoW)받으므로 자식이 x를 바꾸면 그 순간 페이지가 복사되어 자식만의 x가 15가 됩니다. 부모의 x는 그대로 10입니다. 전역 변수라도 프로세스 간에는 공유되지 않는다는 점이 핵심입니다. <code>wait</code> 덕분에 출력 순서가 보장됩니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 26-2 종료 상태 해석 <span class="lv">난이도 ★☆☆</span></p>
+<p><code>waitpid</code>로 받은 <code>st</code>에 대해 <code>WIFSIGNALED(st)</code>가 참이고 <code>WTERMSIG(st)</code>가 11이었습니다. 무슨 일이 일어났고, 운영자는 무엇을 확인해야 합니까?</p>
+<details><summary>정답과 해설 보기</summary>
+<p>자식이 시그널 11(SIGSEGV)로 죽었습니다. 잘못된 메모리 접근입니다. <code>WCOREDUMP(st)</code>(비표준이지만 대부분 지원)로 코어 덤프 생성 여부를 확인하고, 코어 파일을 <code>gdb 실행파일 core</code>로 열어 <code>bt</code>로 호출 스택을 봅니다. 코어가 없으면 <code>ulimit -c</code>와 코어 저장 경로(리눅스 <code>/proc/sys/kernel/core_pattern</code>) 설정을 확인합니다. 직전에 처리하던 입력 데이터(전문, 레코드)를 로그에서 찾아 재현하는 것도 중요합니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 26-3 버그 찾기 — 좀비 <span class="lv">난이도 ★★☆</span></p>
+<p>다음 서버는 운영 며칠 후 <code>fork: Resource temporarily unavailable</code>로 새 연결을 처리하지 못합니다. 원인과 해결책은?</p>
+<figure class="code bad"><figcaption>q26-3.c</figcaption><pre><code class="language-c">for (;;) {
+    int c = accept(ls, NULL, NULL);
+    if (fork() == 0) { close(ls); handle(c); _exit(0); }
+    close(c);
+}</code></pre></figure>
+<details><summary>정답과 해설 보기</summary>
+<p>부모가 자식을 전혀 거두지 않아 연결마다 좀비가 하나씩 쌓입니다. 사용자별 프로세스 수 한도(<code>ulimit -u</code>)나 PID 한도에 도달하면 fork가 <code>EAGAIN</code>으로 실패합니다. 해결: SIGCHLD 핸들러에서 <code>while (waitpid(-1, NULL, WNOHANG) &gt; 0);</code>를 실행하도록 <code>sigaction</code>으로 등록하고(핸들러로 accept가 EINTR로 깨어날 수 있으므로 <code>SA_RESTART</code> 지정 또는 EINTR 처리), fork 실패(-1)도 검사합니다. 또는 종료 상태가 필요 없으면 SIGCHLD를 SIG_IGN으로 설정합니다. 27장의 fork 서버에서 완성형을 봅니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 26-4 빈칸 채우기 — 파이프 <span class="lv">난이도 ★★☆</span></p>
+<p>자식이 <code>sort</code>를 실행하고 부모가 그 표준 입력으로 데이터를 보내려 합니다. 빈칸을 채우세요.</p>
+<figure class="code"><figcaption>q26-4.c</figcaption><pre><code class="language-c">int fd[2];
+pipe(fd);
+if (fork() == 0) {
+    ____(1)____;            /* 파이프 읽기 끝을 표준 입력으로 */
+    close(fd[0]);
+    close(fd[1]);
+    execlp("sort", "sort", (char *)NULL);
+    _exit(127);
+}
+____(2)____;                /* 부모는 읽기 끝이 필요 없다 */
+write(fd[1], "B\nA\nC\n", 6);
+____(3)____;                /* sort가 EOF를 받아 출력하도록 */
+wait(NULL);</code></pre></figure>
+<details><summary>정답과 해설 보기</summary>
+<p>(1) <code>dup2(fd[0], STDIN_FILENO)</code> (2) <code>close(fd[0])</code> (3) <code>close(fd[1])</code>. 출력은 <code>A B C</code>(각 줄). <code>dup2</code> 후 원래 fd 두 개를 닫는 것이 중요합니다. 자식이 <code>fd[1]</code>을 닫지 않으면 sort 자신이 쓰기 끝을 쥐고 있어 EOF가 오지 않으므로 sort는 영원히 입력을 기다리고, 부모의 <code>wait</code>도 끝나지 않습니다. <code>execlp</code>의 마지막 인자는 <code>(char *)NULL</code>로 캐스팅해야 가변 인자에서 올바른 널 포인터가 전달됩니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 26-5 코드 작성 — 타임아웃 있는 자식 실행 <span class="lv">난이도 ★★★</span></p>
+<p>배치 작업을 실행하되 지정한 초를 넘기면 SIGTERM을, 그 후 5초가 더 지나도 안 끝나면 SIGKILL을 보내는 <code>int run_with_timeout(char *const argv[], int sec)</code>을 작성하세요. 시그널 핸들러 없이 <code>waitpid(..., WNOHANG)</code> 폴링으로 구현해도 됩니다.</p>
+<details><summary>정답과 해설 보기</summary>
+<figure class="code good"><figcaption>정답 코드</figcaption><pre><code class="language-c">int run_with_timeout(char *const argv[], int sec)
+{
+    int st, waited = 0, termed = 0;
+    pid_t pid;
+    fflush(NULL);
+    if ((pid = fork()) &lt; 0) return -1;
+    if (pid == 0) { execvp(argv[0], argv); _exit(127); }
+
+    for (;;) {
+        pid_t r = waitpid(pid, &amp;st, WNOHANG);
+        if (r == pid) break;                      /* 끝남 */
+        if (r &lt; 0 &amp;&amp; errno != EINTR) return -1;
+        sleep(1);                                 /* 1초 간격 확인 */
+        waited++;
+        if (!termed &amp;&amp; waited &gt;= sec) { kill(pid, SIGTERM); termed = 1; }
+        else if (termed &amp;&amp; waited &gt;= sec + 5) { kill(pid, SIGKILL); }
+    }
+    if (WIFEXITED(st))   return WEXITSTATUS(st);
+    if (WIFSIGNALED(st)) return 128 + WTERMSIG(st);
+    return -1;
+}</code></pre></figure>
+<p>먼저 SIGTERM으로 graceful shutdown 기회를 주고, 유예 시간 후 SIGKILL을 쓰는 2단계가 운영 표준입니다. 1초 단위 폴링은 정밀하지 않지만 배치 감시에는 충분합니다. 더 정밀하게 하려면 SIGCHLD + <code>sigtimedwait</code>나 리눅스 <code>pidfd</code>를 씁니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 26-6 시그널 안전성 <span class="lv">난이도 ★★☆</span></p>
+<p>다음 핸들러 중 async-signal-safe 규칙을 지킨 것을 고르고, 나머지의 문제를 설명하세요.</p>
+<figure class="code"><figcaption>q26-6.c</figcaption><pre><code class="language-c">void h1(int s) { static const char m[] = "TERM\n"; write(2, m, sizeof m - 1); g_stop = 1; }
+void h2(int s) { syslog(LOG_INFO, "signal %d", s); g_stop = 1; }
+void h3(int s) { free(g_cache); g_cache = NULL; }
+void h4(int s) { g_count++; }    /* static volatile sig_atomic_t g_count; */</code></pre></figure>
+<details><summary>정답과 해설 보기</summary>
+<p>h1은 안전합니다(<code>write</code>는 async-signal-safe, 플래그 설정). h2의 <code>syslog</code>는 안전 목록에 없습니다(내부 버퍼, 락, 소켓 사용). h3의 <code>free</code>는 힙 락과 자료구조를 건드리므로 메인 흐름이 malloc 중이면 교착 또는 힙 손상이 납니다. h4는 미묘합니다. <code>sig_atomic_t</code>는 단순 읽기·쓰기의 원자성만 보장하며 <code>++</code>(읽기-수정-쓰기)는 원자적이지 않습니다. 메인 흐름도 g_count를 수정한다면 증가가 유실될 수 있습니다. 핸들러만 쓰고 메인은 읽기만 한다면 실용상 문제는 작지만, 정확한 카운트가 필요하면 lock-free <code>atomic_int</code>와 <code>atomic_fetch_add</code>를 씁니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 26-7 공유메모리 설계 <span class="lv">난이도 ★★☆</span></p>
+<p>은행코드(3자리) → 은행명(20바이트) 테이블 300건을 공유메모리에 올리려 합니다. 다음 설계의 문제점을 지적하세요: <code>struct Bank { char code[4]; char *name; struct Bank *next; };</code>를 해시 버킷 리스트로 공유메모리에 배치.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>① <code>char *name</code>이 가리키는 문자열이 로더의 힙에 있다면 다른 프로세스에서는 접근할 수 없는 주소입니다. 이름도 공유메모리 안에 <code>char name[21]</code> 같은 고정 배열로 넣어야 합니다. ② <code>next</code> 포인터 역시 로더 프로세스의 가상 주소이므로, 다른 주소에 매핑한 프로세스에서는 잘못된 위치를 가리킵니다. 인덱스(<code>int next_idx</code>, -1은 끝)로 바꿉니다. ③ 300건 정도면 해시보다 코드 순 정렬 배열 + 이진 탐색이 단순하고 빠릅니다. 은행코드가 3자리 숫자라면 1000칸 직접 인덱스 배열도 가능합니다. ④ 헤더에 매직·버전·seq를 둬야 갱신과 배포가 안전합니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 26-8 세마포어 영구 대기 <span class="lv">난이도 ★★☆</span></p>
+<p>거래 프로세스 30개가 모두 <code>semop</code>에서 멈춰 있는 장애가 발생했습니다. 원인 후보 두 가지와 확인 방법, 응급 조치를 쓰세요.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>원인 후보: ① 세마포어를 잡은 프로세스가 V 전에 죽었고 SEM_UNDO를 쓰지 않음 ② 세마포어를 잡은 프로세스가 임계 구역 안에서 다른 블로킹 작업(DB 락 대기, 네트워크 I/O)에 걸려 있음 ③ 코드 경로 중 V를 빠뜨린 오류 처리 분기. 확인: <code>ipcs -s -i SEMID</code>로 세마포어 값과 마지막 조작 PID(sempid)를 보고, 그 PID가 살아 있는지 <code>ps</code>로 확인, 살아 있다면 <code>pstack</code>/<code>gdb -p</code>로 어디서 멈췄는지 확인. 응급 조치: 원인 프로세스가 죽었다면 공유 데이터 무결성을 확인한 뒤 <code>semctl SETVAL</code>로 값을 1로 복구하는 운영 도구를 실행(사전에 준비해 둘 것). 근본 해결: SEM_UNDO 사용, 임계 구역에서 블로킹 호출 금지, 모든 경로에서 V 보장(<code>goto unlock</code> 패턴), <code>semtimedop</code>으로 대기 시간 제한 및 경보.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 26-9 메시지 큐 vs 파이프 <span class="lv">난이도 ★★☆</span></p>
+<p>채널 프로세스 1개가 160바이트 전문을 거래 프로세스 여러 개에 분배합니다. 파이프 하나를 여러 거래 프로세스가 함께 읽으면 어떤 문제가 생기고, 메시지 큐는 이를 어떻게 해결합니까?</p>
+<details><summary>정답과 해설 보기</summary>
+<p>파이프는 메시지 경계가 없는 바이트 스트림이라, 여러 읽는 프로세스가 각자 <code>read(fd, buf, 160)</code>을 해도 커널은 160바이트 경계를 보장하지 않습니다. 한 프로세스가 전문 앞 100바이트, 다른 프로세스가 나머지 60바이트와 다음 전문 앞부분을 가져갈 수 있습니다(쓰기는 <code>PIPE_BUF</code> 이하면 원자적이지만 읽기 분배는 보장되지 않음). 메시지 큐는 <code>msgsnd</code> 한 번이 메시지 하나로 보존되고 <code>msgrcv</code>는 메시지 단위로만 꺼내므로, 여러 소비자가 경쟁적으로 꺼내도 전문이 쪼개지지 않습니다. mtype으로 거래 종류별 라우팅도 할 수 있습니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 26-10 종합 — 거래 서버 운영 스크립트 <span class="lv">난이도 ★★★</span></p>
+<p>거래 서버 <code>trfsvr</code>는 데몬으로 실행되며 PID 파일 <code>/app/run/trfsvr.pid</code>를 남깁니다. 서버를 안전하게 내리는 셸 함수 <code>stop_trfsvr</code>의 동작을 단계별로 설계하고, C 서버 쪽이 지켜야 할 약속을 쓰세요.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>셸 단계: ① PID 파일 읽기, <code>kill -0 PID</code>로 생존 확인(없으면 PID 파일 정리 후 종료) ② <code>ps -p PID -o comm=</code>이 <code>trfsvr</code>인지 확인(PID 재사용으로 엉뚱한 프로세스를 죽이지 않도록) ③ <code>kill -TERM PID</code> ④ 1초 간격으로 최대 30초 <code>kill -0</code> 확인 ⑤ 여전히 살아 있으면 경고 로그 후 <code>kill -KILL PID</code> ⑥ IPC 자원은 지우지 않음(공유 캐시는 다른 프로세스가 사용 중일 수 있음).<br>
+C 서버의 약속: SIGTERM 핸들러는 플래그만 세움 → 메인 루프는 새 요청 수락 중지, 진행 중 거래 완료, 대외기관 응답 대기 중인 거래는 타임아웃 규칙에 따라 정리 → 로그·통계 flush, 세마포어·락 해제, PID 파일 삭제 → <code>exit(0)</code>. 자식 프로세스가 있다면 자식들에게도 SIGTERM을 전달하고 모두 거둔 뒤 종료합니다. 30초 안에 끝나지 않을 수 있는 작업은 그 사실을 로그로 남겨야 운영자가 SIGKILL의 영향을 판단할 수 있습니다.</p>
+</details></div>
+
+</main>
+<aside class="rail" aria-label="이 페이지 목차"></aside>
+</div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-c.min.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>

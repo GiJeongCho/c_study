@@ -1,0 +1,966 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ch04 연산자 · C언어 금융 IT 마스터</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+KR:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-ch="ch04">
+<header class="topbar">
+  <button class="menu-btn" type="button" aria-expanded="false" aria-controls="sidebar">목차</button>
+  <a class="brand" href="index.html"><b>C</b>금융 IT 마스터</a>
+  <span class="where"></span>
+  <span class="progress"></span>
+</header>
+<div class="layout">
+<nav id="sidebar" class="sidebar" aria-label="과정 목차"></nav>
+<div class="page">
+<main class="content">
+
+<header class="ch-head">
+  <p class="eyebrow">PART 1 · C 기초 완전 정복 · CHAPTER</p>
+  <div class="bignum">04</div>
+  <h1>연산자</h1>
+  <p class="lede">이자 = 원금 × 이율 ÷ 10000. 이 식 하나도 곱셈과 나눗셈의 순서, 정수 나눗셈의 버림, 자료형 변환에 따라 결과가 몇 원씩 달라집니다. 금융 프로그램에서 '몇 원'은 곧 장애입니다. 이 장에서는 C의 연산자가 정확히 어떻게 계산하는지, 왜 그런 결과가 나오는지를 비트와 메모리 수준까지 내려가 살펴봅니다.</p>
+  <div class="goals"><p class="goals-title">이 장에서 배울 것</p><ul>
+    <li>정수 나눗셈과 나머지 연산의 규칙(0 방향 버림, 나머지의 부호)을 정확히 압니다.</li>
+    <li>증감 연산자의 전위·후위 차이를 메모리 동작으로 설명할 수 있습니다.</li>
+    <li>관계·논리 연산의 결과가 0과 1이라는 것과 단락 평가를 활용합니다.</li>
+    <li>암시적 형 변환(정수 승격, 일반 산술 변환)과 명시적 형 변환(캐스트)을 구분합니다.</li>
+    <li>sizeof, 복합 대입, 콤마, 조건 연산자, 비트 연산자를 사용합니다.</li>
+    <li>우선순위·결합 규칙과 평가 순서의 차이, <code>i = i++</code> 같은 미정의 동작을 이해합니다.</li>
+  </ul></div>
+</header>
+
+<h2 id="s04-1"><span class="num">04-1</span>산술 연산자, 관계 연산자, 논리 연산자</h2>
+
+<p>연산자(operator)는 값을 가지고 계산하는 기호이고, 연산의 대상이 되는 값을 피연산자(operand)라고 합니다. <code>a + b</code>에서 <code>+</code>는 연산자, <code>a</code>와 <code>b</code>는 피연산자입니다. 피연산자가 하나면 단항(<code>-a</code>, <code>!a</code>), 둘이면 이항, 셋이면 삼항 연산자(<code>?:</code>)입니다. 연산자와 피연산자가 결합된 것을 <b>식(expression)</b>이라 하며, 모든 식은 <b>값</b>을 가집니다.</p>
+
+<h3 id="s04-1-1">산술 연산자</h3>
+<div class="tbl"><table>
+<thead><tr><th>연산자</th><th>의미</th><th>예 (<code>a=17, b=5</code>)</th><th>결과</th></tr></thead>
+<tbody>
+<tr><td><code>+</code></td><td>덧셈</td><td><code>a + b</code></td><td>22</td></tr>
+<tr><td><code>-</code></td><td>뺄셈</td><td><code>a - b</code></td><td>12</td></tr>
+<tr><td><code>*</code></td><td>곱셈</td><td><code>a * b</code></td><td>85</td></tr>
+<tr><td><code>/</code></td><td>나눗셈 (정수끼리는 몫)</td><td><code>a / b</code></td><td>3</td></tr>
+<tr><td><code>%</code></td><td>나머지 (정수 전용)</td><td><code>a % b</code></td><td>2</td></tr>
+<tr><td><code>-</code> (단항)</td><td>부호 반전</td><td><code>-a</code></td><td>-17</td></tr>
+</tbody></table></div>
+
+<h4>정수 나눗셈: 소수점 이하는 버린다</h4>
+<figure class="code"><figcaption>ex04-1.c — 정수 나눗셈과 나머지</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+int main(void)
+{
+    printf("%d %d\n", 17 / 5, 17 % 5);       /* 몫 3, 나머지 2 */
+    printf("%d %d\n", 7 / 2, -7 / 2);        /* 3, -3 (0 방향 버림) */
+    printf("%d %d\n", -7 % 3, 7 % -3);       /* 나머지 부호는 왼쪽(피제수)을 따름 */
+    printf("%f\n", 7.0 / 2);                 /* 실수가 섞이면 실수 나눗셈 */
+    printf("%d\n", 1 / 3 * 3);               /* 0 * 3 = 0 */
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>3 2
+3 -3
+-1 1
+3.500000
+0</pre></figure>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 200" width="700" role="img" aria-label="정수 나눗셈은 0 방향으로 버림">
+  <path class="line" d="M40 90 H 660"/>
+  <path class="accent-line" d="M40 90 H 660"/>
+  <text x="70" y="120" text-anchor="middle" class="mono small">-4</text>
+  <text x="150" y="120" text-anchor="middle" class="mono small">-3.5</text>
+  <text x="230" y="120" text-anchor="middle" class="mono small">-3</text>
+  <text x="350" y="120" text-anchor="middle" class="mono small">0</text>
+  <text x="470" y="120" text-anchor="middle" class="mono small">3</text>
+  <text x="550" y="120" text-anchor="middle" class="mono small">3.5</text>
+  <text x="630" y="120" text-anchor="middle" class="mono small">4</text>
+  <rect class="hl2" x="140" y="80" width="20" height="20" rx="10"/>
+  <rect class="hl2" x="540" y="80" width="20" height="20" rx="10"/>
+  <path class="arrow" d="M150 70 C 180 40, 210 40, 228 75"/>
+  <path class="arrow" d="M550 70 C 520 40, 490 40, 472 75"/>
+  <text x="190" y="35" text-anchor="middle" class="small">-7/2 → -3</text>
+  <text x="510" y="35" text-anchor="middle" class="small">7/2 → 3</text>
+  <text x="350" y="160" text-anchor="middle" class="small">C99부터: 정수 나눗셈은 항상 0 쪽으로 버림(truncation toward zero)</text>
+  <text x="350" y="185" text-anchor="middle" class="small mute">항상 성립: (a / b) * b + a % b == a   →  -7 = (-3)*2 + (-1)</text>
+</svg>
+<figcaption>그림 4-1 정수 나눗셈은 수직선에서 0에 가까운 쪽으로 버립니다. 그래서 음수의 몫은 '내림'이 아닙니다.</figcaption>
+</figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — 정수끼리 나누면 왜 소수점이 사라질까?</p>
+<p>C의 연산 결과 자료형은 <b>피연산자의 자료형</b>으로 정해집니다. <code>int / int</code>의 결과는 <code>int</code>이므로 소수 부분을 담을 공간이 처음부터 없습니다. CPU 차원에서도 정수 나눗셈 명령(x86의 <code>idiv</code>)과 실수 나눗셈 명령(<code>divsd</code>)은 완전히 다른 명령이며, 정수 나눗셈 명령은 몫과 나머지를 정수 레지스터 두 개에 동시에 돌려줍니다. 컴파일러는 피연산자가 둘 다 정수면 정수 명령을 고릅니다. 그래서 <code>double r = 7 / 2;</code>라고 써도 r은 3.0입니다. 오른쪽의 <code>7 / 2</code>가 이미 정수 3으로 계산된 <b>뒤에</b> double로 바뀌기 때문입니다.</p>
+<p>C89에서는 음수가 포함된 정수 나눗셈의 버림 방향(0 방향인지 음의 무한대 방향인지)이 구현 정의였습니다. C99부터 0 방향으로 고정되었고, 나머지의 부호는 피제수(왼쪽)를 따르도록 정해졌습니다.</p>
+</div>
+
+<h4>나머지 연산 %의 활용</h4>
+<ul>
+<li>짝수·홀수 판별: <code>n % 2 == 0</code>이면 짝수. 단, 음수 홀수는 <code>n % 2</code>가 -1이므로 <code>n % 2 == 1</code>로 홀수를 판별하면 음수에서 틀립니다. <code>n % 2 != 0</code>을 쓰십시오.</li>
+<li>자릿수 분리: <code>n % 10</code>은 일의 자리, <code>n / 10 % 10</code>은 십의 자리. 2장의 천 단위 출력에 썼습니다.</li>
+<li>주기 계산: 오늘이 일요일(0)이면 100일 뒤 요일은 <code>(0 + 100) % 7</code> = 2(화요일).</li>
+<li>검증 번호: 계좌번호의 마지막 자리 검증 숫자(check digit)는 각 자리에 가중치를 곱해 더한 뒤 <code>% 10</code>, <code>% 11</code> 등으로 계산하는 방식이 많습니다.</li>
+<li><code>%</code>는 실수에 쓸 수 없습니다. 실수의 나머지는 <code>&lt;math.h&gt;</code>의 <code>fmod</code>를 씁니다.</li>
+</ul>
+
+<h4>곱셈과 나눗셈의 순서: 금융 계산의 1원 차이</h4>
+<figure class="code"><figcaption>ex04-2.c — 계산 순서에 따른 이자 차이</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+int main(void)
+{
+    long long principal = 1234567;   /* 원금 */
+    long long rate_bp   = 275;       /* 연 2.75% (만분율) */
+
+    long long good = principal * rate_bp / 10000;   /* 곱한 뒤 나눔 */
+    long long bad  = principal / 10000 * rate_bp;   /* 나눈 뒤 곱함 */
+
+    printf("곱셈 먼저: %lld원\n", good);
+    printf("나눗셈 먼저: %lld원\n", bad);
+    printf("차이: %lld원\n", good - bad);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>곱셈 먼저: 33950원
+나눗셈 먼저: 33825원
+차이: 125원</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까?</p>
+<p><code>*</code>와 <code>/</code>는 우선순위가 같고 왼쪽부터 계산합니다. <code>principal / 10000 * rate_bp</code>에서는 먼저 1234567 / 10000 = 123(소수 0.4567 버림)이 되고, 버려진 0.4567 × 275 ≈ 125.6원어치 정보가 영원히 사라집니다. 반면 곱셈을 먼저 하면 1234567 × 275 = 339,505,925를 10000으로 나눠 33950.59…에서 마지막에 한 번만 버리므로 오차가 1원 미만입니다. <b>정수 계산에서는 버림을 맨 마지막에 한 번만</b> 하는 것이 원칙입니다.</p>
+</div>
+<div class="box fix"><p class="box-title" data-tag="해결">이렇게 해결합니다 — 곱셈 먼저, 그러나 오버플로 확인</p>
+<p>곱셈을 먼저 하면 중간값이 커집니다. 원금 1조 원 × 275 = 2.75×10<sup>14</sup>는 <code>long long</code>(약 9.2×10<sup>18</sup>)에 충분히 들어가지만, int로 계산하면 원금 800만 원만 넘어도 오버플로입니다(800만 × 275 = 22억). 금액 계산식은 (1) 변수를 <code>long long</code>으로, (2) 곱셈 먼저, (3) 나눗셈은 마지막에, (4) 중간값의 최대 크기를 설계 단계에서 계산해 둡니다.</p>
+</div>
+
+<div class="box fin"><p class="box-title" data-tag="금융 실무">은행 시스템에서는 — 절사, 반올림, 절상을 정수로</p>
+<p>은행 상품 규정에는 "이자는 원 미만 절사", "수수료는 10원 미만 절사", "세금은 10원 미만 절사"처럼 끝처리 규칙이 명시되어 있습니다. 양수 금액에 대해 정수 연산으로 구현하면 다음과 같습니다.</p>
+<figure class="code"><figcaption>끝처리 관용구 (x ≥ 0 가정)</figcaption>
+<pre><code class="language-c">long long x = 12345;
+long long cut10   = x / 10 * 10;          /* 10원 미만 절사: 12340 */
+long long round10 = (x + 5) / 10 * 10;    /* 10원 미만 반올림(사사오입): 12350 */
+long long ceil10  = (x + 9) / 10 * 10;    /* 10원 미만 절상: 12350 */</code></pre></figure>
+<p>여기서 <code>x / 10 * 10</code>은 수학적으로는 x와 같아 보이지만, 정수 나눗셈의 버림 때문에 일의 자리가 0이 됩니다. 이처럼 정수 나눗셈의 '결함'처럼 보이는 성질을 정확히 이해하고 <b>의도적으로</b> 이용하는 것이 금융 계산의 기본기입니다. 음수(환불, 역거래)는 0 방향 버림 때문에 결과가 달라지므로 절댓값으로 처리한 뒤 부호를 붙이는 등 별도 규칙이 필요합니다(21장).</p>
+</div>
+
+<div class="ex"><p class="ex-title">예제 4-1 <span class="lv">난이도 ★★☆</span></p>
+<p>총 1,000,000원을 3명이 똑같이 나눠 내고, 나누어떨어지지 않는 나머지는 첫 번째 사람이 더 내기로 했습니다. 각자 낼 금액을 정수 연산만으로 계산해 출력하십시오.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>1인당 기본 금액은 <code>total / 3</code> = 333,333원, 나머지는 <code>total % 3</code> = 1원입니다. 첫 사람은 333,334원을 냅니다. 합계가 정확히 1,000,000원이 되는지 검산하는 습관(<code>a + b + c == total</code>)이 중요합니다. 금융에서 "나눴더니 1원이 사라졌다"는 대사 불일치의 대표 원인입니다.</p>
+<figure class="code good"><figcaption>정답 코드</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+int main(void)
+{
+    long long total = 1000000;
+    long long share = total / 3;
+    long long rest  = total % 3;
+    long long first = share + rest;
+    printf("1번: %lld원, 2번: %lld원, 3번: %lld원\n", first, share, share);
+    printf("검산: %lld\n", first + share + share);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>1번: 333334원, 2번: 333333원, 3번: 333333원
+검산: 1000000</pre></figure>
+</details></div>
+
+<h3 id="s04-1-2">대입 연산자와 식의 값</h3>
+<p><code>=</code>도 연산자이며, 대입식 자체도 값을 가집니다. <b>대입식의 값은 왼쪽 변수에 저장된 값</b>입니다. 그래서 <code>a = b = 0;</code>은 오른쪽부터 결합되어 <code>a = (b = 0);</code>이 되고, <code>b = 0</code>의 값 0이 a에 대입됩니다. 3장의 <code>while ((ch = getchar()) != '\n')</code>도 대입식의 값을 비교에 사용한 것입니다.</p>
+
+<h3 id="s04-1-3">증감 연산자: 전위와 후위</h3>
+<p><code>++</code>는 변수의 값을 1 증가, <code>--</code>는 1 감소시킵니다. 변수 앞에 붙이면 <b>전위(prefix)</b>, 뒤에 붙이면 <b>후위(postfix)</b>입니다. 변수 값이 1 변하는 것은 같지만 <b>식의 값</b>이 다릅니다.</p>
+<ul>
+<li><code>++a</code>: a를 1 증가시키고, 식의 값은 <b>증가된 값</b>.</li>
+<li><code>a++</code>: a를 1 증가시키되, 식의 값은 <b>증가 전의 값</b>.</li>
+</ul>
+
+<figure class="code"><figcaption>ex04-3.c</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+int main(void)
+{
+    int a = 5, b, c;
+    b = a++;          /* b에 5 대입, a는 6 */
+    printf("a=%d b=%d\n", a, b);
+    c = ++a;          /* a를 7로 만든 뒤 c에 7 대입 */
+    printf("a=%d c=%d\n", a, c);
+    int seq = 100;
+    printf("%d\n", seq--);   /* 100 출력, seq는 99 */
+    printf("%d\n", seq);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>a=6 b=5
+a=7 c=7
+100
+99</pre></figure>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 260" width="700" role="img" aria-label="후위와 전위 증가의 동작 순서">
+  <text x="20" y="30" class="bold mono">b = a++;   (a=5)</text>
+  <rect class="box" x="20" y="45" width="140" height="40" rx="6"/><text x="90" y="70" text-anchor="middle" class="small">① a의 값 5를 복사</text>
+  <path class="arrow" d="M160 65 H 190"/>
+  <rect class="box" x="190" y="45" width="140" height="40" rx="6"/><text x="260" y="70" text-anchor="middle" class="small">② a ← 6 (증가)</text>
+  <path class="arrow" d="M330 65 H 360"/>
+  <rect class="hl2" x="360" y="45" width="160" height="40" rx="6"/><text x="440" y="70" text-anchor="middle" class="small">③ 식의 값 = 복사본 5</text>
+  <path class="arrow" d="M520 65 H 550"/>
+  <rect class="hl" x="550" y="45" width="130" height="40" rx="6"/><text x="615" y="70" text-anchor="middle" class="small">b ← 5</text>
+  <text x="20" y="140" class="bold mono">c = ++a;   (a=6)</text>
+  <rect class="box" x="20" y="155" width="140" height="40" rx="6"/><text x="90" y="180" text-anchor="middle" class="small">① a ← 7 (증가)</text>
+  <path class="arrow" d="M160 175 H 190"/>
+  <rect class="hl2" x="190" y="155" width="160" height="40" rx="6"/><text x="270" y="180" text-anchor="middle" class="small">② 식의 값 = 새 값 7</text>
+  <path class="arrow" d="M350 175 H 380"/>
+  <rect class="hl" x="380" y="155" width="130" height="40" rx="6"/><text x="445" y="180" text-anchor="middle" class="small">c ← 7</text>
+  <text x="350" y="235" text-anchor="middle" class="small mute">후위는 '옛 값의 복사본'이 필요하다는 점이 핵심 (실제 기계어 순서는 컴파일러가 정함)</text>
+</svg>
+<figcaption>그림 4-2 후위 증가는 증가 전 값을 식의 값으로, 전위 증가는 증가 후 값을 식의 값으로 사용합니다.</figcaption>
+</figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — 전위가 더 빠르다는 말은 사실일까?</p>
+<p>개념적으로 후위 연산은 '옛 값의 복사본'을 따로 보관해야 하므로 전위보다 일이 많아 보입니다. 그러나 <code>i++;</code>처럼 식의 값을 쓰지 않는 단독 문장이라면 현대 C 컴파일러는 두 경우를 완전히 같은 기계어로 만듭니다. <code>int</code> 같은 기본형에서 성능 차이는 없습니다. (C++에서 객체의 연산자를 오버로딩한 경우에는 실제로 복사 비용이 생길 수 있어 전위를 권장하는 것입니다.) C에서는 <b>식의 값을 쓰는지</b>에 따라 의미가 달라지는 것만 정확히 알면 됩니다.</p>
+</div>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 — 한 식에서 같은 변수를 두 번 바꾸기</p>
+<p><code>i = i++;</code>, <code>n = n++ + ++n;</code>, <code>printf("%d %d\n", i, i++);</code> 같은 코드는 결과를 '예측'하는 문제가 아니라 <b>미정의 동작</b>입니다. 컴파일러마다, 최적화 옵션마다 결과가 다릅니다. 이유는 이 장 마지막 소절(시퀀스 포인트)에서 자세히 설명합니다. 원칙: <b>하나의 식에서 같은 변수를 두 번 이상 변경하거나, 변경하면서 다른 곳에서 읽지 마십시오.</b></p>
+</div>
+
+<h3 id="s04-1-4">관계 연산자: 결과는 0 또는 1</h3>
+<div class="tbl"><table>
+<thead><tr><th>연산자</th><th>의미</th><th>예 (<code>a=10, b=20</code>)</th><th>결과</th></tr></thead>
+<tbody>
+<tr><td><code>&gt;</code></td><td>크다</td><td><code>a &gt; b</code></td><td>0</td></tr>
+<tr><td><code>&gt;=</code></td><td>크거나 같다</td><td><code>a &gt;= 10</code></td><td>1</td></tr>
+<tr><td><code>&lt;</code></td><td>작다</td><td><code>a &lt; b</code></td><td>1</td></tr>
+<tr><td><code>&lt;=</code></td><td>작거나 같다</td><td><code>b &lt;= 19</code></td><td>0</td></tr>
+<tr><td><code>==</code></td><td>같다</td><td><code>a == 10</code></td><td>1</td></tr>
+<tr><td><code>!=</code></td><td>다르다</td><td><code>a != b</code></td><td>1</td></tr>
+</tbody></table></div>
+<p>C에는 (C99 이전) 별도의 참/거짓 자료형이 없었고, 관계 연산의 결과는 <code>int</code>형 <b>1(참) 또는 0(거짓)</b>입니다. 그리고 조건을 판단할 때는 <b>0이면 거짓, 0이 아닌 모든 값은 참</b>으로 봅니다. C99의 <code>&lt;stdbool.h&gt;</code>가 제공하는 <code>bool</code>, <code>true</code>, <code>false</code>도 결국 1과 0입니다.</p>
+
+<figure class="code"><figcaption>ex04-4.c — 관계 연산 결과는 정수</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+int main(void)
+{
+    long long balance = 50000, amount = 70000;
+    int insufficient = balance &lt; amount;      /* 비교 결과를 정수로 저장 */
+    printf("잔액 부족 여부: %d\n", insufficient);
+    printf("%d %d\n", 3 == 3, 3 != 3);
+    printf("거래 가능 건수: %d\n", (balance &gt;= 10000) + (balance &gt;= 30000) + (balance &gt;= 60000));
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>잔액 부족 여부: 1
+1 0
+거래 가능 건수: 2</pre></figure>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 — =와 ==</p>
+<figure class="code bad"><figcaption>잘못된 예 — 왜 틀렸을까?</figcaption>
+<pre><code class="language-c">int status = 2;          /* 2: 정지 계좌 */
+if (status = 0)          /* == 대신 = */
+    printf("정상 계좌\n");
+else
+    printf("거래 불가\n");</code></pre></figure>
+<p><code>status = 0</code>은 비교가 아니라 대입입니다. status가 0으로 <b>바뀌고</b>, 대입식의 값 0이 조건이 되어 항상 거짓입니다. 반대로 <code>if (status = 1)</code>이었다면 정지 계좌가 항상 정상으로 처리되고 원장의 상태값까지 바뀝니다. gcc <code>-Wall</code>은 "suggest parentheses around assignment used as truth value" 경고를 냅니다. 일부 조직은 <code>if (0 == status)</code>처럼 상수를 왼쪽에 쓰는 요다 표기(Yoda condition)를 쓰기도 합니다(<code>0 = status</code>는 컴파일 오류가 나므로).</p>
+</div>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 — 수학식처럼 이어 쓴 비교</p>
+<p><code>if (1 &lt;= month &lt;= 12)</code>는 month가 무엇이든 항상 참입니다. 관계 연산자는 왼쪽부터 결합되므로 <code>(1 &lt;= month) &lt;= 12</code>가 되고, 앞의 결과는 0 또는 1이므로 언제나 12 이하이기 때문입니다. month가 99여도 통과합니다. 올바른 형태는 <code>1 &lt;= month &amp;&amp; month &lt;= 12</code>입니다.</p>
+</div>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — 실수는 ==로 비교하면 안 된다</p>
+<p><code>0.1 + 0.2 == 0.3</code>의 결과는 0(거짓)입니다. 2장에서 본 것처럼 0.1 + 0.2는 실제로 0.30000000000000004441…이고, 0.3은 0.29999999999999998889…로 저장되어 서로 다른 비트 패턴이기 때문입니다. 실수끼리는 <code>fabs(a - b) &lt; 1e-9</code>처럼 허용 오차로 비교해야 하며, 금액처럼 정확한 비교가 필요한 값은 처음부터 정수로 다뤄야 합니다.</p>
+</div>
+
+<h3 id="s04-1-5">논리 연산자와 단락 평가</h3>
+<div class="tbl"><table>
+<thead><tr><th>연산자</th><th>의미</th><th>결과가 1인 경우</th></tr></thead>
+<tbody>
+<tr><td><code>&amp;&amp;</code></td><td>논리곱 (AND, 그리고)</td><td>양쪽 모두 참(0이 아님)</td></tr>
+<tr><td><code>||</code></td><td>논리합 (OR, 또는)</td><td>둘 중 하나 이상 참</td></tr>
+<tr><td><code>!</code></td><td>논리부정 (NOT)</td><td>피연산자가 0일 때 (<code>!0</code> = 1, <code>!5</code> = 0)</td></tr>
+</tbody></table></div>
+
+<p>논리 연산자의 가장 중요한 성질은 <b>단락 평가(short-circuit evaluation)</b>입니다. <code>&amp;&amp;</code>는 왼쪽이 거짓이면 전체가 거짓으로 확정되므로 <b>오른쪽을 아예 계산하지 않습니다</b>. <code>||</code>는 왼쪽이 참이면 오른쪽을 계산하지 않습니다. 이것은 최적화가 아니라 <b>표준이 보장하는 규칙</b>이므로 안전장치로 활용할 수 있습니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 250" width="700" role="img" aria-label="단락 평가 흐름">
+  <text x="20" y="28" class="mono bold">count != 0 &amp;&amp; total / count &gt; 1000</text>
+  <rect class="box" x="20" y="50" width="160" height="50" rx="8"/>
+  <text x="100" y="80" text-anchor="middle" class="mono small">count != 0 ?</text>
+  <path class="arrow" d="M180 75 H 260"/>
+  <text x="220" y="65" text-anchor="middle" class="small acc">참(1)</text>
+  <rect class="box" x="260" y="50" width="220" height="50" rx="8"/>
+  <text x="370" y="80" text-anchor="middle" class="mono small">total / count &gt; 1000 ?</text>
+  <path class="arrow" d="M480 75 H 540"/>
+  <rect class="hl" x="540" y="50" width="140" height="50" rx="8"/>
+  <text x="610" y="80" text-anchor="middle" class="small">그 결과가 전체 값</text>
+  <path class="arrow" d="M100 100 V 160"/>
+  <text x="115" y="135" class="small warn-t">거짓(0)</text>
+  <rect class="hl2" x="20" y="160" width="300" height="50" rx="8"/>
+  <text x="170" y="190" text-anchor="middle" class="small">전체 = 0, 오른쪽은 실행하지 않음</text>
+  <text x="510" y="190" text-anchor="middle" class="small acc">→ 0으로 나누기가 원천 차단됨</text>
+</svg>
+<figcaption>그림 4-3 &amp;&amp;의 단락 평가. 왼쪽이 거짓이면 오른쪽 식은 실행되지 않습니다.</figcaption>
+</figure>
+
+<figure class="code"><figcaption>ex04-5.c — 단락 평가 확인</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+int main(void)
+{
+    int count = 0;
+    long long total = 50000;
+    int calls = 0;
+
+    int ok = (count != 0) &amp;&amp; (total / count &gt; 1000);   /* 0으로 나누지 않음 */
+    printf("ok = %d\n", ok);
+
+    int r = (1 || ++calls);        /* 왼쪽이 참이므로 ++calls는 실행 안 됨 */
+    printf("r = %d, calls = %d\n", r, calls);
+    r = (0 || ++calls);            /* 왼쪽이 거짓이므로 오른쪽 실행 */
+    printf("r = %d, calls = %d\n", r, calls);
+    printf("%d %d %d\n", !0, !7, !!7);    /* !!x는 x를 0/1로 정규화 */
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>ok = 0
+r = 1, calls = 0
+r = 1, calls = 1
+1 0 1</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — 단락 평가가 보장되는 이유</p>
+<p><code>&amp;&amp;</code>와 <code>||</code>는 C 표준에서 "왼쪽 피연산자의 평가가 끝난 뒤에 <b>시퀀스 포인트</b>가 있다"고 정의되어 있습니다. 즉 왼쪽의 계산과 그 부수 효과(변수 변경 등)가 완전히 끝난 다음에 오른쪽을 평가할지 결정합니다. 기계어로는 조건 분기(jump) 명령으로 번역되어, 왼쪽 결과에 따라 오른쪽 코드로 아예 건너가지 않습니다. 그래서 "포인터가 NULL이 아니면 그 내용을 본다"(<code>p != NULL &amp;&amp; p-&gt;balance &gt; 0</code>) 같은 관용구가 안전합니다. 반대로 오른쪽에 <code>++calls</code>처럼 부수 효과를 넣으면 그것이 실행될지 말지가 왼쪽에 달려 있으므로, 부수 효과는 논리식 밖으로 빼는 것이 읽기 좋은 코드입니다.</p>
+</div>
+
+<div class="box tip"><p class="box-title" data-tag="잠깐">여기서 잠깐 — 드모르간의 법칙</p>
+<p>"정상 계좌이고 한도 이내인 경우가 <b>아니면</b> 거절"을 코드로 옮기면 <code>!(is_normal &amp;&amp; within_limit)</code>입니다. 드모르간의 법칙에 따라 이는 <code>!is_normal || !within_limit</code>(정상 계좌가 아니거나 한도를 넘으면 거절)와 같습니다. 부정이 섞인 복잡한 조건은 이 법칙으로 풀어 쓰면 읽기 쉬워지고 버그가 줄어듭니다.</p>
+</div>
+
+<div class="ex"><p class="ex-title">예제 4-2 <span class="lv">난이도 ★★☆</span></p>
+<p>다음 코드의 출력 결과를 쓰십시오.</p>
+<pre><code class="language-c">int a = 0, b = 5, c = 0;
+int r1 = a &amp;&amp; (c = b);
+int r2 = b || (c = 9);
+int r3 = !a + !b + (a &lt; b &lt; 3);
+printf("%d %d %d %d\n", r1, r2, r3, c);</code></pre>
+<details><summary>정답과 해설 보기</summary>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>0 1 2 0</pre></figure>
+<p>r1: a가 0이므로 <code>(c = b)</code>는 실행되지 않고 r1 = 0, c는 0 그대로. r2: b가 0이 아니므로(참) <code>(c = 9)</code>는 실행되지 않고 r2 = 1. r3: <code>!a</code> = 1, <code>!b</code> = 0, <code>a &lt; b &lt; 3</code>은 <code>(0 &lt; 5) &lt; 3</code> = <code>1 &lt; 3</code> = 1, 합계 2. c는 한 번도 바뀌지 않아 0입니다.</p>
+</details></div>
+
+<h2 id="s04-2"><span class="num">04-2</span>그 외 유용한 연산자</h2>
+
+<h3 id="s04-2-1">형 변환: 암시적 변환과 명시적 변환(캐스트)</h3>
+
+<p>CPU는 <b>같은 자료형끼리만</b> 연산할 수 있습니다. 정수 덧셈 회로와 실수 덧셈 회로가 다르고, 4바이트 덧셈과 8바이트 덧셈도 다른 명령입니다. 그래서 <code>int + double</code>처럼 자료형이 다른 값이 만나면 컴파일러가 연산 전에 한쪽을 다른 쪽 자료형으로 <b>변환</b>하는 기계어를 넣습니다. 이를 <b>암시적 형 변환(implicit conversion)</b>이라 하고, 프로그래머가 <code>(double)x</code>처럼 직접 지시하는 것을 <b>명시적 형 변환(캐스트, cast)</b>이라고 합니다.</p>
+
+<h4>규칙 1: 정수 승격(integer promotion)</h4>
+<p><code>char</code>, <code>short</code>(그리고 그 unsigned 버전) 값은 연산에 쓰일 때 먼저 <code>int</code>로 변환됩니다. 대부분의 CPU에서 int가 가장 자연스럽고 빠른 연산 단위이기 때문입니다. 그래서 <code>char a = 100, b = 100;</code>일 때 <code>a + b</code>는 오버플로 없이 int 200이 됩니다. 그 결과를 다시 char에 저장할 때 범위를 넘는 것이 문제일 뿐입니다.</p>
+
+<h4>규칙 2: 일반 산술 변환(usual arithmetic conversions)</h4>
+<p>이항 연산의 두 피연산자 자료형이 다르면 <b>더 넓은 쪽</b>으로 맞춥니다. 대략의 순서는 다음과 같습니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 250" width="700" role="img" aria-label="일반 산술 변환의 자료형 서열">
+  <rect class="hl2" x="20" y="20" width="160" height="36" rx="6"/><text x="100" y="43" text-anchor="middle" class="mono small">long double</text>
+  <rect class="hl2" x="20" y="64" width="160" height="36" rx="6"/><text x="100" y="87" text-anchor="middle" class="mono small">double</text>
+  <rect class="hl2" x="20" y="108" width="160" height="36" rx="6"/><text x="100" y="131" text-anchor="middle" class="mono small">float</text>
+  <rect class="hl" x="20" y="152" width="160" height="36" rx="6"/><text x="100" y="175" text-anchor="middle" class="mono small">unsigned long long</text>
+  <rect class="hl" x="20" y="196" width="160" height="36" rx="6"/><text x="100" y="219" text-anchor="middle" class="mono small">long long</text>
+  <rect class="hl" x="220" y="152" width="140" height="36" rx="6"/><text x="290" y="175" text-anchor="middle" class="mono small">unsigned long</text>
+  <rect class="hl" x="220" y="196" width="140" height="36" rx="6"/><text x="290" y="219" text-anchor="middle" class="mono small">long</text>
+  <rect class="box" x="400" y="152" width="130" height="36" rx="6"/><text x="465" y="175" text-anchor="middle" class="mono small">unsigned int</text>
+  <rect class="box" x="400" y="196" width="130" height="36" rx="6"/><text x="465" y="219" text-anchor="middle" class="mono small">int</text>
+  <text x="600" y="219" text-anchor="middle" class="small mute">char, short</text>
+  <path class="arrow-m" d="M560 214 H 535"/>
+  <text x="600" y="240" text-anchor="middle" class="small mute">(정수 승격)</text>
+  <path class="arrow" d="M200 30 V 230"/>
+  <text x="205" y="110" class="small acc">위로 갈수록</text>
+  <text x="205" y="128" class="small acc">'넓은' 형</text>
+  <text x="560" y="60" text-anchor="middle" class="small">실수가 하나라도 있으면</text>
+  <text x="560" y="80" text-anchor="middle" class="small">→ 더 넓은 실수형으로</text>
+  <text x="560" y="110" text-anchor="middle" class="small">정수끼리는 순위가 높은 쪽,</text>
+  <text x="560" y="130" text-anchor="middle" class="small warn-t">같은 순위면 unsigned 쪽으로!</text>
+</svg>
+<figcaption>그림 4-4 일반 산술 변환의 대략적인 서열. 같은 크기의 signed와 unsigned가 만나면 unsigned로 변환됩니다.</figcaption>
+</figure>
+
+<figure class="code"><figcaption>ex04-6.c — 암시적 변환과 캐스트</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+int main(void)
+{
+    int sum = 7, cnt = 2;
+    double avg1 = sum / cnt;              /* int / int = 3 → 3.0 */
+    double avg2 = (double)sum / cnt;      /* 7.0 / 2 → 7.0 / 2.0 = 3.5 */
+    double avg3 = (double)(sum / cnt);    /* (3) → 3.0 */
+    printf("%f %f %f\n", avg1, avg2, avg3);
+
+    int i = 3.99;                          /* double → int: 소수부 버림 */
+    int j = -3.99;
+    printf("%d %d\n", i, j);
+    printf("%d\n", (int)(2.5 + 0.5));     /* 양수 반올림 관용구 */
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>3.000000 3.500000 3.000000
+3 -3
+3</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — (double)sum / cnt와 (double)(sum / cnt)의 차이</p>
+<p>캐스트 연산자 <code>(자료형)</code>는 단항 연산자로 우선순위가 <code>/</code>보다 높습니다. 그래서 <code>(double)sum / cnt</code>는 <code>((double)sum) / cnt</code>입니다. sum이 7.0이 된 뒤 일반 산술 변환에 따라 cnt도 2.0으로 바뀌어 실수 나눗셈 3.5가 됩니다. 반면 <code>(double)(sum / cnt)</code>는 괄호 안의 정수 나눗셈이 먼저 끝나 3이 된 뒤 3.0으로 바뀌므로, 이미 잃어버린 0.5는 돌아오지 않습니다. <b>캐스트는 변환 시점이 핵심</b>입니다.</p>
+<p>실수를 정수로 변환하면 소수부는 0 방향으로 버려집니다(3.99 → 3, -3.99 → -3). 변환 결과가 정수형 범위를 넘으면(예: <code>(int)1e20</code>) 미정의 동작입니다.</p>
+</div>
+
+<h4>가장 위험한 함정: signed와 unsigned의 비교</h4>
+<figure class="code"><figcaption>ex04-7.c</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+int main(void)
+{
+    int balance = -1;
+    unsigned int limit = 1;
+    printf("%d\n", balance &lt; limit);            /* -1 &lt; 1 ? */
+    printf("%d\n", -1 &lt; (int)sizeof(int));      /* 캐스트로 해결 */
+    printf("%d\n", -1 &lt; sizeof(int));           /* size_t(unsigned)와 비교 */
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>0
+1
+0</pre></figure>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 200" width="700" role="img" aria-label="-1이 unsigned로 변환되는 과정">
+  <text x="20" y="30" class="mono">int -1</text>
+  <rect class="hl2" x="140" y="12" width="380" height="30"/>
+  <text x="330" y="33" text-anchor="middle" class="mono small">1111 1111 1111 1111 1111 1111 1111 1111</text>
+  <path class="arrow" d="M330 45 V 80"/>
+  <text x="340" y="68" class="small">비트는 그대로, 해석만 unsigned로</text>
+  <text x="20" y="105" class="mono">unsigned</text>
+  <rect class="bad" x="140" y="85" width="380" height="30"/>
+  <text x="330" y="106" text-anchor="middle" class="mono small">4294967295 (UINT_MAX)</text>
+  <text x="20" y="160" class="small">4294967295 &lt; 1 → 거짓(0)</text>
+  <text x="20" y="185" class="small warn-t">"잔액이 한도보다 작다"는 검사가 음수 잔액에서 정반대로 동작합니다</text>
+</svg>
+<figcaption>그림 4-5 int와 unsigned int를 비교하면 int 쪽이 unsigned로 변환되어 -1이 약 43억이 됩니다.</figcaption>
+</figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까?</p>
+<p><code>int</code>와 <code>unsigned int</code>는 같은 순위(크기)이므로 일반 산술 변환 규칙에 따라 <b>int 쪽이 unsigned int로 변환</b>됩니다. signed → unsigned 변환은 "2<sup>32</sup>를 더해 범위 안에 넣는다"로 정의되어 있어 -1은 4294967295가 됩니다. 2의 보수 환경에서는 비트 패턴이 그대로이고 해석만 바뀌는 것입니다. <code>sizeof</code>의 결과 <code>size_t</code>도 unsigned이므로 <code>-1 &lt; sizeof(int)</code>도 거짓입니다(이 경우 -1은 64비트 unsigned 최대값이 됩니다). gcc는 <code>-Wextra</code>(정확히는 <code>-Wsign-compare</code>)로 경고합니다.</p>
+</div>
+<div class="box fix"><p class="box-title" data-tag="해결">이렇게 해결합니다</p>
+<ul>
+<li>금액, 건수, 인덱스 비교에서 signed와 unsigned를 섞지 않습니다. 금액은 모두 <code>long long</code>으로 통일합니다.</li>
+<li>섞어야 한다면 비교 전에 음수 여부를 먼저 검사하거나 명시적으로 캐스트합니다: <code>if (n &lt; 0 || (size_t)n &lt; len)</code>.</li>
+<li><code>-Wall -Wextra</code>로 컴파일하고 <code>-Wsign-compare</code>, <code>-Wconversion</code> 경고를 확인합니다.</li>
+</ul>
+</div>
+
+<div class="box fin"><p class="box-title" data-tag="금융 실무">은행 시스템에서는 — 암시적 변환이 만든 한도 우회</p>
+<p>이체 한도 검사 함수가 <code>if (amount &gt; daily_limit) reject();</code>였고, <code>amount</code>는 <code>long long</code>, <code>daily_limit</code>은 다른 모듈에서 <code>unsigned long long</code>으로 선언되어 있었다고 합시다. 정상 금액에서는 문제가 없지만, 전문 파싱 오류로 amount에 -1이 들어오면 -1은 unsigned long long 최대값(약 1,844경)으로 변환되어 한도 초과로 거절됩니다. 반대 방향, 즉 한도 쪽이 signed이고 금액 쪽이 unsigned라면 음수 한도(설정 오류)가 거대한 양수가 되어 모든 이체가 통과할 수 있습니다. 실무 원칙은 (1) 금액 관련 자료형을 프로젝트 전체에서 하나로 통일하고, (2) 외부 입력 금액은 변환 직후 범위(0 &lt; 금액 ≤ 최대)를 검사하며, (3) 컴파일 경고 0건을 빌드 기준으로 삼는 것입니다.</p>
+</div>
+
+<div class="ex"><p class="ex-title">예제 4-3 <span class="lv">난이도 ★★★</span></p>
+<p>다음 출력 결과를 쓰십시오(64비트 리눅스 gcc).</p>
+<pre><code class="language-c">char a = 100, b = 100;
+char c = a + b;
+unsigned char u = 200;
+int x = 5;
+printf("%d %d %d %f\n", a + b, c, u + x, x / 2 * 2.0);</code></pre>
+<details><summary>정답과 해설 보기</summary>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>200 -56 205 4.000000</pre></figure>
+<p><code>a + b</code>는 정수 승격으로 int 200입니다. 이를 signed char(x86 gcc에서 char는 signed) c에 저장하면 범위(-128~127)를 넘어 구현 정의 변환이 일어나며, gcc는 하위 8비트(1100 1000)를 취해 -56이 됩니다. <code>u + x</code>는 둘 다 int로 승격되어 205. <code>x / 2 * 2.0</code>은 왼쪽부터 <code>x / 2</code> = 2(정수 나눗셈)를 먼저 하고 2 * 2.0 = 4.0이 됩니다. <code>2.0</code>이 있다고 식 전체가 실수 계산이 되는 것이 아니라, <b>각 연산마다</b> 그 연산의 두 피연산자만 보고 변환한다는 점이 핵심입니다.</p>
+</details></div>
+
+<h3 id="s04-2-2">sizeof 연산자 다시 보기</h3>
+<p><code>sizeof</code>는 컴파일 시간에 크기를 계산하는 <b>연산자</b>입니다(가변 길이 배열 VLA만 예외). 그래서 괄호 안의 식은 <b>실행되지 않습니다</b>.</p>
+<figure class="code"><figcaption>ex04-8.c</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+int main(void)
+{
+    int n = 10;
+    size_t s = sizeof(n++);          /* n++는 실행되지 않음 */
+    printf("%zu %d\n", s, n);
+    printf("%zu %zu %zu\n", sizeof(1 + 2.0), sizeof('A' + 1), sizeof(short) );
+    long long arr[5];
+    printf("%zu %zu\n", sizeof arr, sizeof arr / sizeof arr[0]);   /* 배열 크기와 원소 개수 */
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>4 10
+8 4 2
+40 5</pre></figure>
+<p><code>sizeof(1 + 2.0)</code>은 double이므로 8, <code>'A' + 1</code>은 int이므로 4입니다. <code>sizeof arr / sizeof arr[0]</code>은 배열 원소 개수를 구하는 관용구로 8장에서 자주 씁니다.</p>
+
+<h3 id="s04-2-3">복합 대입 연산자</h3>
+<p><code>a = a + b</code>를 <code>a += b</code>로 줄여 쓸 수 있습니다. <code>-=</code>, <code>*=</code>, <code>/=</code>, <code>%=</code>, 그리고 비트 연산의 <code>&amp;=</code>, <code>|=</code>, <code>^=</code>, <code>&lt;&lt;=</code>, <code>&gt;&gt;=</code>가 있습니다.</p>
+<figure class="code"><figcaption>ex04-9.c</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+int main(void)
+{
+    long long balance = 100000;
+    balance += 50000;      /* 입금: 150000 */
+    balance -= 30000;      /* 출금: 120000 */
+    long long fee = 1234;
+    fee /= 10;             /* 123 */
+    fee *= 10;             /* 1230 : 10원 미만 절사 */
+    int x = 10;
+    x *= 2 + 3;            /* x = x * (2 + 3) = 50, x = x * 2 + 3 이 아님! */
+    printf("%lld %lld %d\n", balance, fee, x);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>120000 1230 50</pre></figure>
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — x *= 2 + 3이 50인 이유</p>
+<p>복합 대입 연산자는 대입 연산자와 같은 가장 낮은 우선순위 그룹에 속합니다. 그래서 오른쪽 식 <code>2 + 3</code>이 먼저 완전히 계산된 뒤 <code>x = x * (5)</code>가 됩니다. 또 <code>a += b</code>는 <code>a = a + b</code>와 거의 같지만 <b>a를 한 번만 평가</b>한다는 차이가 있습니다. <code>arr[i++] += 1</code>은 i를 한 번 증가시키지만, <code>arr[i++] = arr[i++] + 1</code>은 i를 두 번 바꾸는 UB 코드가 됩니다.</p>
+</div>
+
+<h3 id="s04-2-4">콤마 연산자</h3>
+<p>콤마 연산자 <code>,</code>는 왼쪽 식을 평가한 뒤(결과는 버림) 오른쪽 식을 평가하고, <b>오른쪽 식의 값</b>을 전체 값으로 합니다. 왼쪽과 오른쪽 사이에는 시퀀스 포인트가 있어 순서가 보장됩니다. 우선순위가 모든 연산자 중 가장 낮습니다.</p>
+<figure class="code"><figcaption>ex04-10.c</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+int main(void)
+{
+    int a, b, x;
+    x = (a = 1, b = 2, a + b);   /* 괄호 안: 1 대입, 2 대입, 그 뒤 a+b의 값 3 */
+    printf("%d\n", x);
+    x = a = 5, b = 7;            /* 괄호가 없으면: (x = a = 5), (b = 7) */
+    printf("%d %d %d\n", x, a, b);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>3
+5 5 7</pre></figure>
+<p>함수 인수를 구분하는 콤마(<code>printf("%d", a, b)</code>)나 변수 선언의 콤마(<code>int a, b;</code>)는 콤마 <b>연산자가 아니라</b> 구분자입니다. 콤마 연산자는 주로 <code>for (i = 0, j = n; i &lt; j; i++, j--)</code>처럼 반복문에서 씁니다(6장). 그 외의 곳에서는 읽기 어려우므로 남용하지 않습니다.</p>
+
+<h3 id="s04-2-5">조건 연산자 ?:</h3>
+<p><code>조건 ? 식1 : 식2</code>는 조건이 참이면 식1, 거짓이면 식2의 값을 가집니다. C의 유일한 삼항 연산자이며, 선택된 쪽만 평가됩니다(조건 뒤에 시퀀스 포인트).</p>
+<figure class="code"><figcaption>ex04-11.c — 수수료 결정</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+int main(void)
+{
+    long long amount = 1500000;
+    int is_vip = 0;
+    long long fee = (is_vip || amount &gt;= 1000000) ? 0 : 500;   /* VIP이거나 100만원 이상이면 면제 */
+    long long a = 30, b = 70;
+    long long bigger = (a &gt; b) ? a : b;
+    printf("수수료 %lld원, 큰 값 %lld\n", fee, bigger);
+    printf("%s\n", amount &gt; 0 ? "입금" : "출금");
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>수수료 0원, 큰 값 70
+입금</pre></figure>
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 — 조건 연산자의 결과 자료형</p>
+<p>조건 연산자의 두 결과 식도 일반 산술 변환을 거쳐 <b>공통 자료형</b>이 됩니다. <code>printf("%d\n", 1 ? 1 : 2.0);</code>은 결과가 double 1.0이 되어 <code>%d</code>와 불일치(UB)입니다. 또 <code>cond ? -1 : 1U</code>는 unsigned가 되어 -1이 4294967295가 됩니다. 조건 연산자는 짧고 명확한 선택에만 쓰고, 중첩(<code>a ? b : c ? d : e</code>)은 if문(5장)으로 바꾸는 것이 좋습니다.</p>
+</div>
+
+<h3 id="s04-2-6">비트 연산 입문</h3>
+<p>비트 연산자는 정수를 <b>비트 단위</b>로 계산합니다. 하드웨어 제어, 압축, 암호, 그리고 금융 시스템에서는 계좌 상태 플래그나 권한 코드를 한 정수에 묶어 저장할 때 씁니다(20장에서 깊이 다룹니다).</p>
+<div class="tbl"><table>
+<thead><tr><th>연산자</th><th>이름</th><th>규칙</th><th>예 (<code>0x0C</code>=1100, <code>0x0A</code>=1010)</th></tr></thead>
+<tbody>
+<tr><td><code>&amp;</code></td><td>비트 AND</td><td>둘 다 1이면 1</td><td><code>0x0C &amp; 0x0A</code> = 1000 = <code>0x08</code></td></tr>
+<tr><td><code>|</code></td><td>비트 OR</td><td>하나라도 1이면 1</td><td><code>0x0C | 0x0A</code> = 1110 = <code>0x0E</code></td></tr>
+<tr><td><code>^</code></td><td>비트 XOR</td><td>서로 다르면 1</td><td><code>0x0C ^ 0x0A</code> = 0110 = <code>0x06</code></td></tr>
+<tr><td><code>~</code></td><td>비트 NOT</td><td>0과 1을 뒤집음</td><td><code>(unsigned char)~0x0C</code> = 1111 0011 = <code>0xF3</code></td></tr>
+<tr><td><code>&lt;&lt;</code></td><td>왼쪽 시프트</td><td>비트를 왼쪽으로 n칸, 오른쪽은 0</td><td><code>1 &lt;&lt; 3</code> = 8</td></tr>
+<tr><td><code>&gt;&gt;</code></td><td>오른쪽 시프트</td><td>비트를 오른쪽으로 n칸</td><td><code>40 &gt;&gt; 2</code> = 10</td></tr>
+</tbody></table></div>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 260" width="700" role="img" aria-label="비트 플래그 설정, 검사, 해제">
+  <text x="20" y="28" class="bold">계좌 상태 플래그 (하위 4비트)</text>
+  <text x="200" y="55" text-anchor="middle" class="small">bit3 VIP</text>
+  <text x="290" y="55" text-anchor="middle" class="small">bit2 대출</text>
+  <text x="380" y="55" text-anchor="middle" class="small">bit1 압류</text>
+  <text x="470" y="55" text-anchor="middle" class="small">bit0 정지</text>
+  <text x="40" y="88" class="mono small">status</text>
+  <rect class="box" x="160" y="65" width="80" height="34"/><text x="200" y="88" text-anchor="middle" class="mono">1</text>
+  <rect class="box" x="250" y="65" width="80" height="34"/><text x="290" y="88" text-anchor="middle" class="mono">0</text>
+  <rect class="box" x="340" y="65" width="80" height="34"/><text x="380" y="88" text-anchor="middle" class="mono">0</text>
+  <rect class="box" x="430" y="65" width="80" height="34"/><text x="470" y="88" text-anchor="middle" class="mono">0</text>
+  <text x="40" y="138" class="mono small">|= 0x1</text>
+  <rect class="box" x="160" y="115" width="80" height="34"/><text x="200" y="138" text-anchor="middle" class="mono">1</text>
+  <rect class="box" x="250" y="115" width="80" height="34"/><text x="290" y="138" text-anchor="middle" class="mono">0</text>
+  <rect class="box" x="340" y="115" width="80" height="34"/><text x="380" y="138" text-anchor="middle" class="mono">0</text>
+  <rect class="hl" x="430" y="115" width="80" height="34"/><text x="470" y="138" text-anchor="middle" class="mono">1</text>
+  <text x="530" y="138" class="small acc">정지 설정 (다른 비트 유지)</text>
+  <text x="40" y="188" class="mono small">&amp; 0x1</text>
+  <rect class="dash" x="160" y="165" width="80" height="34"/><text x="200" y="188" text-anchor="middle" class="mono">0</text>
+  <rect class="dash" x="250" y="165" width="80" height="34"/><text x="290" y="188" text-anchor="middle" class="mono">0</text>
+  <rect class="dash" x="340" y="165" width="80" height="34"/><text x="380" y="188" text-anchor="middle" class="mono">0</text>
+  <rect class="hl2" x="430" y="165" width="80" height="34"/><text x="470" y="188" text-anchor="middle" class="mono">1</text>
+  <text x="530" y="188" class="small">0이 아니면 정지 상태</text>
+  <text x="40" y="238" class="mono small">&amp;= ~0x1</text>
+  <rect class="box" x="160" y="215" width="80" height="34"/><text x="200" y="238" text-anchor="middle" class="mono">1</text>
+  <rect class="box" x="250" y="215" width="80" height="34"/><text x="290" y="238" text-anchor="middle" class="mono">0</text>
+  <rect class="box" x="340" y="215" width="80" height="34"/><text x="380" y="238" text-anchor="middle" class="mono">0</text>
+  <rect class="bad" x="430" y="215" width="80" height="34"/><text x="470" y="238" text-anchor="middle" class="mono">0</text>
+  <text x="530" y="238" class="small warn-t">정지 해제</text>
+</svg>
+<figcaption>그림 4-6 비트 OR로 플래그 설정, AND로 검사, AND와 NOT으로 해제하기</figcaption>
+</figure>
+
+<figure class="code"><figcaption>ex04-12.c — 계좌 상태 플래그</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+int main(void)
+{
+    const unsigned int ST_STOP  = 1u &lt;&lt; 0;   /* 0x1 거래정지 */
+    const unsigned int ST_SEIZE = 1u &lt;&lt; 1;   /* 0x2 압류 */
+    const unsigned int ST_LOAN  = 1u &lt;&lt; 2;   /* 0x4 대출 연결 */
+    const unsigned int ST_VIP   = 1u &lt;&lt; 3;   /* 0x8 우수고객 */
+
+    unsigned int status = ST_VIP;            /* 1000 */
+    status |= ST_STOP;                       /* 1001 : 정지 설정 */
+    printf("status = 0x%X\n", status);
+    printf("정지? %d, 대출? %d\n", (status &amp; ST_STOP) != 0, (status &amp; ST_LOAN) != 0);
+    status &amp;= ~ST_STOP;                      /* 1000 : 정지 해제 */
+    status ^= ST_LOAN;                       /* 1100 : 대출 플래그 뒤집기 */
+    printf("status = 0x%X\n", status);
+    printf("%d %d\n", 5 &lt;&lt; 2, 100 &gt;&gt; 3);     /* 5*4 = 20, 100/8 = 12 */
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>status = 0x9
+정지? 1, 대출? 0
+status = 0xC
+20 12</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — 비트 연산에는 왜 unsigned를 쓸까?</p>
+<p>왼쪽 시프트는 2를 곱하는 것과 같고(<code>x &lt;&lt; n</code> = x × 2<sup>n</sup>), 오른쪽 시프트는 양수에서 2<sup>n</sup>으로 나눈 몫과 같습니다. 그러나 <b>signed 정수</b>에서는 함정이 있습니다. 음수를 왼쪽으로 시프트하거나 결과가 범위를 넘으면 UB이고, 음수를 오른쪽으로 시프트한 결과는 구현 정의입니다(대부분 부호 비트를 복사하는 산술 시프트). 또 시프트 횟수가 자료형 비트 수 이상이면(<code>1 &lt;&lt; 32</code>, int 기준) UB입니다. 플래그와 비트 마스크에는 <b>unsigned</b>를 쓰고 상수에도 <code>1u</code>처럼 접미사를 붙이는 것이 안전한 습관입니다.</p>
+</div>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 — &amp;와 &amp;&amp;, 그리고 우선순위</p>
+<ul>
+<li><code>&amp;</code>(비트 AND)와 <code>&amp;&amp;</code>(논리 AND)는 다릅니다. <code>1 &amp; 2</code>는 0이지만 <code>1 &amp;&amp; 2</code>는 1입니다. 또 <code>&amp;</code>는 단락 평가를 하지 않습니다.</li>
+<li><code>if (status &amp; ST_STOP == 0)</code>은 <code>==</code>가 <code>&amp;</code>보다 우선순위가 높아서 <code>status &amp; (ST_STOP == 0)</code>, 즉 <code>status &amp; 0</code> = 항상 0이 됩니다. 비트 연산은 반드시 괄호로 감쌉니다: <code>if ((status &amp; ST_STOP) == 0)</code>. 이는 C 설계자 데니스 리치도 인정한 역사적 실수입니다.</li>
+</ul>
+</div>
+
+<div class="ex"><p class="ex-title">예제 4-4 <span class="lv">난이도 ★★☆</span></p>
+<p><code>unsigned int perm = 0x5;</code>(이진수 0101)일 때 다음 각 식의 값을 16진수로 쓰십시오. (1) <code>perm | 0x8</code> (2) <code>perm &amp; 0x4</code> (3) <code>perm ^ 0xF</code> (4) <code>perm &lt;&lt; 2</code> (5) <code>perm &amp; ~0x1u</code></p>
+<details><summary>정답과 해설 보기</summary>
+<p>(1) 0101 | 1000 = 1101 = <b>0xD</b> (2) 0101 &amp; 0100 = 0100 = <b>0x4</b> (3) 0101 ^ 1111 = 1010 = <b>0xA</b> (XOR with 1은 뒤집기) (4) 0101을 왼쪽으로 2칸 = 1 0100 = <b>0x14</b> (= 5 × 4 = 20) (5) <code>~0x1u</code> = 1111…1110이므로 bit0만 지움 → 0100 = <b>0x4</b>.</p>
+</details></div>
+
+<h3 id="s04-2-7">연산자 우선순위와 결합 규칙</h3>
+<p>하나의 식에 여러 연산자가 있으면 <b>우선순위(precedence)</b>가 높은 것부터 묶이고, 우선순위가 같으면 <b>결합 규칙(associativity)</b>에 따라 왼쪽부터(또는 오른쪽부터) 묶입니다.</p>
+<div class="tbl"><table>
+<thead><tr><th>순위</th><th>연산자</th><th>설명</th><th>결합 방향</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>() [] -&gt; .</code> 후위<code>++ --</code></td><td>함수 호출, 배열, 멤버, 후위 증감</td><td>왼쪽 → 오른쪽</td></tr>
+<tr><td>2</td><td>전위<code>++ --</code> 단항<code>+ -</code> <code>! ~</code> <code>(type)</code> <code>*</code>(간접) <code>&amp;</code>(주소) <code>sizeof</code></td><td>단항 연산자</td><td><b>오른쪽 → 왼쪽</b></td></tr>
+<tr><td>3</td><td><code>* / %</code></td><td>곱셈류</td><td>왼쪽 → 오른쪽</td></tr>
+<tr><td>4</td><td><code>+ -</code></td><td>덧셈류</td><td>왼쪽 → 오른쪽</td></tr>
+<tr><td>5</td><td><code>&lt;&lt; &gt;&gt;</code></td><td>시프트</td><td>왼쪽 → 오른쪽</td></tr>
+<tr><td>6</td><td><code>&lt; &lt;= &gt; &gt;=</code></td><td>관계</td><td>왼쪽 → 오른쪽</td></tr>
+<tr><td>7</td><td><code>== !=</code></td><td>동등</td><td>왼쪽 → 오른쪽</td></tr>
+<tr><td>8</td><td><code>&amp;</code></td><td>비트 AND</td><td>왼쪽 → 오른쪽</td></tr>
+<tr><td>9</td><td><code>^</code></td><td>비트 XOR</td><td>왼쪽 → 오른쪽</td></tr>
+<tr><td>10</td><td><code>|</code></td><td>비트 OR</td><td>왼쪽 → 오른쪽</td></tr>
+<tr><td>11</td><td><code>&amp;&amp;</code></td><td>논리 AND</td><td>왼쪽 → 오른쪽</td></tr>
+<tr><td>12</td><td><code>||</code></td><td>논리 OR</td><td>왼쪽 → 오른쪽</td></tr>
+<tr><td>13</td><td><code>?:</code></td><td>조건</td><td><b>오른쪽 → 왼쪽</b></td></tr>
+<tr><td>14</td><td><code>= += -= *= /= %= &amp;= ^= |= &lt;&lt;= &gt;&gt;=</code></td><td>대입</td><td><b>오른쪽 → 왼쪽</b></td></tr>
+<tr><td>15</td><td><code>,</code></td><td>콤마</td><td>왼쪽 → 오른쪽</td></tr>
+</tbody></table></div>
+
+<div class="box tip"><p class="box-title" data-tag="잠깐">여기서 잠깐 — 외우는 요령</p>
+<p>"<b>단항 &gt; 산술(곱 &gt; 덧) &gt; 시프트 &gt; 관계 &gt; 동등 &gt; 비트(&amp; ^ |) &gt; 논리(&amp;&amp; ||) &gt; 조건 &gt; 대입 &gt; 콤마</b>". 그리고 오른쪽 결합은 단항, 조건, 대입 세 그룹뿐입니다. 하지만 실무의 진짜 요령은 <b>헷갈리면 괄호를 친다</b>입니다. 괄호는 성능에 아무 영향이 없고, 코드를 읽는 다음 사람(6개월 뒤의 자신 포함)을 구합니다.</p>
+</div>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 270" width="700" role="img" aria-label="식의 구문 트리">
+  <text x="20" y="28" class="mono bold">fee = amt &gt; 100 &amp;&amp; !vip ? amt * 3 / 1000 : 0</text>
+  <rect class="hl2" x="300" y="45" width="60" height="32" rx="6"/><text x="330" y="66" text-anchor="middle" class="mono">=</text>
+  <path class="line" d="M320 77 L 160 105"/><path class="line" d="M340 77 L 430 105"/>
+  <rect class="box" x="125" y="105" width="70" height="30" rx="6"/><text x="160" y="125" text-anchor="middle" class="mono small">fee</text>
+  <rect class="hl" x="400" y="105" width="60" height="30" rx="6"/><text x="430" y="125" text-anchor="middle" class="mono">?:</text>
+  <path class="line" d="M410 135 L 260 160"/><path class="line" d="M430 135 L 470 160"/><path class="line" d="M450 135 L 620 160"/>
+  <rect class="box" x="225" y="160" width="70" height="30" rx="6"/><text x="260" y="180" text-anchor="middle" class="mono small">&amp;&amp;</text>
+  <rect class="box" x="435" y="160" width="70" height="30" rx="6"/><text x="470" y="180" text-anchor="middle" class="mono small">/</text>
+  <rect class="box" x="590" y="160" width="60" height="30" rx="6"/><text x="620" y="180" text-anchor="middle" class="mono small">0</text>
+  <path class="line" d="M245 190 L 170 215"/><path class="line" d="M275 190 L 320 215"/>
+  <rect class="line" x="120" y="215" width="100" height="28" rx="6"/><text x="170" y="234" text-anchor="middle" class="mono small">amt &gt; 100</text>
+  <rect class="line" x="285" y="215" width="70" height="28" rx="6"/><text x="320" y="234" text-anchor="middle" class="mono small">!vip</text>
+  <path class="line" d="M455 190 L 420 215"/><path class="line" d="M485 190 L 530 215"/>
+  <rect class="line" x="375" y="215" width="90" height="28" rx="6"/><text x="420" y="234" text-anchor="middle" class="mono small">amt * 3</text>
+  <rect class="line" x="500" y="215" width="60" height="28" rx="6"/><text x="530" y="234" text-anchor="middle" class="mono small">1000</text>
+  <text x="350" y="265" text-anchor="middle" class="small mute">우선순위가 낮은 연산자일수록 트리의 위쪽(나중에 계산)에 위치</text>
+</svg>
+<figcaption>그림 4-7 우선순위에 따라 식이 묶이는 구조(구문 트리). 대입이 가장 위, 조건 연산자가 그 아래입니다.</figcaption>
+</figure>
+
+<h3 id="s04-2-8">평가 순서와 시퀀스 포인트: i = i++는 왜 UB인가</h3>
+
+<p>많은 사람이 오해하는 사실이 있습니다. <b>우선순위와 결합 규칙은 '어떻게 묶이는가'만 정할 뿐, '어느 피연산자를 먼저 계산하는가'(평가 순서)는 정하지 않습니다.</b> <code>f() + g() * h()</code>에서 곱셈이 덧셈보다 먼저 '묶이는' 것은 확실하지만, f, g, h 중 어떤 함수가 먼저 <b>호출</b>될지는 지정되지 않은(unspecified) 사항이라 컴파일러 마음입니다.</p>
+
+<p>C 표준은 이를 <b>시퀀스 포인트(sequence point)</b>라는 개념으로 정리합니다(C11에서는 sequenced-before 관계로 더 정교하게 표현). 시퀀스 포인트는 "그 이전의 모든 부수 효과(변수 변경 등)가 완료되고, 이후의 것은 아직 시작되지 않은" 지점입니다. 대표적인 시퀀스 포인트는 다음과 같습니다.</p>
+<ul>
+<li>완전한 식의 끝(문장 끝 <code>;</code>)</li>
+<li><code>&amp;&amp;</code>, <code>||</code>, 콤마 연산자 <code>,</code>의 왼쪽 피연산자 평가 후</li>
+<li><code>?:</code>의 조건 평가 후</li>
+<li>함수 호출 직전(모든 인수 평가 후)</li>
+</ul>
+
+<p>그리고 핵심 규칙: <b>두 시퀀스 포인트 사이에서 같은 객체를 두 번 이상 수정하거나, 수정하면서 (새 값을 정하기 위한 목적 외로) 그 값을 읽으면 미정의 동작</b>입니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 250" width="700" role="img" aria-label="i = i++에서 두 개의 쓰기가 충돌하는 모습">
+  <text x="20" y="28" class="mono bold">i = i++;   (i = 5에서 시작)</text>
+  <rect class="box" x="20" y="45" width="200" height="40" rx="6"/><text x="120" y="70" text-anchor="middle" class="small">i++의 값 = 5 (옛 값)</text>
+  <rect class="bad" x="260" y="45" width="190" height="40" rx="6"/><text x="355" y="70" text-anchor="middle" class="small">부수 효과 ①: i ← 6</text>
+  <rect class="bad" x="490" y="45" width="190" height="40" rx="6"/><text x="585" y="70" text-anchor="middle" class="small">부수 효과 ②: i ← 5</text>
+  <text x="350" y="115" text-anchor="middle" class="small warn-t">①과 ② 사이에 시퀀스 포인트가 없음 → 어느 쓰기가 마지막인지 정해지지 않음</text>
+  <rect class="box" x="60" y="140" width="260" height="40" rx="6"/><text x="190" y="165" text-anchor="middle" class="small">순서 A: ① 후 ② → i = 5</text>
+  <rect class="box" x="380" y="140" width="260" height="40" rx="6"/><text x="510" y="165" text-anchor="middle" class="small">순서 B: ② 후 ① → i = 6</text>
+  <text x="350" y="215" text-anchor="middle" class="small">표준은 둘 중 하나를 고르라는 것이 아니라 "아무것도 보장하지 않는다(UB)"고 규정</text>
+  <text x="350" y="238" text-anchor="middle" class="small mute">컴파일러는 이 코드가 존재하지 않는다고 가정하고 최적화할 수 있습니다</text>
+</svg>
+<figcaption>그림 4-8 i = i++에서는 한 문장 안에서 i에 대한 두 번의 쓰기가 순서 없이 일어납니다.</figcaption>
+</figure>
+
+<figure class="code bad"><figcaption>잘못된 예 — 전부 미정의 동작 (ex04-13.c)</figcaption>
+<pre><code class="language-c">int i = 5;
+i = i++;                         /* i를 두 번 수정 */
+int n = i++ + i++;               /* i를 두 번 수정 */
+int arr[10];
+arr[i] = i++;                    /* i를 수정하면서 다른 곳(arr[i])에서 읽음 */
+printf("%d %d\n", i, i++);       /* 인수 사이에는 순서가 없음: 읽기와 수정이 충돌 */</code></pre></figure>
+
+<figure class="code good"><figcaption>고친 코드 — 의도를 문장으로 나누기</figcaption>
+<pre><code class="language-c">int i = 5;
+i++;                             /* 증가가 목적이면 이것만 */
+int n = i + (i + 1);             /* 값이 필요하면 명시적으로 계산 */
+i += 2;
+int arr[10];
+arr[i] = i;                      /* 먼저 저장 */
+i++;                             /* 그다음 증가 */
+printf("%d ", i);
+printf("%d\n", i);
+i++;</code></pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — 표준은 왜 평가 순서를 정하지 않았을까?</p>
+<p>평가 순서를 고정하지 않으면 컴파일러가 CPU 레지스터 사용과 명령 배치를 가장 효율적으로 고를 수 있습니다. 예를 들어 x86-64 리눅스에서 함수 인수는 레지스터로 전달되는데, 인수를 어떤 순서로 계산해야 레지스터를 덜 쓰는지는 상황마다 다릅니다. 실제로 gcc와 clang은 같은 <code>printf("%d %d\n", i, i++)</code>에 대해 서로 다른 결과를 내는 것으로 잘 알려져 있습니다. 그래서 "우리 컴파일러에서는 6 5가 나오더라"는 아무 의미가 없습니다. 이런 코드는 <b>결과를 맞히는 문제가 아니라 고쳐야 하는 버그</b>이며, gcc는 <code>-Wall</code>(<code>-Wsequence-point</code>)로 경고합니다.</p>
+</div>
+
+<div class="box key"><p class="box-title" data-tag="핵심">세 가지를 구분하십시오</p>
+<p>(1) <b>우선순위·결합</b>: 식이 어떻게 묶이는가(문법). (2) <b>평가 순서</b>: 피연산자를 어떤 순서로 계산하는가(대부분 지정되지 않음, <code>&amp;&amp;</code> <code>||</code> <code>,</code> <code>?:</code>만 왼쪽 먼저 보장). (3) <b>시퀀스 포인트 규칙</b>: 그 사이에서 같은 변수를 두 번 수정하거나 수정과 읽기를 섞으면 UB. 면접에서 <code>i = i++</code>의 결과를 묻는다면 숫자가 아니라 "미정의 동작이므로 결과를 보장할 수 없다"가 정답입니다.</p>
+</div>
+
+<div class="ex"><p class="ex-title">예제 4-5 <span class="lv">난이도 ★★★</span></p>
+<p>다음 중 <b>정의된 동작</b>인 것과 <b>미정의 동작</b>인 것을 구분하고, 정의된 것은 실행 후 i의 값을 쓰십시오(각각 i = 1에서 시작).<br>
+(1) <code>i = i + 1;</code> (2) <code>i++ &amp;&amp; i++;</code> (3) <code>i = i++ + 1;</code> (4) <code>i = (i++, i + 1);</code> (5) <code>int j = i++ * i;</code></p>
+<details><summary>정답과 해설 보기</summary>
+<ol>
+<li><b>정의됨</b>, i = 2. i를 읽는 것은 새 값을 계산하기 위한 것이고 수정은 한 번뿐입니다.</li>
+<li><b>정의됨</b>, i = 3. <code>&amp;&amp;</code> 왼쪽 평가 후 시퀀스 포인트가 있습니다. 왼쪽 <code>i++</code>의 값 1(참)이므로 오른쪽도 평가되어 i는 최종 3.</li>
+<li><b>미정의 동작</b>. <code>i++</code>의 부수 효과와 대입이 같은 i를 순서 없이 수정합니다.</li>
+<li><b>정의됨</b>, i = 3. 콤마 연산자에 시퀀스 포인트가 있어 i++(i=2) 완료 후 i + 1 = 3을 계산해 대입합니다.</li>
+<li><b>미정의 동작</b>. i를 수정(<code>i++</code>)하면서 같은 식의 다른 부분에서 읽습니다(<code>* i</code>).</li>
+</ol>
+</details></div>
+
+<div class="box fin"><p class="box-title" data-tag="금융 실무">은행 시스템에서는 — 코드 리뷰 체크리스트의 연산자 항목</p>
+<p>금융권 개발 표준이나 코드 리뷰 체크리스트에는 이 장의 내용이 거의 그대로 들어 있습니다. 예를 들면 다음과 같습니다. (1) 금액 계산식에서 나눗셈은 마지막에 한 번만 하는가. (2) 끝처리(절사·반올림·절상) 규칙이 상품 규정과 일치하는가. (3) 금액 변수는 모두 같은 64비트 signed 자료형인가. (4) signed/unsigned 혼합 비교가 없는가. (5) 하나의 식에서 같은 변수를 두 번 이상 변경하지 않는가. (6) 비트 연산과 비교를 섞을 때 괄호를 썼는가. (7) 0으로 나누기 가능성을 단락 평가나 사전 검사로 막았는가. 이런 항목은 정적 분석 도구로도 상당 부분 자동 점검합니다.</p>
+</div>
+
+<h2 id="summary">핵심 정리</h2>
+<ul class="summary-list">
+<li>정수끼리의 <code>/</code>는 몫만 남기고 <b>0 방향으로 버립니다</b>(C99). <code>%</code>의 부호는 왼쪽 피연산자를 따르며 <code>(a/b)*b + a%b == a</code>가 항상 성립합니다.</li>
+<li>정수 금액 계산은 <b>곱셈 먼저, 나눗셈은 마지막에 한 번</b>. 중간값 오버플로를 고려해 <code>long long</code>을 씁니다. 절사 <code>x/10*10</code>, 반올림 <code>(x+5)/10*10</code>, 절상 <code>(x+9)/10*10</code>(양수).</li>
+<li>대입식도 값을 가지며 대입은 오른쪽부터 결합합니다.</li>
+<li><code>++a</code>는 증가 후 값, <code>a++</code>는 증가 전 값이 식의 값입니다. 단독 문장에서는 차이가 없습니다.</li>
+<li>관계·논리 연산의 결과는 int 0 또는 1이고, 조건에서는 0이 아니면 참입니다. <code>=</code>와 <code>==</code>를 혼동하지 않고, <code>1 &lt;= x &lt;= 12</code>처럼 이어 쓰지 않습니다. 실수는 <code>==</code>로 비교하지 않습니다.</li>
+<li><code>&amp;&amp;</code>, <code>||</code>는 <b>단락 평가</b>가 보장되며, 0으로 나누기·NULL 접근을 막는 안전장치로 씁니다.</li>
+<li>암시적 변환: char/short는 int로 승격, 서로 다른 형은 넓은 쪽으로. 같은 순위의 signed와 unsigned가 만나면 <b>unsigned로</b> 바뀌어 <code>-1 &lt; 1U</code>가 거짓이 됩니다.</li>
+<li>캐스트는 변환 시점이 중요합니다: <code>(double)a/b</code>와 <code>(double)(a/b)</code>는 다릅니다. 실수 → 정수 변환은 0 방향 버림입니다.</li>
+<li><code>sizeof</code>는 컴파일 시간 연산자이며 안의 식을 실행하지 않습니다.</li>
+<li>복합 대입 <code>x *= 2 + 3</code>은 <code>x = x * (2 + 3)</code>입니다. 콤마 연산자는 오른쪽 값을 갖습니다. 조건 연산자 <code>?:</code>는 선택된 쪽만 평가합니다.</li>
+<li>비트 연산 <code>&amp; | ^ ~ &lt;&lt; &gt;&gt;</code>는 unsigned와 함께 쓰고, 플래그는 <code>|=</code>로 설정, <code>&amp;</code>로 검사, <code>&amp;= ~</code>로 해제합니다. 비교와 섞을 때는 괄호 필수.</li>
+<li>우선순위는 묶는 방법일 뿐 평가 순서가 아닙니다. 시퀀스 포인트 사이에서 같은 변수를 두 번 수정하거나 수정과 읽기를 섞으면 UB입니다(<code>i = i++</code>).</li>
+</ul>
+
+<h2 id="interview">CS 면접 단골 질문</h2>
+<div class="box iv"><p class="box-title" data-tag="면접">이 장에서 나오는 면접 질문</p>
+<details><summary>Q1. i = i++; 를 실행하면 i의 값은 어떻게 되나요?</summary>
+<p>결과를 말할 수 없습니다. 하나의 식 안에서 i에 대한 두 번의 수정(후위 증가의 부수 효과와 대입)이 시퀀스 포인트 없이 일어나므로 C 표준상 미정의 동작입니다. 컴파일러와 최적화 옵션에 따라 결과가 다를 수 있고, 아예 예상치 못한 코드가 생성될 수도 있습니다. 의도가 증가라면 <code>i++;</code>만 쓰면 됩니다.</p>
+<p><b>꼬리 질문 대비</b>: "그럼 i++ &amp;&amp; i++는요?" → &amp;&amp;에는 시퀀스 포인트가 있어 정의된 동작입니다.</p>
+</details>
+<details><summary>Q2. 전위 증가와 후위 증가의 차이는? 성능 차이가 있나요?</summary>
+<p>둘 다 변수를 1 증가시키지만, 식의 값이 전위는 증가 후 값, 후위는 증가 전 값입니다. C의 기본 자료형에서는 식의 값을 쓰지 않는 경우 컴파일러가 동일한 기계어를 생성하므로 성능 차이가 없습니다. C++에서 사용자 정의 타입의 후위 연산자는 이전 값의 복사본을 만들어야 하므로 전위가 더 효율적일 수 있습니다.</p>
+</details>
+<details><summary>Q3. 단락 평가(short-circuit evaluation)란 무엇이며 어디에 활용하나요?</summary>
+<p>&amp;&amp;는 왼쪽이 거짓이면, ||는 왼쪽이 참이면 오른쪽 피연산자를 평가하지 않고 결과를 확정하는 규칙으로, C 표준이 보장합니다. 이를 이용해 <code>p != NULL &amp;&amp; p-&gt;x</code>처럼 널 포인터 역참조를 막거나, <code>cnt != 0 &amp;&amp; sum / cnt</code>처럼 0으로 나누기를 방지합니다. 오른쪽에 부수 효과가 있으면 실행 여부가 조건에 따라 달라지므로 주의해야 합니다.</p>
+</details>
+<details><summary>Q4. 연산자 우선순위와 평가 순서의 차이를 설명해 주세요.</summary>
+<p>우선순위와 결합 규칙은 식이 어떤 구조로 묶이는지를 정하는 문법 규칙이고, 평가 순서는 실행 시 피연산자를 어떤 순서로 계산하는지입니다. C는 &amp;&amp;, ||, 콤마, 조건 연산자를 제외하면 피연산자와 함수 인수의 평가 순서를 지정하지 않습니다. 따라서 <code>f() + g()</code>에서 f와 g의 호출 순서에 의존하는 코드는 이식성이 없습니다.</p>
+</details>
+<details><summary>Q5. -1 &lt; sizeof(int)의 결과가 거짓인 이유는?</summary>
+<p>sizeof의 결과형인 size_t는 부호 없는 정수형입니다. int와 size_t를 비교하면 일반 산술 변환에 의해 -1이 size_t로 변환되는데, 부호 없는 형으로의 변환은 모듈러 연산으로 정의되어 -1이 해당 형의 최댓값이 됩니다. 결국 '최댓값 &lt; 4'를 비교하므로 거짓입니다. signed와 unsigned의 혼합 비교는 피하고 -Wsign-compare 경고를 활성화해야 합니다.</p>
+</details>
+<details><summary>Q6. 정수 승격(integer promotion)이란 무엇인가요?</summary>
+<p>int보다 작은 정수형(char, short, 비트필드 등)이 산술 연산에 쓰일 때 먼저 int(값을 표현할 수 없으면 unsigned int)로 변환되는 규칙입니다. CPU의 자연스러운 연산 단위인 int로 계산해 효율을 높이고 중간 오버플로를 줄이기 위한 것입니다. 그래서 <code>unsigned char a = 200, b = 100;</code>에서 <code>a + b</code>는 300이고, 이를 다시 unsigned char에 저장할 때 44가 됩니다.</p>
+</details>
+<details><summary>Q7. 비트 연산으로 특정 비트를 설정, 해제, 토글, 검사하는 방법은?</summary>
+<p>n번 비트 마스크를 <code>1u &lt;&lt; n</code>으로 만든 뒤, 설정은 <code>x |= mask</code>, 해제는 <code>x &amp;= ~mask</code>, 토글은 <code>x ^= mask</code>, 검사는 <code>(x &amp; mask) != 0</code>입니다. 부호 있는 정수의 시프트는 UB나 구현 정의 결과가 생길 수 있으므로 unsigned를 사용합니다. 또 <code>==</code>가 <code>&amp;</code>보다 우선순위가 높으므로 괄호를 반드시 씁니다.</p>
+<p><b>꼬리 질문 대비</b>: "2의 거듭제곱 판별은?" → <code>x != 0 &amp;&amp; (x &amp; (x - 1)) == 0</code>.</p>
+</details>
+<details><summary>Q8. 정수 나눗셈에서 음수는 어떻게 처리되나요?</summary>
+<p>C99 이후 정수 나눗셈은 0 방향으로 버림하므로 -7 / 2는 -3이고, 나머지는 피제수의 부호를 따라 -7 % 2는 -1입니다. (a/b)*b + a%b == a 관계가 항상 성립합니다. C89에서는 음수 나눗셈의 버림 방향이 구현 정의였으며, Python처럼 내림(floor)하는 언어와 결과가 다르므로 언어 간 로직 이식 시 주의해야 합니다.</p>
+</details>
+<details><summary>Q9. 금융 계산에서 나눗셈을 마지막에 해야 하는 이유는?</summary>
+<p>정수 나눗셈은 매번 소수점 이하를 버리므로, 나눗셈을 먼저 하면 버려진 오차에 이후의 곱셈 배수가 곱해져 오차가 커집니다. 곱셈을 먼저 해 정밀도를 유지한 뒤 마지막에 한 번만 나누고, 그때 규정된 끝처리(절사, 반올림)를 적용해야 합니다. 대신 곱셈 결과가 자료형 범위를 넘지 않도록 64비트 정수를 쓰고 최대값을 검토합니다.</p>
+</details>
+<details><summary>Q10. 왼쪽 시프트가 곱셈보다 빠르다는 말은 맞나요?</summary>
+<p>역사적으로는 시프트가 곱셈보다 빨랐지만, 현대 컴파일러는 상수 곱셈을 자동으로 시프트와 덧셈 조합으로 바꾸는 최적화를 하므로 소스에서 직접 시프트로 바꿀 필요가 거의 없습니다. 오히려 signed 음수의 시프트는 UB나 구현 정의 동작이 될 수 있어 위험합니다. 의미가 곱셈이면 곱셈으로, 비트 조작이면 시프트로 쓰는 것이 올바릅니다.</p>
+</details>
+</div>
+
+<h2 id="exercises">연습문제</h2>
+
+<div class="ex"><p class="ex-title">연습문제 4-1 <span class="lv">난이도 ★☆☆</span></p>
+<p>다음 출력 결과를 쓰십시오.</p>
+<pre><code class="language-c">printf("%d %d %d %d\n", 23 / 4, 23 % 4, -23 / 4, -23 % 4);
+printf("%d %f\n", 23 / 4 * 4, 23 / 4.0);</code></pre>
+<details><summary>정답과 해설 보기</summary>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>5 3 -5 -3
+20 5.750000</pre></figure>
+<p>23 = 5×4 + 3. -23 / 4 = -5.75를 0 방향으로 버려 -5, 나머지는 -23 - (-5×4) = -3. <code>23 / 4 * 4</code>는 5 * 4 = 20(23이 아님). <code>23 / 4.0</code>은 실수 나눗셈 5.75.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 4-2 <span class="lv">난이도 ★☆☆</span></p>
+<p>초 단위 시간 <code>int sec = 98765;</code>를 "27시간 26분 5초" 형식으로 출력하는 코드를 /와 %만 써서 작성하십시오.</p>
+<details><summary>정답과 해설 보기</summary>
+<figure class="code good"><figcaption>정답 코드</figcaption>
+<pre><code class="language-c">int sec = 98765;
+printf("%d시간 %d분 %d초\n", sec / 3600, sec % 3600 / 60, sec % 60);</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>27시간 26분 5초</pre></figure>
+<p>98765 / 3600 = 27(27×3600 = 97200), 나머지 1565초. 1565 / 60 = 26, 1565 % 60 = 5. 배치 작업 소요 시간을 로그에 남길 때 자주 쓰는 계산입니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 4-3 <span class="lv">난이도 ★★☆</span></p>
+<p>다음 출력 결과를 쓰십시오.</p>
+<pre><code class="language-c">int a = 3, b = 3, x, y;
+x = a++ * 2;
+y = ++b * 2;
+printf("%d %d %d %d\n", a, b, x, y);
+a = 10;
+a -= 3 - 1;
+b = a-- - 1;
+printf("%d %d\n", a, b);</code></pre>
+<details><summary>정답과 해설 보기</summary>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>4 4 6 8
+7 7</pre></figure>
+<p>x = 3 * 2 = 6(a는 이후 4), y = 4 * 2 = 8. <code>a -= 3 - 1</code>은 <code>a = a - (3 - 1)</code> = 8. <code>b = a-- - 1</code>은 a의 옛 값 8에서 1을 뺀 7이 b, a는 7. 각 문장에서 a를 한 번만 수정하므로 모두 정의된 동작입니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 4-4 <span class="lv">난이도 ★★☆</span></p>
+<p>버그를 찾으십시오. 다음은 "지점 코드가 100~199 사이이고 거래정지(bit0)가 아니면 처리"하려는 코드입니다.</p>
+<figure class="code bad"><figcaption>q4-4.c (일부)</figcaption>
+<pre><code class="language-c">if (100 &lt;= branch &lt;= 199 &amp;&amp; status &amp; 0x1 == 0)
+    process();</code></pre></figure>
+<details><summary>정답과 해설 보기</summary>
+<p>두 가지 버그가 있습니다. (1) <code>100 &lt;= branch &lt;= 199</code>는 <code>(100 &lt;= branch) &lt;= 199</code>로 항상 참입니다. (2) <code>status &amp; 0x1 == 0</code>은 <code>==</code>가 먼저 묶여 <code>status &amp; (0x1 == 0)</code> = <code>status &amp; 0</code> = 0, 즉 항상 거짓입니다. 결과적으로 process()는 절대 호출되지 않습니다(만약 두 번째 조건이 다른 형태로 항상 참이었다면 정지 계좌까지 처리되는 더 심각한 버그였을 것입니다).</p>
+<figure class="code good"><figcaption>고친 코드</figcaption>
+<pre><code class="language-c">if (branch &gt;= 100 &amp;&amp; branch &lt;= 199 &amp;&amp; (status &amp; 0x1u) == 0)
+    process();</code></pre></figure>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 4-5 <span class="lv">난이도 ★★☆</span></p>
+<p>다음 출력 결과를 쓰십시오.</p>
+<pre><code class="language-c">int s = 10, c = 4;
+printf("%f %f %f\n", (double)s / c, (double)(s / c), s / (double)c);
+printf("%d %d\n", (int)7.9, (int)-7.9);
+printf("%d\n", 10 / 4 * 4 == 10);</code></pre>
+<details><summary>정답과 해설 보기</summary>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>2.500000 2.000000 2.500000
+7 -7
+0</pre></figure>
+<p>첫째와 셋째는 한쪽이 double이 되어 실수 나눗셈 2.5. 둘째는 정수 나눗셈 2가 먼저 끝난 뒤 2.0. 실수 → 정수 변환은 0 방향 버림이라 7, -7. <code>10 / 4 * 4</code>는 8이므로 10과 같지 않아 0.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 4-6 <span class="lv">난이도 ★★☆</span></p>
+<p>이체 금액 <code>long long amt</code>에 대해 다음 수수료 규칙을 조건 연산자 하나로 구현하십시오: 금액이 0 이하이면 수수료 -1(오류 표시), 10만 원 이하이면 0원, 그 외에는 금액의 0.1%를 10원 미만 절사(정수 연산). amt = 1,234,567일 때 결과를 계산하십시오.</p>
+<details><summary>정답과 해설 보기</summary>
+<figure class="code good"><figcaption>정답 코드</figcaption>
+<pre><code class="language-c">long long amt = 1234567;
+long long fee = (amt &lt;= 0) ? -1
+              : (amt &lt;= 100000) ? 0
+              : amt * 1 / 1000 / 10 * 10;
+printf("%lld\n", fee);</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>1230</pre></figure>
+<p>1,234,567 × 1 / 1000 = 1234(0.1%, 원 미만 버림), 1234 / 10 * 10 = 1230. 조건 연산자는 오른쪽 결합이라 <code>a ? x : (b ? y : z)</code>로 묶입니다. 이 정도 중첩까지는 줄바꿈으로 읽기 쉽게 쓸 수 있지만, 규칙이 더 늘어나면 if-else(5장)로 바꾸는 것이 좋습니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 4-7 <span class="lv">난이도 ★★★</span></p>
+<p>다음 코드의 출력 결과를 쓰고 이유를 설명하십시오(64비트 리눅스 gcc).</p>
+<pre><code class="language-c">unsigned int limit = 100;
+int amount = -50;
+if (amount &lt; limit)
+    printf("한도 이내\n");
+else
+    printf("한도 초과\n");
+unsigned char x = 255;
+printf("%d %d\n", x + 1, (unsigned char)(x + 1));</code></pre>
+<details><summary>정답과 해설 보기</summary>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>한도 초과
+256 0</pre></figure>
+<p>amount(int)와 limit(unsigned int)를 비교하면 amount가 unsigned로 변환되어 -50이 4294967246이 되므로 "한도 초과"가 출력됩니다. 음수 금액이라는 잘못된 입력이 우연히 거절된 것일 뿐, 논리는 틀렸습니다. 두 번째 줄에서 <code>x + 1</code>은 정수 승격으로 int 256이고, unsigned char로 캐스트하면 256 mod 256 = 0입니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 4-8 <span class="lv">난이도 ★★☆</span></p>
+<p>다음 중 미정의 동작인 문장을 모두 고르십시오(int i = 0, a[5] = {0}; 가정).<br>
+(1) <code>a[i] = i;</code> (2) <code>a[i++] = i;</code> (3) <code>i = i * 2 + 1;</code> (4) <code>i++, i++;</code> (5) <code>a[i] = ++i;</code> (6) <code>i = (i &gt; 0) ? i++ : 0;</code></p>
+<details><summary>정답과 해설 보기</summary>
+<p>미정의 동작: (2), (5). 둘 다 i를 수정하면서 같은 식의 다른 곳에서 i를 읽는데 그 사이에 순서가 정해져 있지 않습니다. (1)과 (3)은 수정이 한 번이고 읽기는 새 값 계산용이라 정의됨. (4)는 콤마 연산자의 시퀀스 포인트로 정의됨(i = 2). (6)은 i = 0이므로 조건이 거짓이라 <code>0</code>이 선택되어 실행 결과 자체는 문제가 없지만, i &gt; 0인 상황에서는 <code>i = i++</code>와 같은 형태가 되어 UB입니다. 이런 코드는 조건에 따라 UB가 되므로 작성하지 말아야 합니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 4-9 <span class="lv">난이도 ★★★</span></p>
+<p>원금 <code>long long p = 25000000;</code>(2,500만 원), 연이율 3.45%(만분율 345), 예치 일수 <code>int days = 90;</code>일 때 일할 계산 이자 = 원금 × 이율 × 일수 / 365를 원 미만 절사로 계산하는 정수 연산식을 작성하고 결과를 구하십시오. 그리고 <code>int</code>로 계산했다면 어떤 문제가 생기는지 설명하십시오.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>만분율이므로 분모는 10000 × 365입니다. 곱셈을 모두 먼저 하고 마지막에 나눕니다.</p>
+<figure class="code good"><figcaption>정답 코드</figcaption>
+<pre><code class="language-c">long long p = 25000000, rate_bp = 345;
+int days = 90;
+long long interest = p * rate_bp * days / (10000LL * 365);
+printf("%lld\n", interest);</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>212671</pre></figure>
+<p>25,000,000 × 345 = 8,625,000,000, × 90 = 776,250,000,000, ÷ 3,650,000 = 212,671.23… → 212,671원. 중간값 7,762억은 int 범위(약 21억)를 크게 넘으므로 int로 계산하면 signed 오버플로(UB)가 발생해 엉뚱한 이자가 나옵니다. 분모도 <code>10000LL * 365</code>처럼 long long으로 계산해 두는 것이 안전합니다(10000 * 365 = 3,650,000은 int 범위 안이지만 습관이 중요합니다).</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 4-10 <span class="lv">난이도 ★★☆</span></p>
+<p>8비트 권한 코드 <code>unsigned int perm</code>에서 bit0 = 조회, bit1 = 이체, bit2 = 해지, bit7 = 관리자 권한입니다. 다음을 코드로 작성하십시오. (1) 조회와 이체 권한을 부여 (2) 해지 권한이 있는지 검사해 0/1 출력 (3) 관리자 권한을 회수 (4) perm = 0x83일 때 (1)~(3)을 차례로 수행한 뒤의 최종 값.</p>
+<details><summary>정답과 해설 보기</summary>
+<figure class="code good"><figcaption>정답 코드</figcaption>
+<pre><code class="language-c">unsigned int perm = 0x83;              /* 1000 0011 */
+perm |= (1u &lt;&lt; 0) | (1u &lt;&lt; 1);        /* (1) 이미 있어도 그대로: 1000 0011 */
+printf("%d\n", (perm &amp; (1u &lt;&lt; 2)) != 0); /* (2) 해지 권한 없음: 0 */
+perm &amp;= ~(1u &lt;&lt; 7);                    /* (3) 관리자 회수: 0000 0011 */
+printf("0x%02X\n", perm);</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>0
+0x03</pre></figure>
+<p>OR로 설정하면 이미 1인 비트는 그대로 유지되므로 '부여'를 여러 번 해도 안전합니다(멱등성). AND NOT으로 다른 비트에 영향 없이 특정 비트만 지울 수 있습니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 4-11 <span class="lv">난이도 ★★★</span></p>
+<p>다음 프로그램은 거래 건수가 0인 지점에서 비정상 종료합니다. 단락 평가를 이용해 한 줄만 고쳐 문제를 해결하십시오. 그리고 <code>&amp;&amp;</code> 대신 <code>&amp;</code>를 쓰면 왜 해결되지 않는지 설명하십시오.</p>
+<figure class="code bad"><figcaption>q4-11.c (일부)</figcaption>
+<pre><code class="language-c">long long total = 0;
+int cnt = 0;
+int big = total / cnt &gt;= 1000000;    /* 평균 거래액 100만 원 이상인 지점인가 */</code></pre></figure>
+<details><summary>정답과 해설 보기</summary>
+<figure class="code good"><figcaption>고친 코드</figcaption>
+<pre><code class="language-c">int big = cnt != 0 &amp;&amp; total / cnt &gt;= 1000000;</code></pre></figure>
+<p><code>&amp;&amp;</code>는 왼쪽 <code>cnt != 0</code>이 거짓이면 오른쪽을 평가하지 않으므로 0으로 나누기가 일어나지 않고, big은 0이 됩니다. 우선순위상 <code>!=</code>, <code>/</code>, <code>&gt;=</code>가 모두 <code>&amp;&amp;</code>보다 높아 의도대로 묶입니다. 반면 비트 AND <code>&amp;</code>는 단락 평가를 하지 않고 양쪽을 모두 계산하므로 여전히 0으로 나누기(UB)가 발생합니다. <code>&amp;</code>는 <code>!=</code>와 <code>&gt;=</code>보다 우선순위가 낮아 식이 묶이는 모양은 같지만, 오른쪽 평가 자체를 막지 못한다는 점이 결정적인 차이입니다.</p>
+</details></div>
+
+</main>
+<aside class="rail" aria-label="이 페이지 목차"></aside>
+</div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-c.min.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>

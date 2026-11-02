@@ -1,0 +1,1191 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ch07 함수 · C언어 금융 IT 마스터</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+KR:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-ch="ch07">
+<header class="topbar">
+  <button class="menu-btn" type="button" aria-expanded="false" aria-controls="sidebar">목차</button>
+  <a class="brand" href="index.html"><b>C</b>금융 IT 마스터</a>
+  <span class="where"></span>
+  <span class="progress"></span>
+</header>
+<div class="layout">
+<nav id="sidebar" class="sidebar" aria-label="과정 목차"></nav>
+<div class="page">
+<main class="content">
+
+<header class="ch-head">
+  <p class="eyebrow">PART 1 · C 기초 완전 정복 · CHAPTER</p>
+  <div class="bignum">07</div>
+  <h1>함수</h1>
+  <p class="lede">은행 시스템에는 "이자 계산", "수수료 계산", "계좌번호 검증" 같은 기능이 수백 개의 프로그램에서 똑같이 쓰입니다. 이 기능을 한 번만 만들어 이름을 붙이고 어디서든 불러 쓰는 장치가 함수입니다. 함수를 이해하면 큰 프로그램을 작은 부품으로 나누어 설계할 수 있고, 호출 스택을 이해하면 포인터와 메모리, 재귀까지 한 줄로 꿰어집니다.</p>
+  <div class="goals"><p class="goals-title">이 장에서 배울 것</p><ul>
+    <li>함수의 정의, 호출, 반환의 문법과 실행 흐름을 설명할 수 있습니다.</li>
+    <li>매개변수와 인수의 차이, 함수 원형(선언)이 필요한 이유를 이해합니다.</li>
+    <li>호출 스택과 스택 프레임을 그림으로 그리고, 값에 의한 전달(call by value)의 결과를 예측합니다.</li>
+    <li>반환값·매개변수 유무에 따른 함수 유형과 void의 의미를 압니다.</li>
+    <li>재귀 함수의 원리, 팩토리얼·피보나치, 재귀의 비용과 스택 오버플로를 이해합니다.</li>
+    <li>math.h, stdlib.h의 주요 함수를 사용하고, 금융 계산 로직을 함수로 분리하는 설계 원칙을 익힙니다.</li>
+  </ul></div>
+</header>
+
+<h2 id="s07-1"><span class="num">07-1</span>함수의 작성과 사용</h2>
+
+<h3 id="s07-1-1">함수가 왜 필요한가</h3>
+
+<p>6장의 상환 스케줄 프로그램에서 "잔액 × 월이율 ÷ 10000, 원 미만 절사"라는 이자 계산이 반복문 안에 들어 있었습니다. 같은 이자 계산이 예금 해지, 대출 상환, 연체 이자, 일마감 배치에도 필요하다면 어떻게 할까요? 코드를 복사해서 붙여 넣으면 당장은 동작합니다. 하지만 절사 규칙이 "반올림"으로 바뀌면 복사한 모든 곳을 찾아 고쳐야 하고, 한 곳이라도 빠뜨리면 프로그램마다 이자가 달라집니다.</p>
+<p><b>함수(function)</b>는 특정 작업을 수행하는 코드 묶음에 이름을 붙인 것입니다. 한 번 정의하면 이름으로 몇 번이든 호출할 수 있습니다. 함수가 주는 이점은 다음과 같습니다.</p>
+<ul>
+<li><b>재사용</b>: 같은 코드를 반복해서 쓰지 않습니다(DRY: Don't Repeat Yourself).</li>
+<li><b>유지보수</b>: 규칙이 바뀌면 함수 한 곳만 고칩니다.</li>
+<li><b>추상화</b>: 호출하는 쪽은 "무엇을 하는지"만 알면 되고 "어떻게 하는지"는 몰라도 됩니다. printf가 내부에서 어떻게 화면에 글자를 찍는지 몰라도 쓸 수 있는 것과 같습니다.</li>
+<li><b>분할 정복과 테스트</b>: 큰 문제를 작은 함수로 나누면 각각을 따로 이해하고 테스트할 수 있습니다.</li>
+</ul>
+<p>여러분은 이미 함수를 써 왔습니다. <code>main</code>도 함수이고, <code>printf</code>, <code>scanf</code>는 표준 라이브러리가 제공하는 함수입니다. 이 장에서는 함수를 직접 만듭니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 680 220" width="680" role="img" aria-label="함수를 블랙박스로 본 그림">
+  <text x="80" y="70" text-anchor="middle" class="small">입력(인수)</text>
+  <text x="80" y="96" text-anchor="middle" class="mono small">balance</text>
+  <text x="80" y="116" text-anchor="middle" class="mono small">rate_bp</text>
+  <text x="80" y="136" text-anchor="middle" class="mono small">days</text>
+  <path class="arrow" d="M140 110 H 236"/>
+  <rect class="hl" x="240" y="50" width="200" height="120" rx="10"/>
+  <text x="340" y="96" text-anchor="middle" class="bold">calc_interest()</text>
+  <text x="340" y="124" text-anchor="middle" class="small mute">내부 구현은 감춰짐</text>
+  <text x="340" y="144" text-anchor="middle" class="small mute">(블랙박스)</text>
+  <path class="arrow" d="M440 110 H 536"/>
+  <text x="600" y="100" text-anchor="middle" class="small">출력(반환값)</text>
+  <text x="600" y="124" text-anchor="middle" class="mono small">interest</text>
+  <text x="340" y="205" text-anchor="middle" class="small mute">호출하는 쪽은 "무엇을 넣으면 무엇이 나오는지"만 알면 된다</text>
+</svg>
+<figcaption>그림 7-1 함수는 입력을 받아 출력을 돌려주는 블랙박스입니다</figcaption>
+</figure>
+
+<h3 id="s07-1-2">함수의 정의 — 머리와 몸통</h3>
+
+<figure class="code"><figcaption>함수 정의의 형식</figcaption>
+<pre><code class="language-c">반환형 함수이름(매개변수 목록)     /* 함수 머리(header) */
+{                                  /* 함수 몸통(body) 시작 */
+    문장들;
+    return 반환값;
+}</code></pre></figure>
+
+<figure class="code"><figcaption>ex07-1.c — 두 정수의 합을 구하는 함수</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+int add(int a, int b)          /* 반환형 int, 이름 add, 매개변수 a, b */
+{
+    int result = a + b;
+    return result;             /* 결과를 호출한 곳으로 돌려줌 */
+}
+
+int main(void)
+{
+    int x = 3, y = 4;
+    int sum = add(x, y);       /* 함수 호출: x, y는 인수 */
+    printf("합: %d\n", sum);
+    printf("바로 출력: %d\n", add(10, 20));   /* 반환값을 식처럼 바로 사용 */
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>합: 7
+바로 출력: 30</pre></figure>
+
+<div class="tbl"><table><thead><tr><th>구성 요소</th><th>예</th><th>설명</th></tr></thead><tbody>
+<tr><td>반환형</td><td><code>int</code></td><td>함수가 돌려줄 값의 자료형. 돌려줄 값이 없으면 <code>void</code></td></tr>
+<tr><td>함수 이름</td><td><code>add</code></td><td>변수 이름과 같은 규칙. 동사로 시작하는 것이 관례(calc_, get_, is_)</td></tr>
+<tr><td>매개변수(parameter)</td><td><code>int a, int b</code></td><td>함수가 받을 값을 저장할 <b>변수</b>. 각각 자료형을 따로 적어야 함(<code>int a, b</code>는 오류)</td></tr>
+<tr><td>몸통</td><td><code>{ ... }</code></td><td>실제로 수행할 문장들</td></tr>
+<tr><td>return 문</td><td><code>return result;</code></td><td>값을 돌려주고 <b>즉시</b> 함수를 끝냄</td></tr>
+</tbody></table></div>
+
+<h4>함수 호출의 흐름</h4>
+<p>함수를 호출하면 실행 흐름이 함수 몸통으로 <b>점프</b>하고, return을 만나면 호출했던 바로 그 자리로 <b>되돌아옵니다</b>. 그리고 호출식 <code>add(x, y)</code> 자리는 반환값으로 바뀐 것처럼 계산이 이어집니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 680 260" width="680" role="img" aria-label="함수 호출과 복귀 흐름">
+  <rect class="box" x="20" y="20" width="280" height="220" rx="8"/>
+  <text x="36" y="44" class="bold small">main</text>
+  <text x="36" y="76" class="mono small">int x = 3, y = 4;</text>
+  <rect class="hl2" x="30" y="90" width="260" height="26" rx="4"/>
+  <text x="36" y="108" class="mono small">int sum = add(x, y);</text>
+  <text x="36" y="146" class="mono small">printf("합: %d\n", sum);</text>
+  <text x="36" y="176" class="mono small">...</text>
+  <rect class="hl" x="400" y="40" width="260" height="160" rx="8"/>
+  <text x="416" y="64" class="bold small">add(int a, int b)</text>
+  <text x="416" y="96" class="mono small">a = 3, b = 4 로 시작</text>
+  <text x="416" y="126" class="mono small">result = a + b;</text>
+  <text x="416" y="156" class="mono small">return result; → 7</text>
+  <path class="arrow" d="M290 98 C 340 90, 360 70, 396 70"/>
+  <text x="340" y="66" text-anchor="middle" class="small acc">① 호출</text>
+  <text x="340" y="82" text-anchor="middle" class="small mute">인수 값 복사</text>
+  <path class="arrow" d="M400 160 C 350 170, 330 130, 292 110"/>
+  <text x="345" y="186" text-anchor="middle" class="small acc">② 복귀</text>
+  <text x="345" y="202" text-anchor="middle" class="small mute">반환값 7 전달</text>
+</svg>
+<figcaption>그림 7-2 함수 호출 시 흐름은 함수로 갔다가, return에서 호출한 자리로 돌아옵니다</figcaption>
+</figure>
+
+<h4>return 문의 두 가지 역할</h4>
+<ol class="steps">
+<li><b>값 반환</b>: return 뒤의 식을 계산해 반환형으로 변환한 뒤 호출한 곳에 돌려줍니다. 예를 들어 반환형이 int인데 <code>return 3.7;</code>이면 3이 반환됩니다(소수점 버림).</li>
+<li><b>즉시 종료</b>: return 아래에 문장이 더 있어도 실행하지 않습니다. 그래서 5장의 가드 절처럼 "조건이 맞지 않으면 일찍 return"하는 데 씁니다.</li>
+</ol>
+
+<figure class="code"><figcaption>ex07-2.c — 여러 개의 return: 큰 값 반환</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+long long max_ll(long long a, long long b)
+{
+    if (a &gt;= b)
+        return a;      /* 여기서 함수 끝 */
+    return b;          /* a &lt; b 일 때만 도달 */
+}
+
+int main(void)
+{
+    printf("%lld\n", max_ll(150000, 98000));    /* 150000 */
+    printf("%lld\n", max_ll(-5, 3));            /* 3 */
+    return 0;
+}</code></pre></figure>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 — 모든 경로에서 return하지 않기</p>
+<figure class="code bad"><figcaption>잘못된 예 — 음수가 들어오면 무엇이 반환될까?</figcaption><pre><code class="language-c">int sign(int x)
+{
+    if (x &gt; 0) return 1;
+    if (x == 0) return 0;
+    /* x &lt; 0 인 경우 return 이 없음! */
+}</code></pre></figure>
+<p>반환형이 void가 아닌 함수가 return 없이 끝나고, 호출한 쪽이 그 반환값을 사용하면 <b>미정의 동작(UB)</b>입니다. 실제로는 반환값을 담는 레지스터(x86-64의 eax)에 우연히 남아 있던 값이 나오는데, 최적화 수준에 따라 결과가 달라집니다. gcc는 <code>-Wall</code>에서 "control reaches end of non-void function" 경고를 냅니다. 마지막에 <code>return -1;</code>을 추가해 모든 경로가 값을 반환하게 하십시오. (예외: main 함수는 C99부터 끝에 return이 없으면 0을 반환한 것으로 간주됩니다.)</p>
+</div>
+
+<div class="ex"><p class="ex-title">예제 7-1 <span class="lv">난이도 ★☆☆</span></p>
+<p>원 단위 금액과 수수료율(bp)을 받아 수수료(원 미만 절사)를 반환하는 함수 <code>long long calc_fee(long long amount, int fee_bp)</code>를 작성하고, 1,234,567원 × 15bp를 계산해 출력하세요.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>1,234,567 × 15 / 10000 = 18,518,505 / 10000 = 1851.85... → 절사하면 <b>1851원</b>. 곱셈을 먼저 하고 나눗셈을 나중에 하는 순서를 지킵니다.</p>
+<figure class="code good"><figcaption>정답 코드</figcaption><pre><code class="language-c">#include &lt;stdio.h&gt;
+
+long long calc_fee(long long amount, int fee_bp)
+{
+    return amount * fee_bp / 10000;
+}
+
+int main(void)
+{
+    printf("수수료: %lld원\n", calc_fee(1234567, 15));   /* 1851원 */
+    return 0;
+}</code></pre></figure>
+</details></div>
+
+<h3 id="s07-1-3">매개변수와 인수</h3>
+
+<p>두 용어는 자주 섞어 쓰이지만 정확히는 다릅니다.</p>
+<ul>
+<li><b>매개변수(parameter, 형식 매개변수)</b>: 함수 정의에 적힌 변수. <code>int add(int a, int b)</code>의 a, b. 함수가 호출될 때 만들어지는 <b>지역 변수</b>입니다.</li>
+<li><b>인수(argument, 실 매개변수)</b>: 호출할 때 실제로 넘기는 값. <code>add(x, y)</code>의 x, y, 또는 <code>add(10, 20)</code>의 10, 20. 상수, 변수, 식 모두 가능합니다.</li>
+</ul>
+<p>호출 시 인수의 <b>값</b>이 계산되어 매개변수에 순서대로 <b>복사</b>됩니다. 개수가 같아야 하고, 자료형이 다르면 매개변수 형으로 자동 변환됩니다(원형이 있을 때).</p>
+
+<div class="box tip"><p class="box-title" data-tag="잠깐">여기서 잠깐 — 인수의 평가 순서는 정해져 있지 않다</p>
+<p><code>f(a(), b())</code>에서 a()와 b() 중 무엇이 먼저 호출될지는 C 표준이 정하지 않았습니다(unspecified). gcc x86-64에서는 오른쪽부터 계산되는 경우가 많지만 보장되지 않습니다. 따라서 <code>printf("%d %d\n", i++, i++);</code>처럼 같은 변수를 한 호출의 인수 안에서 두 번 수정하면 순서점이 없으므로 <b>미정의 동작</b>입니다. 인수에는 부작용이 있는 식을 넣지 마십시오.</p>
+</div>
+
+<h3 id="s07-1-4">함수 원형(선언)</h3>
+
+<p>C 컴파일러는 소스 파일을 <b>위에서 아래로 한 번</b> 읽으며 번역합니다. 그래서 함수를 main보다 아래에 정의하고 main에서 호출하면, 컴파일러는 호출 시점에 그 함수의 반환형과 매개변수를 모릅니다.</p>
+
+<figure class="code bad"><figcaption>잘못된 예 — 정의가 호출보다 뒤에 있다</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+int main(void)
+{
+    double r = half(7);         /* 이 시점에 half를 모름 */
+    printf("%f\n", r);
+    return 0;
+}
+
+double half(int x)
+{
+    return x / 2.0;
+}</code></pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — 암시적 선언(implicit declaration)의 함정</p>
+<p>C89에서는 처음 보는 함수를 만나면 "int를 반환하고 인수는 아무거나 받는 함수"로 <b>암시적 선언</b>했습니다. 위 코드에서 컴파일러는 half가 int를 반환한다고 가정하고 정수 반환 레지스터(eax)에서 값을 꺼냅니다. 그런데 실제 half는 double을 실수 레지스터(xmm0)에 담아 반환하므로, main은 엉뚱한 쓰레기 값을 받습니다. 게다가 나중에 실제 정의(double 반환)를 만나면 "conflicting types for 'half'" 오류가 납니다. C99부터는 암시적 선언 자체가 제거되었고, 최신 gcc(14 이상)는 이를 기본적으로 오류로 처리합니다.</p>
+</div>
+
+<div class="box fix"><p class="box-title" data-tag="해결">이렇게 해결합니다 — 함수 원형을 앞에 선언</p>
+<p>함수의 머리 부분만 세미콜론과 함께 미리 적어 두는 것을 <b>함수 원형(function prototype)</b> 또는 함수 선언이라고 합니다. 원형은 컴파일러에게 "이런 이름, 이런 반환형, 이런 매개변수를 가진 함수가 어딘가에 있다"고 약속하는 것입니다.</p>
+<figure class="code good"><figcaption>고친 코드</figcaption><pre><code class="language-c">#include &lt;stdio.h&gt;
+
+double half(int x);            /* 함수 원형: 매개변수 이름은 생략 가능 (double half(int);) */
+
+int main(void)
+{
+    double r = half(7);
+    printf("%f\n", r);         /* 3.500000 */
+    return 0;
+}
+
+double half(int x)             /* 함수 정의 */
+{
+    return x / 2.0;
+}</code></pre></figure>
+</div>
+
+<p>원형이 있으면 컴파일러는 호출할 때마다 다음을 검사하고 처리합니다.</p>
+<ol class="steps">
+<li>인수 개수가 맞는지 검사합니다(틀리면 오류).</li>
+<li>인수를 매개변수 자료형으로 자동 변환합니다(예: <code>half(7.9)</code>는 7로 변환. 경고 옵션에 따라 경고).</li>
+<li>반환값을 올바른 자료형으로 받습니다.</li>
+</ol>
+<p><code>#include &lt;stdio.h&gt;</code>를 쓰는 이유가 바로 이것입니다. stdio.h 헤더 파일 안에는 printf, scanf 등의 <b>원형</b>이 들어 있습니다. 실제 정의(기계어)는 C 표준 라이브러리(libc)에 있고 링크 단계에서 연결됩니다. 여러 파일로 이루어진 프로그램에서는 원형을 헤더 파일(.h)에 모아 두고 공유합니다(18장 분할 컴파일).</p>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 — int f() 와 int f(void) 는 다르다 (C17까지)</p>
+<p>C17 이전의 C에서 <code>int f();</code>는 "매개변수 정보를 알려 주지 않음"이라는 뜻이어서 <code>f(1, 2, 3)</code>으로 호출해도 컴파일러가 검사하지 않습니다. "매개변수가 없음"을 명확히 하려면 <code>int f(void);</code>라고 써야 합니다. 그래서 이 과정에서는 <code>int main(void)</code>라고 씁니다. (C23에서는 <code>f()</code>도 <code>f(void)</code>와 같은 뜻이 되었지만, 이식성을 위해 void를 쓰는 습관을 권장합니다. C++에서는 원래부터 같은 뜻입니다.)</p>
+</div>
+
+<h3 id="s07-1-5">호출 스택과 스택 프레임</h3>
+
+<p>함수가 호출될 때마다 그 함수의 매개변수와 지역 변수가 저장될 공간이 필요합니다. 이 공간은 메모리의 <b>스택(stack)</b> 영역에 만들어지며, 함수 하나의 호출에 해당하는 공간 덩어리를 <b>스택 프레임(stack frame)</b> 또는 활성 레코드(activation record)라고 합니다.</p>
+<p>스택은 접시 쌓기와 같습니다. 함수를 호출하면 새 프레임(접시)이 맨 위에 쌓이고(push), 함수가 끝나면 맨 위 프레임이 제거됩니다(pop). 항상 가장 나중에 호출된 함수가 가장 먼저 끝나므로 <b>LIFO(Last In, First Out)</b> 구조입니다.</p>
+
+<figure class="code"><figcaption>ex07-3.c — 함수가 함수를 부르는 프로그램</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+long long calc_interest(long long bal, int bp)
+{
+    long long it = bal * bp / 10000;     /* 지역 변수 it */
+    return it;
+}
+
+long long calc_net(long long bal, int bp)
+{
+    long long gross = calc_interest(bal, bp);   /* 함수 안에서 또 함수 호출 */
+    long long tax = gross * 154 / 1000;
+    return gross - tax;
+}
+
+int main(void)
+{
+    long long balance = 10000000;
+    long long net = calc_net(balance, 350);
+    printf("세후 이자: %lld원\n", net);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>세후 이자: 296100원</pre></figure>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 330" width="700" role="img" aria-label="호출 스택 변화">
+  <text x="110" y="20" text-anchor="middle" class="small bold">① main 실행 중</text>
+  <rect class="box" x="30" y="220" width="160" height="80" rx="4"/>
+  <text x="110" y="244" text-anchor="middle" class="small bold">main 프레임</text>
+  <text x="110" y="266" text-anchor="middle" class="mono small">balance=10000000</text>
+  <text x="110" y="286" text-anchor="middle" class="mono small">net=?</text>
+
+  <text x="350" y="20" text-anchor="middle" class="small bold">② calc_interest 실행 중</text>
+  <rect class="box" x="270" y="220" width="160" height="80" rx="4"/>
+  <text x="350" y="244" text-anchor="middle" class="small bold">main</text>
+  <text x="350" y="266" text-anchor="middle" class="mono small">balance, net</text>
+  <rect class="hl2" x="270" y="140" width="160" height="80" rx="4"/>
+  <text x="350" y="164" text-anchor="middle" class="small bold">calc_net</text>
+  <text x="350" y="186" text-anchor="middle" class="mono small">bal, bp</text>
+  <text x="350" y="206" text-anchor="middle" class="mono small">gross=? tax=?</text>
+  <rect class="hl" x="270" y="60" width="160" height="80" rx="4"/>
+  <text x="350" y="84" text-anchor="middle" class="small bold">calc_interest</text>
+  <text x="350" y="106" text-anchor="middle" class="mono small">bal, bp</text>
+  <text x="350" y="126" text-anchor="middle" class="mono small">it=350000</text>
+  <path class="arrow-m" d="M450 140 V 80"/>
+  <text x="460" y="112" class="small mute">스택 top</text>
+
+  <text x="590" y="20" text-anchor="middle" class="small bold">③ 복귀 후</text>
+  <rect class="box" x="510" y="220" width="160" height="80" rx="4"/>
+  <text x="590" y="244" text-anchor="middle" class="small bold">main</text>
+  <text x="590" y="266" text-anchor="middle" class="mono small">net=296100</text>
+  <rect class="dash" x="510" y="140" width="160" height="80" rx="4"/>
+  <text x="590" y="184" text-anchor="middle" class="small mute">제거됨 (pop)</text>
+  <rect class="dash" x="510" y="60" width="160" height="80" rx="4"/>
+  <text x="590" y="104" text-anchor="middle" class="small mute">제거됨 (pop)</text>
+  <text x="350" y="324" text-anchor="middle" class="small mute">그림에서는 위로 쌓이게 그렸지만, x86-64 실제 메모리에서 스택은 높은 주소 → 낮은 주소로 자랍니다</text>
+</svg>
+<figcaption>그림 7-3 호출 스택 — 호출될 때 프레임이 쌓이고(push), 반환되면 제거됩니다(pop)</figcaption>
+</figure>
+
+<p>스택 프레임에는 보통 다음이 들어갑니다(정확한 배치는 CPU와 호출 규약에 따라 다름).</p>
+<ul>
+<li><b>복귀 주소(return address)</b>: 함수가 끝난 뒤 돌아갈 호출한 곳의 다음 명령 주소. <code>call</code> 명령이 자동으로 스택에 넣습니다.</li>
+<li><b>이전 프레임 포인터</b>: 호출한 함수의 프레임 위치(rbp)를 저장.</li>
+<li><b>지역 변수</b>와, 레지스터로 전달되지 못한 <b>매개변수</b>.</li>
+</ul>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — 지역 변수가 함수가 끝나면 사라지는 이유</p>
+<p>함수가 return하면 스택 포인터(rsp)가 이전 위치로 돌아갑니다. 프레임이 차지하던 메모리를 실제로 지우지는 않고, "여기부터는 빈 공간"이라고 표시만 옮기는 것입니다. 그래서 프레임 생성과 제거는 포인터 하나를 더하고 빼는 것으로 끝나 매우 빠릅니다(힙 메모리 할당보다 훨씬 빠른 이유). 대신 그 공간은 다음 함수 호출이 덮어쓰므로, 함수가 끝난 뒤 그 지역 변수의 주소를 사용하면 <b>미정의 동작</b>이 됩니다. 9장 포인터에서 "지역 변수의 주소를 반환하지 말라"는 규칙이 여기서 나옵니다.</p>
+<p>x86-64 리눅스(System V 호출 규약)에서는 정수·포인터 인수 앞의 6개가 레지스터(rdi, rsi, rdx, rcx, r8, r9)로, 실수 인수 앞의 8개가 xmm0~xmm7로 전달되고, 반환값은 rax(정수) 또는 xmm0(실수)에 담깁니다. 윈도우 x64 호출 규약은 레지스터 4개(rcx, rdx, r8, r9)를 쓰는 등 다릅니다.</p>
+</div>
+
+<h3 id="s07-1-6">값에 의한 전달(call by value)</h3>
+
+<p>C의 함수 호출은 <b>언제나 값에 의한 전달</b>입니다. 인수의 값이 매개변수에 <b>복사</b>되므로, 함수 안에서 매개변수를 바꿔도 호출한 쪽의 원래 변수는 바뀌지 않습니다.</p>
+
+<figure class="code bad"><figcaption>ex07-4.c — 두 값을 바꾸려 했지만 실패</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+void swap(int a, int b)
+{
+    int tmp = a;
+    a = b;
+    b = tmp;
+    printf("swap 안: a=%d, b=%d\n", a, b);
+}
+
+int main(void)
+{
+    int x = 10, y = 20;
+    swap(x, y);
+    printf("main  : x=%d, y=%d\n", x, y);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>swap 안: a=20, b=10
+main  : x=10, y=20</pre></figure>
+
+<figure class="diagram">
+<div class="mem">
+  <div class="cell hl"><span class="addr">0x7ffc10</span><span class="val">10</span><span class="name">x (main)</span></div>
+  <div class="cell hl"><span class="addr">0x7ffc14</span><span class="val">20</span><span class="name">y (main)</span></div>
+</div>
+<div class="mem">
+  <div class="cell hl2"><span class="addr">0x7ffbe8</span><span class="val">20</span><span class="name">a (swap)</span></div>
+  <div class="cell hl2"><span class="addr">0x7ffbec</span><span class="val">10</span><span class="name">b (swap)</span></div>
+  <div class="cell"><span class="addr">0x7ffbf0</span><span class="val">10</span><span class="name">tmp</span></div>
+</div>
+<figcaption>그림 7-4 call by value — swap의 a, b는 x, y의 <b>복사본</b>이 저장된 별개의 메모리입니다. 복사본을 바꿔도 원본은 그대로입니다 (주소는 예시)</figcaption>
+</figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — scanf에 &amp;가 필요한 진짜 이유</p>
+<p>이제 3장부터 외워 왔던 "scanf에는 &amp;를 붙인다"의 이유를 설명할 수 있습니다. <code>scanf("%d", x)</code>라고 쓰면 x의 <b>값</b>(예: 쓰레기 값 32767)이 복사되어 넘어갈 뿐이고, scanf는 main의 x가 어디 있는지 알 수 없으므로 x에 값을 넣어 줄 방법이 없습니다. <code>&amp;x</code>는 x의 <b>주소</b>입니다. 주소 값이 복사되어 넘어가면, scanf는 그 주소가 가리키는 곳에 직접 값을 써 넣을 수 있습니다. 주소도 "값"으로 전달된다는 점에서 C는 여전히 call by value이지만, 주소를 넘김으로써 원본을 바꾸는 효과를 내는 것입니다. 이 방법으로 swap을 고치는 것은 9장 포인터에서 다룹니다.</p>
+</div>
+
+<div class="box fix"><p class="box-title" data-tag="해결">지금 단계에서의 해결 — 결과는 반환값으로 받는다</p>
+<p>포인터를 배우기 전에는 "함수는 매개변수로 입력을 받고, 결과는 return으로 돌려준다"는 원칙을 지키십시오. 원본을 바꾸고 싶으면 <code>x = f(x);</code>처럼 반환값을 다시 대입합니다.</p>
+<figure class="code good"><figcaption>반환값으로 잔액 갱신</figcaption><pre><code class="language-c">long long deposit(long long balance, long long amount)
+{
+    return balance + amount;
+}
+/* 호출: balance = deposit(balance, 50000); */</code></pre></figure>
+</div>
+
+<div class="ex"><p class="ex-title">예제 7-2 <span class="lv">난이도 ★★☆</span></p>
+<p>다음 프로그램의 출력을 예측하세요.</p>
+<figure class="code"><figcaption>출력 예측</figcaption><pre><code class="language-c">#include &lt;stdio.h&gt;
+int f(int n)
+{
+    n = n * 2;
+    return n + 1;
+}
+int main(void)
+{
+    int n = 5;
+    int r = f(n);
+    printf("%d %d\n", n, r);
+    r = f(f(n));
+    printf("%d %d\n", n, r);
+    return 0;
+}</code></pre></figure>
+<details><summary>정답과 해설 보기</summary>
+<figure class="code out"><figcaption>정답</figcaption><pre>5 11
+5 23</pre></figure>
+<p>f 안의 n은 main의 n과 이름만 같은 별개의 변수(복사본)입니다. f(5) = 11. f(f(5)) = f(11) = 23. main의 n은 끝까지 5입니다.</p>
+</details></div>
+
+<h2 id="s07-2"><span class="num">07-2</span>여러 가지 함수 유형</h2>
+
+<h3 id="s07-2-1">반환값과 매개변수의 유무에 따른 네 가지 유형</h3>
+
+<p>함수는 "값을 받는가(매개변수)"와 "값을 돌려주는가(반환값)"에 따라 네 가지로 나눌 수 있습니다. 값을 받지 않거나 돌려주지 않는다는 것은 <code>void</code>로 표시합니다. void는 "없음, 비어 있음"이라는 뜻입니다.</p>
+
+<div class="tbl"><table><thead><tr><th>유형</th><th>원형 예</th><th>용도</th></tr></thead><tbody>
+<tr><td>매개변수 O, 반환값 O</td><td><code>long long calc_fee(long long amt, int bp);</code></td><td>계산 함수. 가장 흔하고 테스트하기 쉬움</td></tr>
+<tr><td>매개변수 O, 반환값 X</td><td><code>void print_receipt(long long amt);</code></td><td>출력, 로그 기록처럼 "일"만 하는 함수</td></tr>
+<tr><td>매개변수 X, 반환값 O</td><td><code>int read_menu(void);</code></td><td>입력 받기, 현재 상태 조회</td></tr>
+<tr><td>매개변수 X, 반환값 X</td><td><code>void print_banner(void);</code></td><td>고정된 화면 출력, 초기화</td></tr>
+</tbody></table></div>
+
+<figure class="code"><figcaption>ex07-5.c — 네 가지 유형이 모두 등장하는 ATM 프로그램</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+void print_banner(void)                      /* 입력 X, 출력 X */
+{
+    printf("==== C BANK ATM ====\n");
+}
+
+int read_menu(void)                          /* 입력 X, 반환 O */
+{
+    int m, ch;
+    printf("[1]조회 [2]입금 [0]종료: ");
+    while (scanf("%d", &amp;m) != 1) {          /* 숫자가 아니면 줄을 비우고 재입력 */
+        while ((ch = getchar()) != '\n' &amp;&amp; ch != EOF)
+            ;
+        if (ch == EOF) return 0;            /* 입력 끝이면 종료 메뉴로 간주 */
+        printf("숫자를 입력하세요: ");
+    }
+    return m;
+}
+
+long long deposit(long long bal, long long amt)   /* 입력 O, 반환 O */
+{
+    return bal + amt;
+}
+
+void print_balance(long long bal)            /* 입력 O, 반환 X */
+{
+    printf("현재 잔액: %lld원\n", bal);
+}
+
+int main(void)
+{
+    long long balance = 50000;
+    int menu;
+
+    print_banner();
+    while ((menu = read_menu()) != 0) {
+        if (menu == 1)
+            print_balance(balance);
+        else if (menu == 2) {
+            balance = deposit(balance, 10000);
+            print_balance(balance);
+        } else
+            printf("잘못된 메뉴\n");
+    }
+    printf("종료합니다.\n");
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>==== C BANK ATM ====
+[1]조회 [2]입금 [0]종료: 2
+현재 잔액: 60000원
+[1]조회 [2]입금 [0]종료: 1
+현재 잔액: 60000원
+[1]조회 [2]입금 [0]종료: 0
+종료합니다.</pre></figure>
+
+<p>main이 몇 줄 안 되는 "목차"처럼 읽힌다는 점에 주목하십시오. 세부 동작은 함수 이름이 설명해 줍니다. 이것이 함수로 분리했을 때 얻는 가장 큰 가독성 이득입니다.</p>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 — void 함수의 반환값을 사용</p>
+<p><code>long long b = print_balance(balance);</code>처럼 void 함수의 결과를 쓰려고 하면 컴파일 오류("void value not ignored as it ought to be")입니다. 반대로 반환값이 있는 함수의 결과를 무시하는 것은 합법이지만(<code>printf</code>도 출력한 글자 수를 반환하는데 보통 무시합니다), scanf나 fopen처럼 <b>성공/실패를 반환하는 함수의 결과를 무시하는 것은 버그의 원천</b>입니다.</p>
+</div>
+
+<h3 id="s07-2-2">재귀 함수 — 자기 자신을 호출하는 함수</h3>
+
+<p>함수가 자기 자신을 호출하는 것을 <b>재귀(recursion)</b>라고 합니다. 처음엔 이상하게 들리지만, "큰 문제를 같은 모양의 더 작은 문제로 바꿔 푸는" 수학적 귀납법과 같은 사고방식입니다. 재귀 함수는 반드시 두 부분을 가져야 합니다.</p>
+<ol class="steps">
+<li><b>기저 사례(base case)</b>: 더 이상 쪼개지 않고 바로 답을 아는 가장 작은 문제. 재귀를 멈추는 조건입니다.</li>
+<li><b>재귀 사례(recursive case)</b>: 문제를 한 단계 작게 만들어 자기 자신을 호출하고, 그 결과로 현재 답을 만듭니다. 반드시 기저 사례 쪽으로 다가가야 합니다.</li>
+</ol>
+
+<h4>팩토리얼</h4>
+<p>n! = n × (n-1) × ... × 1 이고, 이를 재귀적으로 정의하면 <b>0! = 1</b>(기저), <b>n! = n × (n-1)!</b>(재귀)입니다.</p>
+
+<figure class="code"><figcaption>ex07-6.c — 재귀 팩토리얼과 반복 팩토리얼</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+long long fact_rec(int n)
+{
+    if (n &lt;= 1)                       /* 기저 사례 */
+        return 1;
+    return n * fact_rec(n - 1);       /* 재귀 사례: 문제를 n-1로 축소 */
+}
+
+long long fact_iter(int n)
+{
+    long long r = 1;
+    for (int i = 2; i &lt;= n; i++)
+        r *= i;
+    return r;
+}
+
+int main(void)
+{
+    printf("4!  = %lld\n", fact_rec(4));
+    printf("10! = %lld\n", fact_rec(10));
+    printf("20! = %lld\n", fact_iter(20));    /* long long로 표현 가능한 최대 팩토리얼 */
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>4!  = 24
+10! = 3628800
+20! = 2432902008176640000</pre></figure>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 330" width="700" role="img" aria-label="fact(4) 재귀 호출의 스택 프레임">
+  <text x="170" y="20" text-anchor="middle" class="small bold">호출 단계 (스택이 쌓임)</text>
+  <rect class="box" x="60" y="250" width="220" height="40" rx="4"/>
+  <text x="170" y="275" text-anchor="middle" class="mono small">fact(4): 4 * fact(3) 대기</text>
+  <rect class="box" x="60" y="200" width="220" height="40" rx="4"/>
+  <text x="170" y="225" text-anchor="middle" class="mono small">fact(3): 3 * fact(2) 대기</text>
+  <rect class="box" x="60" y="150" width="220" height="40" rx="4"/>
+  <text x="170" y="175" text-anchor="middle" class="mono small">fact(2): 2 * fact(1) 대기</text>
+  <rect class="hl" x="60" y="100" width="220" height="40" rx="4"/>
+  <text x="170" y="125" text-anchor="middle" class="mono small">fact(1): 기저 → return 1</text>
+  <path class="arrow-m" d="M40 280 V 112"/>
+  <text x="30" y="200" text-anchor="middle" class="small mute" transform="rotate(-90 30 200)">push</text>
+
+  <text x="520" y="20" text-anchor="middle" class="small bold">복귀 단계 (스택이 풀림)</text>
+  <rect class="hl2" x="410" y="100" width="220" height="40" rx="4"/>
+  <text x="520" y="125" text-anchor="middle" class="mono small">fact(1) = 1</text>
+  <rect class="hl2" x="410" y="150" width="220" height="40" rx="4"/>
+  <text x="520" y="175" text-anchor="middle" class="mono small">fact(2) = 2 * 1 = 2</text>
+  <rect class="hl2" x="410" y="200" width="220" height="40" rx="4"/>
+  <text x="520" y="225" text-anchor="middle" class="mono small">fact(3) = 3 * 2 = 6</text>
+  <rect class="hl2" x="410" y="250" width="220" height="40" rx="4"/>
+  <text x="520" y="275" text-anchor="middle" class="mono small">fact(4) = 4 * 6 = 24</text>
+  <path class="arrow" d="M650 112 V 280"/>
+  <text x="664" y="200" text-anchor="middle" class="small acc" transform="rotate(90 664 200)">pop</text>
+  <path class="arrow-m" d="M290 120 H 400"/>
+  <text x="345" y="112" text-anchor="middle" class="small">기저 도달</text>
+  <text x="350" y="318" text-anchor="middle" class="small mute">각 프레임은 자신만의 n을 가지며, 아래 프레임은 위 프레임의 결과를 기다립니다</text>
+</svg>
+<figcaption>그림 7-5 fact(4)의 스택 프레임 — 기저 사례까지 쌓였다가 역순으로 결과를 곱하며 풀립니다</figcaption>
+</figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — 같은 이름의 n이 서로 섞이지 않는 이유</p>
+<p>fact(4), fact(3), fact(2), fact(1)은 모두 같은 코드를 실행하지만, 호출될 때마다 <b>새 스택 프레임</b>이 만들어지고 각자의 매개변수 n이 그 프레임 안에 따로 저장됩니다. 그래서 fact(1)이 실행되는 동안에도 아래 프레임의 n=2, 3, 4는 그대로 보존되어 있다가 복귀할 때 사용됩니다. 재귀는 특별한 마법이 아니라, 이미 배운 "함수 호출 = 새 프레임 push"가 같은 함수에 반복 적용된 것뿐입니다.</p>
+</div>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 — 기저 사례 누락과 스택 오버플로</p>
+<figure class="code bad"><figcaption>잘못된 예 — 기저 사례가 없음</figcaption><pre><code class="language-c">long long fact_bad(int n)
+{
+    return n * fact_bad(n - 1);   /* 멈추는 조건이 없다 */
+}</code></pre></figure>
+<p>재귀가 끝나지 않으면 프레임이 계속 쌓여 스택 영역(리눅스 기본 8MB, 윈도우 기본 1MB)을 다 써 버리고 <b>스택 오버플로(stack overflow)</b>가 발생합니다. 리눅스에서는 <code>Segmentation fault</code>로 프로그램이 죽습니다. 기저 사례가 있어도 <code>fact_rec(-5)</code>처럼 기저에 도달할 수 없는 값이 들어오면 같은 일이 생길 수 있으므로, 위 코드처럼 <code>n &lt;= 1</code>로 넓게 잡거나 입력을 검증합니다. 또 21!부터는 long long 범위(약 9.2×10<sup>18</sup>)를 넘어 <b>부호 있는 정수 오버플로(UB)</b>가 일어납니다.</p>
+</div>
+
+<h4>피보나치 수열과 재귀의 비용</h4>
+<p>피보나치 수열은 F(0)=0, F(1)=1, F(n)=F(n-1)+F(n-2)입니다. 정의를 그대로 재귀로 옮기면 매우 간단합니다.</p>
+
+<figure class="code"><figcaption>ex07-7.c — 단순 재귀 피보나치와 호출 횟수</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+long long calls = 0;                 /* 호출 횟수 측정용 전역 변수 */
+
+long long fib(int n)
+{
+    calls++;
+    if (n &lt; 2)                       /* 기저: F(0)=0, F(1)=1 */
+        return n;
+    return fib(n - 1) + fib(n - 2);  /* 재귀 호출이 두 갈래 */
+}
+
+long long fib_iter(int n)
+{
+    long long a = 0, b = 1;          /* a = F(i), b = F(i+1) */
+    for (int i = 0; i &lt; n; i++) {
+        long long t = a + b;
+        a = b;
+        b = t;
+    }
+    return a;
+}
+
+int main(void)
+{
+    long long r = fib(30);           /* 먼저 호출해 둔다: 인수 평가 순서는 정해져 있지 않으므로 */
+    printf("fib(30) = %lld, 호출 횟수 = %lld\n", r, calls);   /* printf(..., fib(30), calls)는 위험 */
+    printf("fib_iter(30) = %lld\n", fib_iter(30));
+    printf("fib_iter(90) = %lld\n", fib_iter(90));
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>fib(30) = 832040, 호출 횟수 = 2692537
+fib_iter(30) = 832040
+fib_iter(90) = 2880067194370816120</pre></figure>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 260" width="700" role="img" aria-label="fib(5) 호출 트리">
+  <rect class="hl" x="310" y="10" width="80" height="30" rx="4"/><text x="350" y="30" text-anchor="middle" class="mono small">fib(5)</text>
+  <path class="line" d="M330 40 L 190 70"/><path class="line" d="M370 40 L 510 70"/>
+  <rect class="box" x="150" y="70" width="80" height="30" rx="4"/><text x="190" y="90" text-anchor="middle" class="mono small">fib(4)</text>
+  <rect class="hl2" x="470" y="70" width="80" height="30" rx="4"/><text x="510" y="90" text-anchor="middle" class="mono small">fib(3)</text>
+  <path class="line" d="M170 100 L 100 130"/><path class="line" d="M210 100 L 280 130"/>
+  <path class="line" d="M490 100 L 440 130"/><path class="line" d="M530 100 L 590 130"/>
+  <rect class="hl2" x="60" y="130" width="80" height="30" rx="4"/><text x="100" y="150" text-anchor="middle" class="mono small">fib(3)</text>
+  <rect class="bad" x="240" y="130" width="80" height="30" rx="4"/><text x="280" y="150" text-anchor="middle" class="mono small">fib(2)</text>
+  <rect class="bad" x="400" y="130" width="80" height="30" rx="4"/><text x="440" y="150" text-anchor="middle" class="mono small">fib(2)</text>
+  <rect class="box" x="550" y="130" width="80" height="30" rx="4"/><text x="590" y="150" text-anchor="middle" class="mono small">fib(1)</text>
+  <path class="line" d="M85 160 L 50 190"/><path class="line" d="M115 160 L 150 190"/>
+  <path class="line" d="M265 160 L 245 190"/><path class="line" d="M295 160 L 315 190"/>
+  <path class="line" d="M425 160 L 405 190"/><path class="line" d="M455 160 L 475 190"/>
+  <rect class="bad" x="14" y="190" width="72" height="28" rx="4"/><text x="50" y="209" text-anchor="middle" class="mono small">fib(2)</text>
+  <rect class="box" x="114" y="190" width="72" height="28" rx="4"/><text x="150" y="209" text-anchor="middle" class="mono small">fib(1)</text>
+  <rect class="box" x="210" y="190" width="70" height="28" rx="4"/><text x="245" y="209" text-anchor="middle" class="mono small">fib(1)</text>
+  <rect class="box" x="284" y="190" width="70" height="28" rx="4"/><text x="319" y="209" text-anchor="middle" class="mono small">fib(0)</text>
+  <rect class="box" x="370" y="190" width="70" height="28" rx="4"/><text x="405" y="209" text-anchor="middle" class="mono small">fib(1)</text>
+  <rect class="box" x="444" y="190" width="70" height="28" rx="4"/><text x="479" y="209" text-anchor="middle" class="mono small">fib(0)</text>
+  <text x="350" y="246" text-anchor="middle" class="small">같은 색 = 같은 계산의 중복. fib(3)은 2번, fib(2)는 3번 계산됨 (fib(2) 아래 가지는 일부 생략)</text>
+</svg>
+<figcaption>그림 7-6 fib(5)의 호출 트리 — 같은 값을 반복해서 계산하므로 호출 수가 지수적으로 증가합니다</figcaption>
+</figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — fib(30) 하나에 269만 번 호출되는 이유</p>
+<p>fib(n)은 fib(n-1)과 fib(n-2)를 <b>각각 처음부터</b> 계산하는데, fib(n-1) 안에서도 fib(n-2)를 또 계산합니다. 같은 부분 문제가 트리 전체에 반복 등장하므로 호출 수는 대략 1.618<sup>n</sup>(황금비의 거듭제곱)에 비례해 늘어납니다. 정확히는 fib(n)의 호출 횟수 = 2×F(n+1) − 1이고, n=30이면 2×1,346,269 − 1 = 2,692,537번입니다. n=50이면 약 400억 번이 되어 일반 PC에서 수 분이 걸립니다. 반면 반복 버전은 n번의 덧셈이면 끝납니다(O(n)).</p>
+<p>재귀의 비용은 두 가지입니다. ① <b>시간</b>: 함수 호출 자체의 오버헤드(프레임 생성, 레지스터 저장, 점프)와 위와 같은 중복 계산. ② <b>공간</b>: 재귀 깊이만큼 스택 프레임이 쌓임. fact(10만)은 계산 결과가 오버플로하기 전에 스택이 넘칠 수도 있습니다.</p>
+</div>
+
+<div class="box fix"><p class="box-title" data-tag="해결">이렇게 해결합니다 — 재귀를 쓸 때와 쓰지 말아야 할 때</p>
+<ul>
+<li><b>중복 계산이 있는 재귀</b>는 결과를 저장해 재사용(<b>메모이제이션</b>, 배열을 배운 뒤 8장 연습문제)하거나 반복문으로 바꿉니다(<b>동적 계획법</b>).</li>
+<li><b>깊이가 입력 크기에 비례하는 재귀</b>(팩토리얼, 리스트 순회)는 반복문으로 바꾸는 것이 안전합니다. 특히 24시간 도는 금융 서버에서 입력에 따라 스택이 넘칠 수 있는 코드는 금지 대상입니다.</li>
+<li><b>재귀가 빛나는 곳</b>: 깊이가 log n 정도로 얕은 분할 정복(이진 탐색, 퀵 정렬, 병합 정렬), 트리 구조 순회(디렉터리 탐색, 25장 트리) 등. 이런 문제는 재귀로 쓰면 코드가 훨씬 짧고 명확합니다.</li>
+<li>재귀 호출이 함수의 <b>마지막 동작</b>인 <b>꼬리 재귀(tail recursion)</b>는 gcc -O2에서 반복문으로 최적화될 수 있지만, C 표준이 보장하지는 않으므로 의존하지 않습니다.</li>
+</ul>
+</div>
+
+<div class="ex"><p class="ex-title">예제 7-3 <span class="lv">난이도 ★★☆</span></p>
+<p>양의 정수의 각 자릿수 합을 재귀 함수 <code>int digit_sum(long long n)</code>으로 구하세요. (6장 예제 6-6을 재귀로)</p>
+<details><summary>정답과 해설 보기</summary>
+<p>기저: n이 0이면 0. 재귀: (마지막 자리) + (나머지 자리들의 합) = <code>n % 10 + digit_sum(n / 10)</code>. n이 매번 10배씩 줄어드므로 깊이는 자릿수(최대 19)뿐이라 재귀를 써도 안전합니다.</p>
+<figure class="code good"><figcaption>정답 코드</figcaption><pre><code class="language-c">int digit_sum(long long n)
+{
+    if (n == 0)
+        return 0;
+    return (int)(n % 10) + digit_sum(n / 10);
+}
+/* digit_sum(12345) → 5 + digit_sum(1234) → ... → 15 */</code></pre></figure>
+</details></div>
+
+<div class="ex"><p class="ex-title">예제 7-4 <span class="lv">난이도 ★★★</span></p>
+<p>다음 재귀 함수에서 <code>f(3)</code>을 호출하면 무엇이 출력됩니까? 호출 전 출력과 복귀 후 출력의 순서에 주목하세요.</p>
+<figure class="code"><figcaption>출력 예측</figcaption><pre><code class="language-c">void f(int n)
+{
+    if (n == 0) return;
+    printf("in%d ", n);
+    f(n - 1);
+    printf("out%d ", n);
+}</code></pre></figure>
+<details><summary>정답과 해설 보기</summary>
+<p>출력: <b>in3 in2 in1 out1 out2 out3</b></p>
+<p>재귀 호출 <b>전</b>의 문장은 스택이 쌓이는 순서(3, 2, 1)로, 재귀 호출 <b>후</b>의 문장은 스택이 풀리는 역순(1, 2, 3)으로 실행됩니다. 이 성질 때문에 재귀를 이용하면 입력을 거꾸로 출력하는 등의 작업을 쉽게 할 수 있습니다(예: 정수를 2진수로 출력할 때 상위 비트부터 출력).</p>
+</details></div>
+
+<h3 id="s07-2-3">표준 라이브러리 함수 — math.h</h3>
+
+<p>C 표준은 자주 쓰는 기능을 <b>표준 라이브러리</b>로 제공합니다. 원형은 헤더 파일에 있으므로 해당 헤더를 #include하고 호출하면 됩니다. 수학 함수는 <code>&lt;math.h&gt;</code>에 있으며, 리눅스 gcc에서는 링크할 때 수학 라이브러리를 지정하는 <code>-lm</code> 옵션이 필요할 수 있습니다.</p>
+
+<div class="tbl"><table><thead><tr><th>함수</th><th>의미</th><th>예와 결과</th></tr></thead><tbody>
+<tr><td><code>double sqrt(double x)</code></td><td>제곱근</td><td><code>sqrt(2.0)</code> → 1.414214</td></tr>
+<tr><td><code>double pow(double x, double y)</code></td><td>x의 y제곱</td><td><code>pow(1.035, 5)</code> → 1.187686</td></tr>
+<tr><td><code>double fabs(double x)</code></td><td>실수 절댓값</td><td><code>fabs(-3.5)</code> → 3.5</td></tr>
+<tr><td><code>double floor(double x)</code></td><td>내림(x 이하 최대 정수)</td><td><code>floor(-2.5)</code> → -3.0</td></tr>
+<tr><td><code>double ceil(double x)</code></td><td>올림(x 이상 최소 정수)</td><td><code>ceil(-2.5)</code> → -2.0</td></tr>
+<tr><td><code>double trunc(double x)</code> (C99)</td><td>0 방향 버림</td><td><code>trunc(-2.7)</code> → -2.0</td></tr>
+<tr><td><code>double round(double x)</code> (C99)</td><td>반올림(.5는 0에서 먼 쪽)</td><td><code>round(2.5)</code> → 3.0, <code>round(-2.5)</code> → -3.0</td></tr>
+<tr><td><code>double rint(double x)</code> (C99)</td><td>현재 반올림 모드(기본: 짝수 쪽)로 반올림</td><td><code>rint(2.5)</code> → 2.0, <code>rint(3.5)</code> → 4.0</td></tr>
+<tr><td><code>long long llround(double x)</code> (C99)</td><td>반올림해서 long long으로</td><td><code>llround(1032797.16)</code> → 1032797</td></tr>
+<tr><td><code>double log(double x)</code>, <code>exp</code>, <code>log10</code></td><td>자연로그, 지수, 상용로그</td><td><code>log(2.0)/log(1.035)</code> → 20.149 (2배 되는 기간)</td></tr>
+</tbody></table></div>
+
+<figure class="code"><figcaption>ex07-8.c — 반올림 함수 비교</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;math.h&gt;                 /* gcc ex07-8.c -lm */
+
+int main(void)
+{
+    double v[] = { 2.5, 3.5, -2.5, 2.4999 };
+    for (int i = 0; i &lt; 4; i++) {
+        printf("%7.4f: floor=%4.0f ceil=%4.0f trunc=%4.0f round=%4.0f rint=%4.0f\n",
+               v[i], floor(v[i]), ceil(v[i]), trunc(v[i]), round(v[i]), rint(v[i]));
+    }
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre> 2.5000: floor=   2 ceil=   3 trunc=   2 round=   3 rint=   2
+ 3.5000: floor=   3 ceil=   4 trunc=   3 round=   4 rint=   4
+-2.5000: floor=  -3 ceil=  -2 trunc=  -2 round=  -3 rint=  -2
+ 2.4999: floor=   2 ceil=   3 trunc=   2 round=   2 rint=   2</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — rint는 왜 2.5를 2로 만들까 (은행가 반올림)</p>
+<p>rint는 IEEE 754 표준의 기본 반올림 모드인 <b>"가장 가까운 값, 동점이면 짝수 쪽(round half to even)"</b>을 따릅니다. 2.5는 2와 3의 정확히 중간이므로 짝수인 2를, 3.5는 짝수인 4를 고릅니다. 이를 <b>은행가 반올림(banker's rounding)</b>이라고 부르는데, 대량의 데이터를 반올림할 때 항상 올리는 방식(사사오입)은 합계가 위로 치우치는(편향) 반면, 짝수 쪽 반올림은 올림과 내림이 반반씩 일어나 합계 편향이 줄어들기 때문입니다. 단, 한국 금융 실무의 원 단위 처리는 대부분 <b>절사</b> 또는 <b>사사오입</b>이 약관으로 정해져 있으므로, 함수를 고르기 전에 반드시 업무 규칙을 확인해야 합니다.</p>
+</div>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 — math.h를 빼먹거나 정수 거듭제곱에 pow 사용</p>
+<ul>
+<li><code>#include &lt;math.h&gt;</code> 없이 sqrt를 호출하면 원형이 없어 경고/오류가 나거나(C99 이후) 엉뚱한 값이 나옵니다.</li>
+<li><code>pow(10, 2)</code>는 double 계산이라 대부분 정확히 100.0이 나오지만, 큰 정수의 거듭제곱을 <code>(long long)pow(...)</code>로 변환하면 오차 때문에 1 작은 값(99999999999999 등)이 나올 수 있습니다. 정수 거듭제곱은 반복문으로 직접 곱하는 함수를 만드는 것이 안전합니다.</li>
+<li>sqrt에 음수를 넣으면 NaN(Not a Number)이 반환됩니다. log(0)은 -inf입니다. 입력 범위를 먼저 검증하십시오.</li>
+</ul>
+</div>
+
+<h3 id="s07-2-4">표준 라이브러리 함수 — stdlib.h</h3>
+
+<div class="tbl"><table><thead><tr><th>함수</th><th>의미</th><th>비고</th></tr></thead><tbody>
+<tr><td><code>int abs(int)</code>, <code>long long llabs(long long)</code></td><td>정수 절댓값</td><td><code>abs(INT_MIN)</code>은 표현 불가 → UB</td></tr>
+<tr><td><code>int rand(void)</code></td><td>0 ~ RAND_MAX 사이 의사 난수</td><td>RAND_MAX는 최소 32767 (glibc는 2147483647)</td></tr>
+<tr><td><code>void srand(unsigned seed)</code></td><td>난수 시드 설정</td><td>보통 <code>srand((unsigned)time(NULL))</code></td></tr>
+<tr><td><code>int atoi(const char *s)</code></td><td>문자열 → int</td><td>오류 검출 불가. 실무에서는 비권장</td></tr>
+<tr><td><code>long strtol(const char *s, char **end, int base)</code></td><td>문자열 → long (오류 검출 가능)</td><td>12장에서 자세히</td></tr>
+<tr><td><code>void exit(int status)</code></td><td>프로그램 즉시 종료</td><td><code>EXIT_SUCCESS</code>(0), <code>EXIT_FAILURE</code></td></tr>
+<tr><td><code>void *malloc(size_t)</code>, <code>free</code></td><td>동적 메모리</td><td>13장</td></tr>
+<tr><td><code>void qsort(...)</code>, <code>bsearch</code></td><td>정렬, 이진 탐색</td><td>함수 포인터(14장)</td></tr>
+</tbody></table></div>
+
+<figure class="code"><figcaption>ex07-9.c — 난수로 테스트용 거래 금액 만들기</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;time.h&gt;
+
+/* lo 이상 hi 이하의 정수 난수 (학습용: 약간의 편향이 있음) */
+int rand_range(int lo, int hi)
+{
+    return lo + rand() % (hi - lo + 1);
+}
+
+int main(void)
+{
+    srand((unsigned)time(NULL));          /* 실행할 때마다 다른 시드 */
+    for (int i = 0; i &lt; 5; i++) {
+        long long amt = rand_range(1, 100) * 1000LL;   /* 1천원 ~ 10만원, 천원 단위 */
+        printf("테스트 거래 %d: %lld원\n", i + 1, amt);
+    }
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과 (예시 — 실행할 때마다 다름)</figcaption><pre>테스트 거래 1: 47000원
+테스트 거래 2: 3000원
+테스트 거래 3: 88000원
+테스트 거래 4: 61000원
+테스트 거래 5: 19000원</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — rand()는 진짜 난수가 아니다</p>
+<p>rand()는 정해진 수식(예: 선형 합동 생성기)으로 다음 값을 계산하는 <b>의사 난수(pseudo-random)</b> 생성기입니다. 같은 시드로 시작하면 항상 같은 수열이 나옵니다. srand를 호출하지 않으면 시드가 1인 것처럼 동작하므로 매번 같은 결과가 나옵니다. 이 성질은 테스트를 재현할 때는 장점이지만, <b>보안 용도(OTP, 인증번호, 암호 키, 거래 일련번호 추측 방지)에는 절대 쓰면 안 됩니다.</b> 시드(현재 시각)를 추측하면 다음 값을 모두 예측할 수 있기 때문입니다. 금융 보안에는 운영체제의 암호학적 난수(<code>/dev/urandom</code>, <code>getrandom()</code>, 윈도우 <code>BCryptGenRandom</code>)나 검증된 암호 라이브러리를 사용합니다. 또 <code>rand() % n</code>은 RAND_MAX+1이 n의 배수가 아니면 작은 값이 조금 더 자주 나오는 편향이 있습니다.</p>
+</div>
+
+<h3 id="s07-2-5">함수 설계 원칙</h3>
+
+<p>함수를 "문법적으로" 만드는 것은 쉽습니다. 어려운 것은 <b>잘 나누는 것</b>입니다. 실무에서 통용되는 원칙을 정리합니다.</p>
+<ol class="steps">
+<li><b>하나의 함수는 하나의 일만 한다(단일 책임).</b> 함수 이름을 "~하고 ~한다"로밖에 지을 수 없다면 둘로 나눌 신호입니다. 예: <code>calc_and_print_interest</code> → <code>calc_interest</code> + <code>print_interest</code>.</li>
+<li><b>계산과 입출력을 분리한다.</b> 계산 함수는 printf/scanf를 하지 않고 값만 반환해야 다른 곳(화면, 배치, 전문 응답)에서 재사용하고 자동 테스트할 수 있습니다.</li>
+<li><b>이름이 곧 문서다.</b> 동사+목적어(<code>calc_fee</code>, <code>is_valid_account</code>), 불리언 반환은 <code>is_</code>, <code>has_</code>로 시작합니다. 단위가 있으면 이름에 넣습니다(<code>rate_bp</code>, <code>amount_won</code>, <code>days</code>).</li>
+<li><b>짧게 유지한다.</b> 한 화면(약 40~60줄)을 넘으면 나눌 곳을 찾습니다. 들여쓰기 깊이 3단계 이내.</li>
+<li><b>매개변수는 적게.</b> 4~5개를 넘으면 구조체(15장)로 묶는 것을 고려합니다.</li>
+<li><b>부작용을 최소화한다.</b> 전역 변수를 몰래 바꾸는 함수는 호출 순서에 따라 결과가 달라져 버그를 만듭니다. 같은 입력에 항상 같은 출력을 내는 함수(순수 함수)가 가장 다루기 쉽습니다.</li>
+<li><b>오류를 반환값으로 알린다.</b> C에는 예외가 없으므로 "0 성공, 음수 오류 코드" 같은 규약을 정해 일관되게 씁니다. 결과값과 오류를 둘 다 반환해야 하면 포인터 매개변수(9장)를 씁니다.</li>
+</ol>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 250" width="700" role="img" aria-label="계층적 함수 분해">
+  <rect class="hl2" x="270" y="10" width="160" height="36" rx="6"/>
+  <text x="350" y="33" text-anchor="middle" class="mono small">process_maturity()</text>
+  <path class="line" d="M350 46 V 66 H 110 V 86"/>
+  <path class="line" d="M350 66 H 590 V 86"/>
+  <path class="line" d="M350 66 V 86"/>
+  <rect class="box" x="30" y="88" width="160" height="36" rx="6"/>
+  <text x="110" y="111" text-anchor="middle" class="mono small">validate_input()</text>
+  <rect class="hl" x="270" y="88" width="160" height="36" rx="6"/>
+  <text x="350" y="111" text-anchor="middle" class="mono small">calc_payout()</text>
+  <rect class="box" x="510" y="88" width="160" height="36" rx="6"/>
+  <text x="590" y="111" text-anchor="middle" class="mono small">print_receipt()</text>
+  <path class="line" d="M350 124 V 144 H 230 V 164"/>
+  <path class="line" d="M350 144 H 470 V 164"/>
+  <rect class="hl" x="150" y="166" width="160" height="36" rx="6"/>
+  <text x="230" y="189" text-anchor="middle" class="mono small">calc_interest()</text>
+  <rect class="hl" x="390" y="166" width="160" height="36" rx="6"/>
+  <text x="470" y="189" text-anchor="middle" class="mono small">calc_tax()</text>
+  <text x="350" y="232" text-anchor="middle" class="small mute">초록: 순수 계산 함수(입출력 없음, 단위 테스트 대상)  ·  회색: 입출력/검증</text>
+</svg>
+<figcaption>그림 7-7 하향식(top-down) 함수 분해 — 큰 일을 작은 함수로 나누고, 계산과 입출력을 분리합니다</figcaption>
+</figure>
+
+<h3 id="s07-2-6">금융 예제 — 이자 계산 함수 분리</h3>
+
+<p>정기예금 만기 해지 처리를 함수로 설계해 봅니다. 규칙: 이자 = 원금 × 연이율(bp) × 예치일수 ÷ (10000 × 365), 원 미만 절사(한편넣기 일수). 세금 = 이자 × 15.4%, 원 미만 절사. 지급액 = 원금 + 이자 − 세금.</p>
+
+<figure class="code"><figcaption>ex07-10.c — 만기 지급액 계산: 계산 함수와 출력 함수 분리</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+#define DAYS_PER_YEAR 365
+#define TAX_RATE_PERMIL 154          /* 15.4% = 154 / 1000 */
+
+/* 오류 코드 */
+#define OK            0
+#define ERR_AMOUNT   -1
+#define ERR_RATE     -2
+#define ERR_DAYS     -3
+
+/* 입력 검증: 0이면 정상, 음수면 오류 코드 */
+int validate(long long principal, int rate_bp, int days)
+{
+    if (principal &lt;= 0)                 return ERR_AMOUNT;
+    if (rate_bp &lt; 0 || rate_bp &gt; 10000) return ERR_RATE;
+    if (days &lt;= 0 || days &gt; 3650)       return ERR_DAYS;
+    return OK;
+}
+
+/* 일할 이자: 원 미만 절사 */
+long long calc_interest(long long principal, int rate_bp, int days)
+{
+    return principal * rate_bp * days / (10000LL * DAYS_PER_YEAR);
+}
+
+/* 이자소득세: 원 미만 절사 */
+long long calc_tax(long long interest)
+{
+    return interest * TAX_RATE_PERMIL / 1000;
+}
+
+/* 영수증 출력: 계산은 하지 않는다 */
+void print_receipt(long long principal, long long interest, long long tax)
+{
+    printf("원금     : %12lld원\n", principal);
+    printf("세전이자 : %12lld원\n", interest);
+    printf("세금     : %12lld원\n", tax);
+    printf("지급액   : %12lld원\n", principal + interest - tax);
+}
+
+int main(void)
+{
+    long long principal = 5000000;
+    int rate_bp = 350, days = 90;
+
+    int rc = validate(principal, rate_bp, days);
+    if (rc != OK) {
+        printf("입력 오류 (코드 %d)\n", rc);
+        return 1;
+    }
+    long long interest = calc_interest(principal, rate_bp, days);
+    long long tax = calc_tax(interest);
+    print_receipt(principal, interest, tax);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>원금     :      5000000원
+세전이자 :        43150원
+세금     :         6645원
+지급액   :      5036505원</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 그럴까? — 10000LL 의 LL은 왜 붙였을까</p>
+<p><code>10000 * 365</code>는 int끼리의 곱이라 3,650,000으로 int 범위 안이므로 사실 괜찮습니다. 하지만 상수 곱이 커지는 경우(예: 이율 단위를 0.0001%로 바꿔 1000000 × 365)에는 int 범위(약 21억)를 넘어 <b>부호 있는 정수 오버플로(UB)</b>가 됩니다. 결과를 long long 변수에 담더라도 <b>계산은 피연산자의 자료형(int)으로 먼저 이루어지기 때문</b>입니다. 상수에 LL 접미사를 붙이면 처음부터 long long으로 계산되어 안전합니다. 분자 <code>principal * rate_bp * days</code>는 principal이 long long이므로 왼쪽부터 long long으로 승격되어 계산됩니다(5,000,000 × 350 × 90 = 1.575×10<sup>11</sup>, int라면 넘침).</p>
+</div>
+
+<div class="box fin"><p class="box-title" data-tag="금융 실무">은행 시스템에서는 — 공통 모듈과 단위 테스트</p>
+<p>은행 계정계에서는 이자 계산, 세금 계산, 영업일 계산, 계좌번호 검증 같은 함수를 <b>공통 모듈(공통 라이브러리)</b>로 만들고 모든 업무 프로그램(수신, 여신, 외환, 배치)이 호출합니다. 공통 모듈은 변경 시 영향 범위가 매우 크기 때문에 별도의 승인 절차와 <b>회귀 테스트</b>(기존 테스트 케이스를 모두 다시 돌려 결과가 바뀌지 않았는지 확인)를 거칩니다. calc_interest처럼 입출력이 없는 순수 함수로 만들어 두면 "입력 → 기대 결과" 표만으로 수천 개의 테스트를 자동으로 돌릴 수 있습니다. 반대로 함수 안에서 printf를 하거나 전역 변수를 바꾸면 이런 자동 테스트가 어려워집니다. 계산과 입출력의 분리는 취향이 아니라 품질 관리의 핵심 요건입니다.</p>
+</div>
+
+<div class="box fin"><p class="box-title" data-tag="금융 실무">은행 시스템에서는 — 오류 코드 체계</p>
+<p>예제의 <code>ERR_AMOUNT</code>, <code>ERR_RATE</code>처럼 실무 시스템은 전사적인 <b>오류 코드(응답 코드) 체계</b>를 가지고 있습니다. 함수는 오류 코드를 반환하고, 최상위 거래 처리부는 그 코드를 화면 메시지나 대외 전문의 응답 코드로 변환합니다. 함수마다 제멋대로 -1, 0, 1을 반환하면 "이 -1이 금액 오류인가 계좌 오류인가"를 구분할 수 없어 장애 분석이 어려워집니다. 그래서 신입 개발자가 가장 먼저 익히는 사내 문서 중 하나가 오류 코드 표입니다.</p>
+</div>
+
+<div class="ex"><p class="ex-title">예제 7-5 <span class="lv">난이도 ★★☆</span></p>
+<p>원 미만을 <b>사사오입(반올림)</b>하는 정수 나눗셈 함수 <code>long long div_round(long long num, long long den)</code>을 실수 연산 없이 작성하세요(num ≥ 0, den &gt; 0 가정). 예: div_round(7, 2) = 4, div_round(5, 3) = 2, div_round(43150684, 1000) = 43151.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>반올림은 "0.5를 더하고 버림"입니다. 정수에서는 분자에 den/2를 더하면 됩니다: <code>(num + den / 2) / den</code>. den이 홀수일 때 den/2가 내림되어 미세한 차이가 생기므로, 정확히 하려면 <code>(2 * num + den) / (2 * den)</code>을 씁니다(오버플로 주의).</p>
+<figure class="code good"><figcaption>정답 코드</figcaption><pre><code class="language-c">long long div_round(long long num, long long den)
+{
+    return (2 * num + den) / (2 * den);
+}
+/* div_round(7, 2)  = 16 / 4  = 4
+   div_round(5, 3)  = 13 / 6  = 2
+   div_round(43150684, 1000) = 86302368 / 2000 = 43151 */</code></pre></figure>
+<p>이 함수를 공통 모듈로 두면, 이자 계산 규칙이 "절사"에서 "사사오입"으로 바뀌어도 calc_interest 안의 나눗셈 한 줄만 바꾸면 됩니다.</p>
+</details></div>
+
+<h2 id="summary">핵심 정리</h2>
+<ul class="summary-list">
+<li>함수는 이름 붙은 코드 묶음으로 재사용, 유지보수, 추상화, 테스트를 가능하게 합니다.</li>
+<li>함수 정의 = 반환형 + 이름 + 매개변수 목록 + 몸통. return은 값을 돌려주고 즉시 함수를 끝냅니다. void가 아닌 함수는 모든 경로에서 return해야 합니다.</li>
+<li>매개변수는 함수의 지역 변수이고, 인수는 호출 시 넘기는 값입니다. 인수의 평가 순서는 정해져 있지 않습니다.</li>
+<li>호출보다 정의가 뒤에 있으면 <b>함수 원형</b>을 앞에 선언합니다. 헤더 파일(stdio.h 등)은 원형의 모음입니다. 매개변수가 없으면 <code>(void)</code>로 씁니다.</li>
+<li>호출마다 스택 프레임(복귀 주소, 지역 변수, 매개변수)이 push되고 반환 시 pop됩니다(LIFO). 함수가 끝나면 지역 변수는 사라집니다.</li>
+<li>C는 항상 <b>call by value</b>입니다. 매개변수를 바꿔도 원본은 그대로이며, 원본을 바꾸려면 주소를 넘겨야 합니다(scanf의 &amp;, 9장).</li>
+<li>함수 유형은 매개변수·반환값 유무로 네 가지이며, void는 "없음"을 뜻합니다.</li>
+<li>재귀 = 기저 사례 + 기저로 다가가는 재귀 사례. 기저가 없거나 깊이가 크면 스택 오버플로가 납니다.</li>
+<li>단순 재귀 피보나치는 중복 계산으로 지수 시간이 걸립니다. 반복문, 메모이제이션으로 개선합니다.</li>
+<li>math.h(sqrt, pow, floor, ceil, round, rint)와 stdlib.h(abs, rand, srand, exit, strtol) 사용법과 함정(-lm, NaN, rand의 보안 부적합)을 압니다.</li>
+<li>계산과 입출력을 분리하고, 하나의 함수는 하나의 일만 하며, 오류는 일관된 반환 코드로 알립니다.</li>
+</ul>
+
+<h2 id="interview">CS 면접 단골 질문</h2>
+<div class="box iv"><p class="box-title" data-tag="면접">이 장에서 나오는 면접 질문</p>
+<details><summary>Q1. Call by value와 Call by reference의 차이는? C는 어느 쪽인가요?</summary>
+<p>Call by value는 인수의 값을 복사해 전달하므로 함수 안에서 바꿔도 원본이 변하지 않고, call by reference는 원본 변수 자체(별칭)를 전달해 함수 안의 변경이 원본에 반영됩니다. C는 오직 call by value만 지원합니다. 포인터를 넘기는 것도 "주소 값"을 복사해 넘기는 call by value이며, 그 주소를 통해 원본에 접근하므로 참조 전달과 같은 효과를 낼 뿐입니다. C++의 참조(&amp;)가 진짜 call by reference입니다.</p>
+<p><b>꼬리 질문 대비</b>: "Java는?" — Java도 항상 값 전달이며, 객체의 경우 참조값이 복사됩니다.</p></details>
+
+<details><summary>Q2. 함수 호출 시 스택에서 무슨 일이 일어나나요?</summary>
+<p>호출 측이 인수를 레지스터나 스택에 준비하고 call 명령으로 복귀 주소를 push한 뒤 점프합니다. 피호출 함수는 이전 프레임 포인터를 저장하고 스택 포인터를 내려 지역 변수 공간을 확보합니다. 반환 시 반환값을 rax(또는 xmm0)에 넣고 스택 포인터와 프레임 포인터를 복원한 다음 ret으로 복귀 주소로 돌아갑니다.</p>
+<p><b>꼬리 질문 대비</b>: "스택 버퍼 오버플로 공격이란?" — 지역 배열의 범위를 넘겨 써서 복귀 주소를 덮어쓰고 공격 코드로 점프시키는 것이며, 스택 카나리, ASLR, NX 비트로 방어합니다(8장 연결).</p></details>
+
+<details><summary>Q3. 스택과 힙의 차이는?</summary>
+<p>스택은 함수 호출 시 자동으로 할당·해제되는 지역 변수 영역으로, 스택 포인터 이동만으로 관리되어 매우 빠르지만 크기가 작고(수 MB) 수명이 함수 호출 기간으로 고정됩니다. 힙은 malloc/free로 프로그래머가 명시적으로 관리하는 영역으로, 크고 수명을 자유롭게 정할 수 있지만 할당이 상대적으로 느리고 누수·단편화 문제가 있습니다. 스택은 스레드마다 하나씩, 힙은 프로세스가 공유합니다.</p></details>
+
+<details><summary>Q4. 재귀 함수의 장단점과 스택 오버플로를 피하는 방법은?</summary>
+<p>장점은 트리 탐색, 분할 정복처럼 자기 유사 구조의 문제를 짧고 명확하게 표현한다는 것입니다. 단점은 호출 오버헤드와 깊이만큼의 스택 사용, 중복 계산 가능성입니다. 반복문으로 변환하거나, 명시적 스택 자료구조를 쓰거나, 메모이제이션으로 중복을 없애고, 재귀 깊이를 입력 검증으로 제한해 피합니다.</p>
+<p><b>꼬리 질문 대비</b>: "꼬리 재귀 최적화란?" — 재귀 호출이 마지막 연산이면 현재 프레임을 재사용해 점프로 바꾸는 최적화로, gcc -O2에서 수행될 수 있지만 C 표준은 보장하지 않습니다.</p></details>
+
+<details><summary>Q5. 피보나치를 재귀로 구현하면 시간 복잡도는? 개선 방법은?</summary>
+<p>단순 재귀는 같은 부분 문제를 반복 계산해 O(φ<sup>n</sup>) ≈ O(1.618<sup>n</sup>), 흔히 O(2<sup>n</sup>)으로 말합니다. 메모이제이션(top-down DP)이나 반복문(bottom-up DP)으로 O(n), 행렬 거듭제곱으로 O(log n)까지 줄일 수 있습니다.</p></details>
+
+<details><summary>Q6. 함수 원형(prototype)은 왜 필요한가요?</summary>
+<p>C 컴파일러는 파일을 위에서 아래로 한 번 읽기 때문에, 호출 시점에 반환형과 매개변수 정보를 알아야 인수 개수 검사, 자료형 변환, 올바른 반환값 수신을 할 수 있습니다. 원형이 없으면 C89에서는 int 반환으로 암시적 선언되어 잘못된 값이 전달되었고, C99부터는 암시적 선언이 금지되었습니다. 여러 파일에서 공유하는 원형은 헤더 파일에 둡니다.</p></details>
+
+<details><summary>Q7. 인라인 함수와 매크로 함수의 차이는?</summary>
+<p>매크로는 전처리기가 텍스트를 치환하므로 자료형 검사가 없고, 인수가 여러 번 평가되는 부작용(예: <code>SQUARE(i++)</code>)과 연산자 우선순위 문제가 있습니다. inline 함수(C99)는 진짜 함수라 자료형 검사와 한 번 평가가 보장되며, 컴파일러가 호출 오버헤드를 없애기 위해 본문을 펼칠 수 있습니다(강제는 아님). 17장 전처리기에서 자세히 다룹니다.</p></details>
+
+<details><summary>Q8. 함수 호출 오버헤드란 무엇이고, 언제 신경 써야 하나요?</summary>
+<p>인수 준비, 복귀 주소 저장, 프레임 생성·해제, 점프로 인한 파이프라인 영향 같은 비용입니다. 대부분은 수 나노초 수준이고 최적화 컴파일러가 작은 함수를 인라인하므로 가독성을 위해 함수를 나누는 것을 주저할 필요가 없습니다. 수억 번 도는 핫 루프에서만 프로파일링 후 고려합니다.</p></details>
+
+<details><summary>Q9. rand()를 보안 용도로 쓰면 안 되는 이유는?</summary>
+<p>rand는 시드로부터 결정적으로 계산되는 의사 난수라 시드나 출력 몇 개를 알면 이후 값을 예측할 수 있습니다. OTP, 세션 키, 인증번호에는 OS의 암호학적으로 안전한 난수 생성기(/dev/urandom, getrandom, CryptGenRandom 계열)를 써야 합니다.</p></details>
+</div>
+
+<h2 id="exercises">연습문제</h2>
+
+<div class="ex"><p class="ex-title">문제 1 (출력 예측) <span class="lv">난이도 ★☆☆</span></p>
+<figure class="code"><figcaption>q1.c</figcaption><pre><code class="language-c">int sq(int x) { return x * x; }
+int main(void)
+{
+    int a = 3;
+    printf("%d %d\n", sq(a + 1), sq(sq(2)));
+    return 0;
+}</code></pre></figure>
+<details><summary>정답과 해설 보기</summary>
+<p>출력: <b>16 16</b>. 인수 <code>a + 1</code>은 먼저 계산되어 4가 전달됩니다(매크로와 다른 점). sq(sq(2)) = sq(4) = 16.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">문제 2 (출력 예측 — call by value) <span class="lv">난이도 ★★☆</span></p>
+<figure class="code"><figcaption>q2.c</figcaption><pre><code class="language-c">void withdraw(long long bal, long long amt)
+{
+    bal -= amt;
+    printf("함수 안 잔액: %lld\n", bal);
+}
+int main(void)
+{
+    long long balance = 100000;
+    withdraw(balance, 30000);
+    printf("main 잔액: %lld\n", balance);
+    return 0;
+}</code></pre></figure>
+<details><summary>정답과 해설 보기</summary>
+<p>출력: <b>함수 안 잔액: 70000</b> / <b>main 잔액: 100000</b>. bal은 balance의 복사본이므로 출금이 반영되지 않습니다. 실제 시스템이라면 "출금 처리했는데 잔액이 그대로"인 치명적 버그입니다. 해결: <code>long long withdraw(...)</code>로 새 잔액을 반환해 <code>balance = withdraw(balance, 30000);</code>로 받거나, 9장의 포인터를 사용합니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">문제 3 (버그 찾기) <span class="lv">난이도 ★★☆</span></p>
+<p>다음 코드의 문제점을 모두 찾으세요.</p>
+<figure class="code bad"><figcaption>q3.c</figcaption><pre><code class="language-c">#include &lt;stdio.h&gt;
+int main(void)
+{
+    printf("%d\n", is_adult(20));
+    return 0;
+}
+int is_adult(int age)
+{
+    if (age &gt;= 19) return 1;
+}</code></pre></figure>
+<details><summary>정답과 해설 보기</summary>
+<ol><li>is_adult의 원형이 호출보다 앞에 없습니다. C99 이후 암시적 선언은 허용되지 않으며 최신 gcc는 오류를 냅니다. <code>int is_adult(int age);</code>를 main 위에 추가합니다.</li>
+<li>age &lt; 19인 경우 return이 없어 반환값을 사용하면 UB입니다. 마지막에 <code>return 0;</code>을 추가합니다.</li></ol>
+</details></div>
+
+<div class="ex"><p class="ex-title">문제 4 (재귀 추적) <span class="lv">난이도 ★★☆</span></p>
+<figure class="code"><figcaption>q4.c</figcaption><pre><code class="language-c">int g(int n)
+{
+    if (n &lt;= 0) return 0;
+    return n + g(n - 2);
+}
+/* g(7) 과 g(6) 의 값은? g(7) 호출 시 최대 스택 깊이는? */</code></pre></figure>
+<details><summary>정답과 해설 보기</summary>
+<p>g(7) = 7 + 5 + 3 + 1 + g(-1)=0 → <b>16</b>. g(6) = 6 + 4 + 2 + g(0)=0 → <b>12</b>. g(7)의 프레임은 g(7), g(5), g(3), g(1), g(-1)로 최대 <b>5개</b>가 동시에 쌓입니다(main 제외). 기저를 <code>n == 0</code>으로 썼다면 홀수 입력에서 0을 건너뛰어 무한 재귀(스택 오버플로)가 되었을 것입니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">문제 5 (코드 작성 — 거듭제곱) <span class="lv">난이도 ★★☆</span></p>
+<p>정수 거듭제곱 함수 <code>long long ipow(long long base, int exp)</code>를 (1) 반복문으로, (2) 재귀로 작성하세요(exp ≥ 0). 재귀 버전은 exp가 짝수일 때 <code>ipow(base, exp/2)</code>를 한 번만 계산해 제곱하는 "분할 정복"으로 O(log exp)가 되게 하세요.</p>
+<details><summary>정답과 해설 보기</summary>
+<figure class="code good"><figcaption>정답 코드</figcaption><pre><code class="language-c">long long ipow_iter(long long base, int exp)
+{
+    long long r = 1;
+    for (int i = 0; i &lt; exp; i++)
+        r *= base;
+    return r;
+}
+
+long long ipow_rec(long long base, int exp)
+{
+    if (exp == 0) return 1;                  /* 기저 */
+    long long half = ipow_rec(base, exp / 2); /* 한 번만 계산 */
+    if (exp % 2 == 0)
+        return half * half;
+    return half * half * base;
+}
+/* ipow_rec(2, 10): 10→5→2→1→0, 호출 5번으로 1024 */</code></pre></figure>
+<p>반복 버전은 곱셈 exp번(O(n)), 분할 정복 재귀는 exp를 반씩 줄이므로 O(log n)입니다. <code>ipow_rec(base, exp/2) * ipow_rec(base, exp/2)</code>처럼 두 번 호출하면 피보나치처럼 중복 계산이 생겨 다시 O(n)이 되므로 결과를 변수에 저장하는 것이 핵심입니다. 금융에서는 복리 계수 계산에 응용됩니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">문제 6 (코드 작성 — 함수 분리) <span class="lv">난이도 ★★☆</span></p>
+<p>다음 요구사항에 맞게 함수 3개를 작성하세요. ① <code>int is_valid_amount(long long amt)</code>: 1원 이상 1억원 이하이면 1. ② <code>long long transfer_fee(long long amt, int same_bank)</code>: 같은 은행 0원, 다른 은행이면 10만원 이하 500원, 초과 1000원. ③ main에서 금액 3개(50000, 250000, 0)에 대해 타행 이체 수수료를 출력하되, 유효하지 않은 금액은 "금액 오류".</p>
+<details><summary>정답과 해설 보기</summary>
+<figure class="code good"><figcaption>정답 코드</figcaption><pre><code class="language-c">#include &lt;stdio.h&gt;
+
+int is_valid_amount(long long amt)
+{
+    return amt &gt;= 1 &amp;&amp; amt &lt;= 100000000;    /* 비교 결과 1/0을 그대로 반환 */
+}
+
+long long transfer_fee(long long amt, int same_bank)
+{
+    if (same_bank) return 0;
+    return amt &lt;= 100000 ? 500 : 1000;
+}
+
+int main(void)
+{
+    long long tests[] = { 50000, 250000, 0 };
+    for (int i = 0; i &lt; 3; i++) {
+        if (!is_valid_amount(tests[i])) {
+            printf("%lld원: 금액 오류\n", tests[i]);
+            continue;
+        }
+        printf("%lld원: 수수료 %lld원\n", tests[i], transfer_fee(tests[i], 0));
+    }
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>50000원: 수수료 500원
+250000원: 수수료 1000원
+0원: 금액 오류</pre></figure>
+<p><code>return amt &gt;= 1 &amp;&amp; amt &lt;= 100000000;</code>처럼 조건식 결과(1/0)를 그대로 반환하는 것은 <code>if (...) return 1; else return 0;</code>보다 간결한 관용구입니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">문제 7 (금융 응용 — 원리금균등 함수화) <span class="lv">난이도 ★★★</span></p>
+<p>6장 ex06-12의 월상환액 계산을 함수 <code>long long monthly_payment(long long principal, int annual_bp, int months)</code>로 분리하세요. 금리가 0이면 pow 공식이 0으로 나누기가 되므로 원금 ÷ 개월 수(올림)를 반환해야 합니다.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>금리 0은 실제로 존재하는 경우(무이자 할부)이므로 경계 처리가 반드시 필요합니다. 공식의 분모 <code>factor - 1.0</code>이 0이 되어 무한대(inf)가 나오고, 이를 long long으로 변환하면 미정의 동작입니다.</p>
+<figure class="code good"><figcaption>정답 코드</figcaption><pre><code class="language-c">#include &lt;math.h&gt;
+
+long long monthly_payment(long long principal, int annual_bp, int months)
+{
+    if (months &lt;= 0 || principal &lt;= 0)
+        return -1;                                   /* 오류 */
+    if (annual_bp == 0)
+        return (principal + months - 1) / months;    /* 무이자: 정수 올림 나눗셈 */
+
+    double r = annual_bp / 12.0 / 10000.0;           /* 월 이율 */
+    double factor = pow(1.0 + r, months);
+    return llround(principal * r * factor / (factor - 1.0));
+}
+/* monthly_payment(12000000, 600, 12) == 1032797 */</code></pre></figure>
+<p><code>(a + b - 1) / b</code>는 양의 정수의 올림 나눗셈 관용구입니다. 1,000,000 / 3이면 333,334원이 되어 3회 합이 원금 이상이 되고, 마지막 회차에서 끝전을 정리합니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">문제 8 (재귀 — 이진수 출력) <span class="lv">난이도 ★★☆</span></p>
+<p>음이 아닌 정수를 2진수로 출력하는 재귀 함수 <code>void print_bin(unsigned n)</code>을 작성하세요(예: 10 → 1010). 반복문으로 하면 왜 거꾸로 나오는지도 설명하세요.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>n % 2는 가장 낮은 비트입니다. 반복문으로 n % 2를 출력하고 n /= 2를 반복하면 낮은 비트부터(0101) 출력됩니다. 재귀에서 "상위 비트들 먼저 출력(재귀 호출) → 내 비트 출력" 순서로 쓰면, 복귀하면서 출력하므로 높은 비트부터 나옵니다(예제 7-4의 in/out 순서 원리).</p>
+<figure class="code good"><figcaption>정답 코드</figcaption><pre><code class="language-c">void print_bin(unsigned n)
+{
+    if (n &gt;= 2)
+        print_bin(n / 2);     /* 상위 비트 먼저 */
+    printf("%u", n % 2);      /* 복귀하면서 내 비트 */
+}
+/* print_bin(10) → 1010, print_bin(0) → 0 */</code></pre></figure>
+</details></div>
+
+<div class="ex"><p class="ex-title">문제 9 (설계 — 리팩터링) <span class="lv">난이도 ★★☆</span></p>
+<p>다음 함수의 설계상 문제점을 지적하고 개선안을 제시하세요.</p>
+<figure class="code bad"><figcaption>q9.c</figcaption><pre><code class="language-c">long long g_balance;     /* 전역 잔액 */
+void process(int code, long long amt)
+{
+    if (code == 1) { g_balance += amt; printf("입금 %lld\n", amt); }
+    else if (code == 2) {
+        if (g_balance &gt;= amt) { g_balance -= amt; printf("출금 %lld\n", amt); }
+        else printf("잔액부족\n");
+    }
+    printf("잔액 %lld\n", g_balance);
+}</code></pre></figure>
+<details><summary>정답과 해설 보기</summary>
+<ul><li><b>여러 책임</b>: 거래 분기, 잔액 계산, 검증, 출력을 모두 한 함수가 합니다.</li>
+<li><b>전역 변수 부작용</b>: 어떤 함수가 언제 g_balance를 바꿨는지 추적이 어렵고, 계좌가 여러 개면 쓸 수 없습니다.</li>
+<li><b>계산과 출력 혼합</b>: 배치나 전문 응답에서 재사용할 수 없고 자동 테스트가 어렵습니다.</li>
+<li><b>오류 보고 없음</b>: 잔액 부족을 호출자가 알 수 없습니다(화면에만 찍힘). 알 수 없는 code도 조용히 무시합니다.</li></ul>
+<p>개선: <code>long long deposit(long long bal, long long amt)</code>, <code>int can_withdraw(long long bal, long long amt)</code>, <code>void print_result(...)</code>로 분리하고, 잔액은 매개변수로 받고 결과를 반환하며, 오류는 반환 코드로 알립니다. 포인터(9장)와 구조체(15장)를 배우면 <code>int withdraw(Account *acc, long long amt)</code> 형태로 더 자연스럽게 설계할 수 있습니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">문제 10 (math.h) <span class="lv">난이도 ★★☆</span></p>
+<p>원금 P를 연이율 r%로 연복리 운용할 때 원금이 2배가 되는 기간(년)을 <code>log</code>를 이용해 계산하는 함수 <code>double years_to_double(double rate_percent)</code>를 작성하고, 3.5%, 7.2%일 때 결과를 72의 법칙과 비교하세요.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>(1 + r)<sup>n</sup> = 2 → n = ln 2 / ln(1 + r).</p>
+<figure class="code good"><figcaption>정답 코드</figcaption><pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;math.h&gt;
+
+double years_to_double(double rate_percent)
+{
+    return log(2.0) / log(1.0 + rate_percent / 100.0);
+}
+
+int main(void)
+{
+    printf("3.5%%: %.2f년 (72법칙 %.2f)\n", years_to_double(3.5), 72 / 3.5);
+    printf("7.2%%: %.2f년 (72법칙 %.2f)\n", years_to_double(7.2), 72 / 7.2);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>3.5%: 20.15년 (72법칙 20.57)
+7.2%: 9.97년 (72법칙 10.00)</pre></figure>
+<p>72의 법칙은 이율 6~10% 근처에서 잘 맞는 어림셈입니다. 6장 예제 6-7에서 반복 시뮬레이션이 21년이었던 것은 연 단위로만 확인했고 매년 절사했기 때문입니다(20.15년이 지난 첫 연말은 21년차).</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">문제 11 (출력 예측 — 인수 평가) <span class="lv">난이도 ★★★</span></p>
+<p>다음 코드의 출력을 확정할 수 있습니까? 이유를 설명하세요.</p>
+<figure class="code"><figcaption>q11.c</figcaption><pre><code class="language-c">int counter = 0;
+int next(void) { return ++counter; }
+int main(void)
+{
+    printf("%d %d\n", next(), next());
+    return 0;
+}</code></pre></figure>
+<details><summary>정답과 해설 보기</summary>
+<p>확정할 수 없습니다. 함수 인수의 평가 순서는 <b>미지정(unspecified)</b>이므로 "1 2"일 수도 "2 1"일 수도 있습니다(gcc x86-64에서는 흔히 "2 1"). 다만 각 함수 호출은 서로 겹치지 않고 순서대로 하나씩 실행되므로 UB는 아니고, 둘 중 하나의 결과가 나옵니다. 순서가 중요하면 <code>int a = next(); int b = next();</code>로 먼저 변수에 받습니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">문제 12 (코드 작성 — 계좌번호 체크 디지트) <span class="lv">난이도 ★★★</span></p>
+<p>가상의 규칙: 10자리 계좌번호의 앞 9자리 각각에 가중치 2,3,4,5,6,7,2,3,4를 곱해 더한 합 S에 대해, 검증번호 = (11 − S % 11) % 10. 마지막(10번째) 자리가 검증번호와 같으면 유효. 함수 <code>int check_digit(long long first9)</code>와 <code>int is_valid_account(long long acc10)</code>를 작성하세요. (실제 은행별 규칙은 다르며 공개되지 않는 경우가 많습니다.)</p>
+<details><summary>정답과 해설 보기</summary>
+<p>앞 9자리를 오른쪽 자리부터 꺼내면 가중치도 뒤에서부터(4,3,2,7,6,5,4,3,2) 적용해야 합니다. 가중치를 위치 계산식으로 구하는 대신 switch나 배열(8장)로 처리할 수도 있습니다. 여기서는 오른쪽에서 i번째(0부터) 자리의 가중치 = 앞에서부터 (8 − i)번째 가중치로 계산합니다.</p>
+<figure class="code good"><figcaption>정답 코드</figcaption><pre><code class="language-c">int weight_at(int pos)                /* pos: 앞에서부터 0~8 */
+{
+    switch (pos) {
+    case 0: case 6: return 2;
+    case 1: case 7: return 3;
+    case 2: case 8: return 4;
+    case 3: return 5;
+    case 4: return 6;
+    case 5: return 7;
+    default: return 0;
+    }
+}
+
+int check_digit(long long first9)
+{
+    int sum = 0;
+    for (int i = 0; i &lt; 9; i++) {      /* 오른쪽 자리부터 */
+        int d = (int)(first9 % 10);
+        sum += d * weight_at(8 - i);
+        first9 /= 10;
+    }
+    return (11 - sum % 11) % 10;
+}
+
+int is_valid_account(long long acc10)
+{
+    int last = (int)(acc10 % 10);
+    return check_digit(acc10 / 10) == last;
+}
+/* 123456789: 1*2+2*3+3*4+4*5+5*6+6*7+7*2+8*3+9*4 = 186, 186 % 11 = 10,
+   (11 - 10) % 10 = 1 → 1234567891 은 유효 */</code></pre></figure>
+<p>검증번호는 계좌번호 입력 시 한 자리 오타나 인접 자리 뒤바뀜을 서버에 보내기 전에 걸러 내는 장치입니다. 계산 함수를 분리해 두었기 때문에 은행별 가중치가 달라도 weight_at만 바꾸면 됩니다.</p>
+</details></div>
+
+</main>
+<aside class="rail" aria-label="이 페이지 목차"></aside>
+</div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-c.min.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>

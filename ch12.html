@@ -1,0 +1,1296 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ch12 문자열 · C언어 금융 IT 마스터</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+KR:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-ch="ch12">
+<header class="topbar">
+  <button class="menu-btn" type="button" aria-expanded="false" aria-controls="sidebar">목차</button>
+  <a class="brand" href="index.html"><b>C</b>금융 IT 마스터</a>
+  <span class="where"></span>
+  <span class="progress"></span>
+</header>
+<div class="layout">
+<nav id="sidebar" class="sidebar" aria-label="과정 목차"></nav>
+<div class="page">
+<main class="content">
+
+<header class="ch-head">
+  <p class="eyebrow">PART 1 · C 기초 완전 정복 · CHAPTER</p>
+  <div class="bignum">12</div>
+  <h1>문자열</h1>
+  <p class="lede">C에는 "문자열 자료형"이 없습니다. 문자열은 '\0'으로 끝나는 char 배열이고, 우리는 대부분 그 첫 글자의 주소(포인터)로 문자열을 다룹니다. 9~11장의 포인터·배열·문자 지식이 모두 여기서 만납니다. 동시에 문자열은 C 프로그램 보안 사고의 가장 큰 원인이기도 합니다. 계좌번호·고객명·전문을 다루는 금융 시스템에서 문자열 함수의 함정을 정확히 아는 것은 선택이 아니라 필수입니다.</p>
+  <div class="goals"><p class="goals-title">이 장에서 배울 것</p><ul>
+    <li>문자열 상수가 읽기 전용 영역에 저장되는 이유와, 이를 수정하면 segfault가 나는 원리를 이해합니다.</li>
+    <li><code>char s[]</code>와 <code>char *s</code>의 차이(저장 위치, sizeof, 수정 가능 여부)를 그림으로 구분합니다.</li>
+    <li>2차원 char 배열과 포인터 배열로 문자열 여러 개를 다룹니다.</li>
+    <li>strlen, strcpy, strncpy, strcat, strcmp, strchr, strstr, strtok, snprintf, strtol의 정확한 동작과 함정을 압니다.</li>
+    <li>주요 문자열 함수를 직접 구현하며 '\0' 종료 규약을 몸에 익힙니다.</li>
+    <li>버퍼 오버플로의 원리와 안전한 대안을 알고, 계좌번호 하이픈 제거·마스킹 함수를 작성합니다.</li>
+  </ul></div>
+</header>
+
+<h2 id="s12-1"><span class="num">12-1</span>문자열과 포인터</h2>
+
+<p>8장에서 문자열을 "널 문자('\0')로 끝나는 char 배열"로 배웠습니다. 이 정의는 여전히 정확합니다. 이번 절에서는 여기에 포인터라는 렌즈를 더해, 문자열이 메모리의 <strong>어디에</strong> 저장되고 <strong>어떻게</strong> 전달되는지를 살펴봅니다.</p>
+
+<h3 id="s12-1-1">문자열 상수는 어디에 저장되는가</h3>
+
+<p>큰따옴표로 쓴 <code>"KRW"</code>를 <strong>문자열 리터럴(string literal)</strong> 또는 문자열 상수라고 합니다. 컴파일러는 이것을 보면 다음 일을 합니다.</p>
+<ol class="steps">
+<li>'K', 'R', 'W', '\0' 네 바이트짜리 이름 없는 char 배열(<code>char [4]</code>)을 만듭니다.</li>
+<li>이 배열을 실행 파일의 <strong>읽기 전용 데이터 영역(.rodata)</strong>에 넣습니다. 프로그램이 시작될 때 메모리에 올라와 종료될 때까지 존재합니다(정적 저장 기간).</li>
+<li>코드에서 <code>"KRW"</code>를 식으로 쓴 자리는, 배열의 decay 규칙(10장)에 따라 <strong>그 배열의 첫 글자 주소</strong>로 바뀝니다.</li>
+</ol>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 330" width="700" role="img" aria-label="프로세스 메모리 구조: 코드, 읽기 전용 데이터, 데이터, BSS, 힙, 스택 영역과 문자열 리터럴의 위치">
+  <text x="160" y="22" text-anchor="middle" class="bold">프로세스의 가상 메모리 구조</text>
+  <rect class="box" x="60" y="34" width="200" height="40"/>
+  <text x="160" y="59" text-anchor="middle">스택 (지역 변수)</text>
+  <path class="arrow-m" d="M160 76 V 96"/>
+  <rect class="dash" x="60" y="100" width="200" height="34"/>
+  <text x="160" y="122" text-anchor="middle" class="small mute">(빈 공간)</text>
+  <path class="arrow-m" d="M160 156 V 138"/>
+  <rect class="box" x="60" y="158" width="200" height="34"/>
+  <text x="160" y="180" text-anchor="middle">힙 (malloc)</text>
+  <rect class="box" x="60" y="192" width="200" height="30"/>
+  <text x="160" y="212" text-anchor="middle" class="small">BSS (0 초기화 전역)</text>
+  <rect class="box" x="60" y="222" width="200" height="30"/>
+  <text x="160" y="242" text-anchor="middle" class="small">데이터 (초기화된 전역)</text>
+  <rect class="bad" x="60" y="252" width="200" height="34"/>
+  <text x="160" y="274" text-anchor="middle" class="bold">.rodata (읽기 전용)</text>
+  <rect class="hl2" x="60" y="286" width="200" height="30"/>
+  <text x="160" y="306" text-anchor="middle" class="small">코드 (.text, 읽기·실행)</text>
+  <text x="30" y="40" class="small mute">높은 주소</text>
+  <text x="30" y="318" class="small mute">낮은 주소</text>
+
+  <rect class="bad" x="420" y="250" width="56" height="36"/><text x="448" y="273" text-anchor="middle" class="mono">'K'</text>
+  <rect class="bad" x="476" y="250" width="56" height="36"/><text x="504" y="273" text-anchor="middle" class="mono">'R'</text>
+  <rect class="bad" x="532" y="250" width="56" height="36"/><text x="560" y="273" text-anchor="middle" class="mono">'W'</text>
+  <rect class="bad" x="588" y="250" width="56" height="36"/><text x="616" y="273" text-anchor="middle" class="mono">'\0'</text>
+  <path class="arrow-m" d="M262 269 H 415"/>
+  <text x="530" y="240" text-anchor="middle" class="small">"KRW" — char[4], 이름 없음</text>
+  <rect class="hl" x="440" y="60" width="160" height="40" rx="4"/>
+  <text x="520" y="85" text-anchor="middle" class="mono">cur (주소)</text>
+  <text x="520" y="50" text-anchor="middle" class="small mono">const char *cur = "KRW";</text>
+  <path class="arrow" d="M520 102 V 245 H 448"/>
+  <text x="530" y="130" class="small acc">스택의 포인터가</text>
+  <text x="530" y="148" class="small acc">.rodata를 가리킨다</text>
+</svg>
+<figcaption>그림 12-1 문자열 리터럴은 읽기 전용 데이터 영역에 저장되고, 포인터는 그 첫 글자를 가리킵니다</figcaption>
+</figure>
+
+<figure class="code"><figcaption>ex12-1.c 문자열 리터럴은 주소다</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+int main(void)
+{
+    const char *cur = "KRW";    /* 리터럴의 첫 글자 주소를 저장 */
+
+    printf("%s\n", cur);         /* %s: 주소부터 '\0' 직전까지 출력 */
+    printf("%c\n", *cur);        /* 첫 글자 */
+    printf("%c\n", cur[2]);      /* *(cur + 2) */
+    printf("%c\n", "KRW"[1]);    /* 리터럴 자체도 배열이므로 인덱싱 가능 */
+    printf("%s\n", cur + 1);     /* 두 번째 글자부터의 문자열 */
+    printf("sizeof \"KRW\" = %zu, sizeof cur = %zu\n", sizeof "KRW", sizeof cur);
+    return 0;
+}</code></pre></figure>
+
+<figure class="code out"><figcaption>실행 결과</figcaption>
+<pre>KRW
+K
+W
+R
+RW
+sizeof "KRW" = 4, sizeof cur = 8</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">printf("%s", cur)는 어떻게 문자열 끝을 알까?</p>
+<p><code>%s</code>에는 길이 정보가 전달되지 않습니다. printf가 받은 것은 주소 하나뿐입니다. printf는 그 주소에서 시작해 한 바이트씩 출력하다가 <strong>값이 0인 바이트('\0')를 만나면 멈춥니다</strong>. 그래서 C의 문자열은 반드시 '\0'으로 끝나야 하며, 이것을 "널 종료 문자열(null-terminated string)" 규약이라고 부릅니다. 10장에서 본 "끝 표시(sentinel)" 방식 그대로입니다. 그러므로 <code>cur + 1</code>을 넘기면 'R'부터 출력하고, '\0'이 없는 배열을 넘기면 메모리의 다음 0 바이트를 만날 때까지 쓰레기를 출력합니다.</p>
+</div>
+
+<h3 id="s12-1-2">char 배열과 char 포인터 — 무엇이 다른가</h3>
+
+<p>다음 두 줄은 비슷해 보이지만 완전히 다른 일을 합니다.</p>
+
+<figure class="code"><figcaption>두 가지 선언</figcaption>
+<pre><code class="language-c">char  bank1[] = "BANK";   /* ① 배열: 리터럴 내용을 스택의 배열에 "복사" */
+char *bank2   = "BANK";   /* ② 포인터: 리터럴(읽기 전용)의 "주소"를 저장 */</code></pre></figure>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 260" width="700" role="img" aria-label="char 배열은 스택에 5바이트 복사본을 가지고, char 포인터는 스택의 8바이트 포인터가 읽기 전용 영역의 리터럴을 가리키는 비교 그림">
+  <text x="20" y="26" class="bold">① char bank1[] = "BANK";</text>
+  <text x="440" y="26" class="small mute">스택 — 수정 가능, sizeof = 5</text>
+  <rect class="hl" x="60" y="40" width="60" height="40"/><text x="90" y="65" text-anchor="middle" class="mono">'B'</text>
+  <rect class="hl" x="120" y="40" width="60" height="40"/><text x="150" y="65" text-anchor="middle" class="mono">'A'</text>
+  <rect class="hl" x="180" y="40" width="60" height="40"/><text x="210" y="65" text-anchor="middle" class="mono">'N'</text>
+  <rect class="hl" x="240" y="40" width="60" height="40"/><text x="270" y="65" text-anchor="middle" class="mono">'K'</text>
+  <rect class="hl" x="300" y="40" width="60" height="40"/><text x="330" y="65" text-anchor="middle" class="mono">'\0'</text>
+
+  <text x="20" y="130" class="bold">② char *bank2 = "BANK";</text>
+  <text x="440" y="130" class="small mute">포인터는 스택, sizeof = 8</text>
+  <rect class="hl2" x="60" y="144" width="140" height="40" rx="4"/>
+  <text x="130" y="169" text-anchor="middle" class="mono">0x4006f4</text>
+  <text x="130" y="200" text-anchor="middle" class="small mono">bank2</text>
+  <path class="arrow" d="M200 164 H 260 V 214 H 296"/>
+  <rect class="bad" x="300" y="196" width="60" height="40"/><text x="330" y="221" text-anchor="middle" class="mono">'B'</text>
+  <rect class="bad" x="360" y="196" width="60" height="40"/><text x="390" y="221" text-anchor="middle" class="mono">'A'</text>
+  <rect class="bad" x="420" y="196" width="60" height="40"/><text x="450" y="221" text-anchor="middle" class="mono">'N'</text>
+  <rect class="bad" x="480" y="196" width="60" height="40"/><text x="510" y="221" text-anchor="middle" class="mono">'K'</text>
+  <rect class="bad" x="540" y="196" width="60" height="40"/><text x="570" y="221" text-anchor="middle" class="mono">'\0'</text>
+  <text x="450" y="254" text-anchor="middle" class="small warn-t">.rodata — 읽기 전용, 수정하면 UB</text>
+</svg>
+<figcaption>그림 12-2 배열은 내용의 복사본을 소유하고, 포인터는 읽기 전용 리터럴을 가리키기만 합니다</figcaption>
+</figure>
+
+<div class="tbl"><table><thead><tr><th>비교</th><th><code>char bank1[] = "BANK";</code></th><th><code>char *bank2 = "BANK";</code></th></tr></thead><tbody>
+<tr><td>정체</td><td>5바이트 배열(내용 복사본)</td><td>8바이트 포인터 변수</td></tr>
+<tr><td>저장 위치</td><td>지역이면 스택</td><td>포인터는 스택, 글자는 .rodata</td></tr>
+<tr><td><code>sizeof</code></td><td>5 ('\0' 포함)</td><td>8 (포인터 크기)</td></tr>
+<tr><td>글자 수정 <code>x[0] = 'b'</code></td><td>가능</td><td><strong>UB</strong> (보통 segfault)</td></tr>
+<tr><td>다른 문자열 대입 <code>x = "CARD"</code></td><td><strong>불가</strong> (배열 이름은 대입 불가)</td><td>가능 (다른 리터럴을 가리킴)</td></tr>
+<tr><td>수명</td><td>선언된 블록이 끝날 때까지</td><td>리터럴은 프로그램 끝까지 (반환해도 안전)</td></tr>
+</tbody></table></div>
+
+<p>마지막 행이 흥미롭습니다. 지역 배열의 주소를 반환하면 댕글링 포인터가 되지만(9장), 문자열 리터럴의 주소는 프로그램 내내 유효하므로 반환해도 안전합니다. 거래 코드를 이름으로 바꿔 주는 함수를 이렇게 만들 수 있는 이유입니다.</p>
+
+<figure class="code good"><figcaption>ex12-2.c 리터럴의 주소는 반환해도 안전하다</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+const char *trx_name(int code)
+{
+    switch (code) {
+    case 1:  return "입금";      /* 정적 저장 기간: 함수가 끝나도 살아 있다 */
+    case 2:  return "출금";
+    case 3:  return "이체";
+    default: return "알수없음";
+    }
+}
+
+int main(void)
+{
+    printf("%s / %s / %s\n", trx_name(1), trx_name(3), trx_name(9));
+    return 0;
+}</code></pre></figure>
+
+<figure class="code out"><figcaption>실행 결과</figcaption>
+<pre>입금 / 이체 / 알수없음</pre></figure>
+
+<h3 id="s12-1-3">문자열 상수를 수정하면 왜 segfault가 날까</h3>
+
+<figure class="code bad"><figcaption>잘못된 예 — 왜 죽을까? (ex12-3.c)</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+int main(void)
+{
+    char *code = "krw";      /* 컴파일은 된다 (C에서는 경고도 기본으로는 없음) */
+    code[0] = 'K';           /* 읽기 전용 메모리에 쓰기 → UB */
+    printf("%s\n", code);
+    return 0;
+}</code></pre></figure>
+
+<figure class="code out"><figcaption>실행 결과 (리눅스 gcc)</figcaption>
+<pre>Segmentation fault (core dumped)</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">하드웨어가 막는다 — 페이지 보호 비트</p>
+<p>C 표준은 "문자열 리터럴을 수정하려 하면 미정의 동작"이라고만 정합니다. 실제로 죽는 이유는 운영체제와 CPU에 있습니다.</p>
+<ol class="steps">
+<li>링커는 문자열 리터럴을 .rodata 구역에 모으고, 운영체제는 프로그램을 실행할 때 이 구역이 담긴 메모리 페이지(보통 4KB 단위)를 <strong>"읽기 전용"</strong>으로 표시해 매핑합니다(페이지 테이블의 쓰기 허용 비트를 끔).</li>
+<li><code>code[0] = 'K'</code>가 실행되면 CPU의 MMU가 해당 페이지에 쓰기 권한이 없음을 발견하고 <strong>보호 위반 예외(페이지 폴트)</strong>를 일으킵니다.</li>
+<li>운영체제는 이를 정당한 접근이 아니라고 판단하고 프로세스에 SIGSEGV를 보내 종료시킵니다.</li>
+</ol>
+<p>이렇게 설계한 이유는 두 가지입니다. ① 같은 리터럴을 여러 곳에서 공유(12-1-4)해도 안전하게 하려고, ② 여러 프로세스가 같은 실행 파일을 띄울 때 읽기 전용 페이지를 물리 메모리 한 벌로 공유해 메모리를 아끼려고. 오래된 컴파일러나 임베디드 환경에서는 리터럴이 쓰기 가능한 영역에 있어 죽지 않고 "조용히 바뀌는" 경우도 있는데, 그것이 더 위험합니다.</p>
+</div>
+
+<div class="box fix"><p class="box-title" data-tag="해결">이렇게 해결합니다</p>
+<ul>
+<li><strong>리터럴을 가리키는 포인터는 항상 <code>const char *</code></strong>로 선언합니다. 그러면 <code>code[0] = 'K'</code>가 <strong>컴파일 오류</strong>로 바뀌어 실행 전에 잡힙니다.</li>
+<li>수정해야 하는 문자열은 <strong>배열로 복사본</strong>을 만듭니다: <code>char code[] = "krw"; code[0] = 'K';</code></li>
+<li>gcc의 <code>-Wwrite-strings</code> 옵션을 켜면 리터럴의 자료형을 <code>const char[]</code>처럼 취급해 <code>char *code = "krw";</code>에서 경고를 냅니다. (C++에서는 이 대입 자체가 오류입니다.)</li>
+</ul>
+</div>
+
+<div class="box tip"><p class="box-title" data-tag="잠깐">왜 C의 리터럴 자료형은 const char[]가 아니라 char[]일까?</p>
+<p>역사적 이유입니다. <code>const</code>는 C89에서야 도입되었는데, 그 전에 작성된 엄청난 양의 코드가 <code>char *s = "...";</code>를 쓰고 있었습니다. 리터럴을 const로 바꾸면 이 코드가 전부 컴파일 오류가 나므로, C 표준은 자료형은 <code>char[N]</code>으로 두되 "수정하면 UB"라는 규칙으로 타협했습니다. 그래서 C에서는 컴파일러가 막아 주지 않으니 프로그래머가 스스로 <code>const</code>를 붙여야 합니다.</p>
+</div>
+
+<h3 id="s12-1-4">같은 문자열 리터럴과 == 비교의 함정</h3>
+
+<p>두 문자열이 같은지 <code>==</code>로 비교하면 어떻게 될까요? <code>==</code>는 포인터, 즉 <strong>주소</strong>를 비교합니다. 내용이 아닙니다.</p>
+
+<figure class="code"><figcaption>ex12-4.c 주소 비교와 내용 비교</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+
+int main(void)
+{
+    const char *a = "KRW";
+    const char *b = "KRW";        /* 같은 리터럴: 컴파일러가 하나로 합칠 수도 있다 */
+    char c[] = "KRW";             /* 스택에 별도 복사본 */
+
+    printf("a == b      : %s\n", (a == b) ? "같다" : "다르다");   /* 구현 의존 */
+    printf("a == c      : %s\n", (a == c) ? "같다" : "다르다");   /* 항상 다르다 */
+    printf("strcmp(a,c) : %d\n", strcmp(a, c));                  /* 내용 비교: 0 */
+    return 0;
+}</code></pre></figure>
+
+<figure class="code out"><figcaption>실행 결과 (gcc 기본 설정)</figcaption>
+<pre>a == b      : 같다
+a == c      : 다르다
+strcmp(a,c) : 0</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">a == b가 "같다"인 것은 우연이다</p>
+<p>gcc는 같은 내용의 리터럴을 .rodata에 한 벌만 두고 공유하는 <strong>문자열 풀링(string pooling)</strong> 최적화를 합니다. 그래서 a와 b가 같은 주소를 갖게 되었을 뿐, 표준은 이를 보장하지 않습니다. 다른 파일에 있는 같은 리터럴이나 다른 컴파일러에서는 "다르다"가 나올 수 있습니다. 이런 코드는 테스트에서 통과하다가 빌드 옵션이 바뀌면 깨집니다. <strong>문자열 내용 비교는 반드시 <code>strcmp</code></strong>로 합니다.</p>
+</div>
+
+<h3 id="s12-1-5">문자열 배열 — 2차원 char 배열과 포인터 배열</h3>
+
+<p>통화 코드 목록처럼 문자열 여러 개를 다루는 방법은 두 가지입니다.</p>
+
+<figure class="code"><figcaption>ex12-5.c 두 가지 문자열 배열</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+int main(void)
+{
+    /* ① 2차원 char 배열: 각 행이 고정 크기 8바이트 */
+    char names2d[3][8] = {"KRW", "USD", "EUR"};
+
+    /* ② 포인터 배열: 각 요소가 리터럴을 가리키는 포인터 */
+    const char *names_p[3] = {"원화", "미국 달러", "유로"};
+
+    int i;
+    for (i = 0; i &lt; 3; i++)
+        printf("%s = %s\n", names2d[i], names_p[i]);
+
+    names2d[0][0] = 'k';          /* OK: 배열이므로 수정 가능 */
+    names_p[2] = "유럽연합 유로";  /* OK: 포인터가 다른 리터럴을 가리키게 */
+    /* names_p[0][0] = 'x';  컴파일 오류: const char 수정 */
+
+    printf("%s, %s\n", names2d[0], names_p[2]);
+    printf("sizeof names2d = %zu, sizeof names_p = %zu\n", sizeof names2d, sizeof names_p);
+    return 0;
+}</code></pre></figure>
+
+<figure class="code out"><figcaption>실행 결과</figcaption>
+<pre>KRW = 원화
+USD = 미국 달러
+EUR = 유로
+kRW, 유럽연합 유로
+sizeof names2d = 24, sizeof names_p = 24</pre></figure>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 280" width="700" role="img" aria-label="2차원 char 배열은 고정 크기 행에 글자를 직접 담고, 포인터 배열은 길이가 다른 문자열들을 가리키는 비교 그림">
+  <text x="20" y="24" class="bold">① char names2d[3][8] — 고정 크기 칸에 글자를 직접 저장</text>
+  <rect class="hl" x="40" y="36" width="40" height="30"/><text x="60" y="56" text-anchor="middle" class="mono small">K</text>
+  <rect class="hl" x="80" y="36" width="40" height="30"/><text x="100" y="56" text-anchor="middle" class="mono small">R</text>
+  <rect class="hl" x="120" y="36" width="40" height="30"/><text x="140" y="56" text-anchor="middle" class="mono small">W</text>
+  <rect class="hl" x="160" y="36" width="40" height="30"/><text x="180" y="56" text-anchor="middle" class="mono small">\0</text>
+  <rect class="dash" x="200" y="36" width="160" height="30"/><text x="280" y="56" text-anchor="middle" class="small mute">\0 \0 \0 \0 (낭비)</text>
+  <text x="380" y="56" class="small mono">names2d[0]</text>
+  <rect class="hl" x="40" y="66" width="40" height="30"/><text x="60" y="86" text-anchor="middle" class="mono small">U</text>
+  <rect class="hl" x="80" y="66" width="40" height="30"/><text x="100" y="86" text-anchor="middle" class="mono small">S</text>
+  <rect class="hl" x="120" y="66" width="40" height="30"/><text x="140" y="86" text-anchor="middle" class="mono small">D</text>
+  <rect class="hl" x="160" y="66" width="40" height="30"/><text x="180" y="86" text-anchor="middle" class="mono small">\0</text>
+  <rect class="dash" x="200" y="66" width="160" height="30"/>
+  <text x="380" y="86" class="small mono">names2d[1]</text>
+  <text x="560" y="72" text-anchor="middle" class="small">3 × 8 = 24바이트, 연속</text>
+
+  <text x="20" y="140" class="bold">② const char *names_p[3] — 포인터 3개(각 8바이트)</text>
+  <rect class="hl2" x="40" y="156" width="90" height="30"/><text x="85" y="176" text-anchor="middle" class="mono small">ptr0</text>
+  <rect class="hl2" x="40" y="186" width="90" height="30"/><text x="85" y="206" text-anchor="middle" class="mono small">ptr1</text>
+  <rect class="hl2" x="40" y="216" width="90" height="30"/><text x="85" y="236" text-anchor="middle" class="mono small">ptr2</text>
+  <path class="arrow" d="M130 171 H 300"/>
+  <path class="arrow" d="M130 201 H 300"/>
+  <path class="arrow" d="M130 231 H 300"/>
+  <rect class="bad" x="305" y="158" width="110" height="26"/><text x="360" y="176" text-anchor="middle" class="small">"원화" 7B</text>
+  <rect class="bad" x="305" y="188" width="230" height="26"/><text x="420" y="206" text-anchor="middle" class="small">"미국 달러" 14B</text>
+  <rect class="bad" x="305" y="218" width="110" height="26"/><text x="360" y="236" text-anchor="middle" class="small">"유로" 7B</text>
+  <text x="350" y="270" text-anchor="middle" class="small mute">문자열은 .rodata에 제각각의 길이로 흩어져 있고, 배열에는 주소만 있다</text>
+</svg>
+<figcaption>그림 12-3 2차원 char 배열(고정 칸, 수정 가능)과 포인터 배열(가변 길이, 리터럴 공유)</figcaption>
+</figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">무엇을 언제 쓸까?</p>
+<p>둘 다 sizeof가 24로 같은 것은 우연입니다(3×8 바이트 배열 vs 포인터 3개×8바이트). 의미는 전혀 다릅니다.</p>
+<ul>
+<li><strong>2차원 char 배열</strong>: 내용을 수정해야 하거나(입력받은 이름 저장), 고정 길이 레코드처럼 각 칸의 크기가 정해진 경우에 씁니다. 가장 긴 문자열에 맞춰 칸을 잡으므로 짧은 문자열이 많으면 공간이 낭비됩니다.</li>
+<li><strong>포인터 배열</strong>: 길이가 제각각인 고정 문구 테이블(메뉴, 오류 메시지, 거래 코드명)에 적합합니다. 공간 낭비가 없고, 포인터만 바꾸면 되므로 정렬할 때 문자열을 복사하지 않고 포인터만 교환하면 되어 빠릅니다. 리터럴을 가리킨다면 반드시 <code>const char *</code>로 선언합니다.</li>
+</ul>
+<p>한글 "원화"가 7바이트인 이유는 UTF-8에서 한글 한 글자가 3바이트이고 '\0'이 1바이트이기 때문입니다(3+3+1). "미국 달러"는 한글 4글자(12) + 공백(1) + '\0'(1) = 14바이트입니다.</p>
+</div>
+
+<div class="box fin"><p class="box-title" data-tag="금융 실무">은행 시스템에서는 — 응답 코드 메시지 테이블</p>
+<p>계정계는 처리 결과를 "0000", "E102" 같은 응답 코드로 돌려주고, 채널(인터넷뱅킹·ATM·창구 단말)은 이를 고객용 메시지로 바꿔 보여 줍니다. 이 매핑은 흔히 <code>static const struct { const char *code; const char *msg; } RESP_TBL[] = { {"0000", "정상 처리되었습니다"}, {"E102", "잔액이 부족합니다"}, ... };</code>처럼 <strong>포인터 배열(구조체 배열)</strong>로 만들어 읽기 전용 영역에 둡니다. const로 선언하면 실수로 메시지를 바꾸는 코드가 컴파일 단계에서 막히고, 여러 프로세스가 같은 실행 파일을 띄울 때 이 테이블이 물리 메모리 한 벌로 공유됩니다. 반대로 고객명처럼 입력받아 가공하는 문자열은 고정 크기 <code>char name[41]</code> 같은 배열에 담아 수정 가능하게 둡니다. 실무 코딩 표준에서 필드 길이를 "실제 길이 + 1('\0')"로 잡는 것이 바로 이 장의 널 종료 규약 때문입니다.</p>
+</div>
+
+<div class="ex"><p class="ex-title">예제 12-1 <span class="lv">난이도 ★★☆</span></p>
+<p>다음 각 줄이 (A) 정상, (B) 컴파일 오류, (C) 컴파일되지만 UB 중 무엇인지 고르세요.</p>
+<figure class="code"><pre><code class="language-c">char s1[] = "ATM";
+char *s2 = "ATM";
+const char *s3 = "ATM";
+s1[0] = 'a';      /* (1) */
+s2[0] = 'a';      /* (2) */
+s3[0] = 'a';      /* (3) */
+s1 = "CD";        /* (4) */
+s2 = "CD";        /* (5) */
+s3 = s1;          /* (6) */</code></pre></figure>
+<details><summary>정답과 해설 보기</summary>
+<p>(1) A — 배열 복사본 수정. (2) C — 리터럴 수정, 보통 segfault. (3) B — const를 통한 수정은 컴파일 오류. 이것이 const를 붙이는 이유입니다. (4) B — 배열 이름에는 대입 불가. 내용을 바꾸려면 strcpy 등을 써야 합니다. (5) A — 포인터가 다른 리터럴을 가리킴. (6) A — char *를 const char *에 넣는 것은 보호를 더하는 방향이므로 자유롭습니다.</p>
+</details></div>
+
+<h2 id="s12-2"><span class="num">12-2</span>문자열 연산 함수</h2>
+
+<p>C에는 문자열 자료형이 없으므로 <code>s1 = s2</code>(복사), <code>s1 + s2</code>(연결), <code>s1 == s2</code>(비교) 같은 연산자를 쓸 수 없습니다. 대신 <code>&lt;string.h&gt;</code>의 함수를 사용합니다. 이 함수들은 모두 <strong>"주소를 받아 '\0'을 만날 때까지 처리한다"</strong>는 같은 원리로 동작하며, 대부분 <strong>대상 버퍼의 크기를 확인하지 않습니다.</strong> 이 한 가지 사실이 수십 년간 수많은 보안 사고의 원인이 되었습니다. 함수마다 동작과 함정을 정확히 짚어 봅시다.</p>
+
+<div class="tbl"><table><thead><tr><th>함수</th><th>하는 일</th><th>대표적 함정</th></tr></thead><tbody>
+<tr><td><code>strlen(s)</code></td><td>'\0' 전까지의 길이</td><td>sizeof와 혼동, '\0' 없으면 UB, 매번 O(n)</td></tr>
+<tr><td><code>strcpy(d, s)</code></td><td>s를 '\0'까지 d에 복사</td><td>d의 크기 검사 없음 → 오버플로</td></tr>
+<tr><td><code>strncpy(d, s, n)</code></td><td>최대 n바이트 복사, 짧으면 0으로 채움</td><td>s가 n 이상이면 <strong>'\0'을 붙이지 않음</strong></td></tr>
+<tr><td><code>strcat(d, s)</code></td><td>d의 끝에 s를 이어 붙임</td><td>d의 남은 공간 검사 없음</td></tr>
+<tr><td><code>strncat(d, s, n)</code></td><td>최대 n글자 이어 붙이고 '\0' 추가</td><td>n은 "붙일 최대 글자 수"이지 버퍼 크기가 아님</td></tr>
+<tr><td><code>strcmp(a, b)</code></td><td>사전 순 비교: 음수/0/양수</td><td>-1/1이 아니라 부호만 의미, ==로 비교 금지</td></tr>
+<tr><td><code>strchr(s, c)</code> / <code>strrchr</code></td><td>문자의 처음/마지막 위치 포인터</td><td>못 찾으면 NULL — 검사 필수</td></tr>
+<tr><td><code>strstr(s, sub)</code></td><td>부분 문자열의 처음 위치 포인터</td><td>못 찾으면 NULL</td></tr>
+<tr><td><code>strtok(s, delim)</code></td><td>구분자로 토큰 분리</td><td>원본을 수정, 내부 정적 상태(재진입 불가)</td></tr>
+<tr><td><code>snprintf(d, n, fmt, ...)</code></td><td>형식화된 문자열을 최대 n-1자 + '\0'</td><td>반환값(필요 길이)으로 잘림 확인</td></tr>
+<tr><td><code>strtol(s, &amp;end, base)</code></td><td>문자열 → long, 오류 검출 가능</td><td>errno·end 검사를 빼먹음</td></tr>
+</tbody></table></div>
+
+<h3 id="s12-2-1">strlen — 길이 구하기</h3>
+
+<figure class="code"><figcaption>ex12-6.c strlen과 sizeof의 차이</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+
+int main(void)
+{
+    char acct[20] = "110-234-567890";
+    const char *p = acct;
+
+    printf("strlen(acct) = %zu\n", strlen(acct));  /* 글자 수: 14 */
+    printf("sizeof acct  = %zu\n", sizeof acct);   /* 배열 크기: 20 */
+    printf("strlen(p)    = %zu\n", strlen(p));     /* 14 */
+    printf("sizeof p     = %zu\n", sizeof p);      /* 포인터: 8 */
+    printf("strlen(\"\")   = %zu\n", strlen(""));   /* 빈 문자열: 0 */
+    return 0;
+}</code></pre></figure>
+
+<figure class="code out"><figcaption>실행 결과</figcaption>
+<pre>strlen(acct) = 14
+sizeof acct  = 20
+strlen(p)    = 14
+sizeof p     = 8
+strlen("")   = 0</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">strlen은 실행 중에, sizeof는 컴파일할 때</p>
+<p><code>sizeof</code>는 컴파일러가 자료형만 보고 계산하는 <strong>컴파일 시점 연산자</strong>입니다. 배열에 무엇이 들어 있는지는 상관없이 "확보된 공간"을 알려 줍니다. <code>strlen</code>은 <strong>실행 시점 함수</strong>로, 주소부터 한 바이트씩 세면서 '\0'을 찾습니다. 그래서 길이 n의 문자열에 O(n) 시간이 걸립니다.</p>
+<p>이 사실은 성능 함정을 만듭니다. <code>for (i = 0; i &lt; strlen(s); i++)</code>는 반복할 때마다 strlen을 다시 호출하므로 전체가 O(n²)이 됩니다. 10만 바이트 전문이라면 약 100억 번의 비교입니다. 루프 전에 <code>size_t len = strlen(s);</code>로 한 번만 구해 두세요. (최적화 컴파일러가 대신 해 주기도 하지만, 루프 안에서 s를 수정하면 그럴 수 없습니다.)</p>
+</div>
+
+<h3 id="s12-2-2">strcpy와 strncpy — 복사와 그 함정</h3>
+
+<p>배열 이름에는 대입할 수 없으므로 문자열 복사는 <code>strcpy(대상, 원본)</code>으로 합니다. 원본의 '\0'까지 포함해 복사합니다. 문제는 <strong>대상의 크기를 전혀 모른다</strong>는 점입니다.</p>
+
+<figure class="code bad"><figcaption>잘못된 예 — 버퍼 오버플로</figcaption>
+<pre><code class="language-c">char name[8];
+strcpy(name, "HONG GILDONG");   /* 13바이트를 8바이트 배열에 → 5바이트 넘침: UB */</code></pre></figure>
+
+<p>그래서 "크기를 지정하는" <code>strncpy</code>가 안전한 대안처럼 소개되곤 합니다. 하지만 strncpy는 원래 고정 길이 필드(옛 유닉스의 14바이트 파일 이름 항목)를 채우기 위해 만든 함수라서, 일반 문자열 복사용으로 쓰면 함정이 있습니다.</p>
+
+<figure class="code"><figcaption>ex12-7.c strncpy의 함정</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+
+int main(void)
+{
+    char a[8];
+    char b[5];
+    int i;
+
+    strncpy(a, "KRW", sizeof a);        /* 원본이 짧다: 나머지를 '\0'으로 채운다 */
+    for (i = 0; i &lt; 8; i++) printf("%d ", a[i]);
+    printf("\n");
+
+    strncpy(b, "1102345", sizeof b);    /* 원본이 길다: 5바이트만 복사, '\0' 없음! */
+    for (i = 0; i &lt; 5; i++) printf("%c ", b[i]);
+    printf("\n");
+    /* printf("%s", b); 를 하면 b 뒤의 메모리까지 읽는다: UB */
+
+    b[sizeof b - 1] = '\0';             /* 해결: 마지막 칸에 직접 '\0' */
+    printf("%s\n", b);
+    return 0;
+}</code></pre></figure>
+
+<figure class="code out"><figcaption>실행 결과</figcaption>
+<pre>75 82 87 0 0 0 0 0
+1 1 0 2 3
+1102</pre></figure>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 210" width="700" role="img" aria-label="strncpy가 긴 원본을 5바이트 버퍼에 복사하면 널 문자가 없어 printf가 버퍼 밖까지 읽는 그림">
+  <text x="20" y="26" class="bold">strncpy(b, "1102345", 5) 결과</text>
+  <rect class="hl" x="40" y="50" width="56" height="40"/><text x="68" y="75" text-anchor="middle" class="mono">'1'</text>
+  <rect class="hl" x="96" y="50" width="56" height="40"/><text x="124" y="75" text-anchor="middle" class="mono">'1'</text>
+  <rect class="hl" x="152" y="50" width="56" height="40"/><text x="180" y="75" text-anchor="middle" class="mono">'0'</text>
+  <rect class="hl" x="208" y="50" width="56" height="40"/><text x="236" y="75" text-anchor="middle" class="mono">'2'</text>
+  <rect class="hl" x="264" y="50" width="56" height="40"/><text x="292" y="75" text-anchor="middle" class="mono">'3'</text>
+  <rect class="bad" x="320" y="50" width="56" height="40"/><text x="348" y="75" text-anchor="middle" class="mono">?</text>
+  <rect class="bad" x="376" y="50" width="56" height="40"/><text x="404" y="75" text-anchor="middle" class="mono">?</text>
+  <rect class="bad" x="432" y="50" width="56" height="40"/><text x="460" y="75" text-anchor="middle" class="mono">?</text>
+  <path class="line" d="M40 100 V 110 H 320 V 100"/>
+  <text x="180" y="130" text-anchor="middle" class="small">b[5] — '\0'이 들어갈 자리가 없다</text>
+  <text x="404" y="130" text-anchor="middle" class="small warn-t">b 밖의 다른 변수들</text>
+  <path class="arrow" d="M40 160 H 560"/>
+  <text x="300" y="185" text-anchor="middle" class="small warn-t">printf("%s", b)는 '\0'을 찾을 때까지 계속 읽는다</text>
+  <text x="600" y="164" class="small mono">?</text>
+</svg>
+<figcaption>그림 12-4 strncpy는 원본이 길면 '\0'을 붙이지 않아 "끝나지 않는 문자열"을 만듭니다</figcaption>
+</figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">strncpy의 두 가지 문제</p>
+<ol class="steps">
+<li><strong>널 종료 미보장</strong>: 원본 길이가 n 이상이면 정확히 n바이트만 복사하고 '\0'을 붙이지 않습니다. 이후 이 배열을 문자열로 쓰는 모든 함수(printf, strlen, strcpy)가 배열 밖까지 읽어 UB가 됩니다.</li>
+<li><strong>불필요한 0 채우기</strong>: 원본이 짧으면 n바이트가 될 때까지 나머지를 전부 '\0'으로 채웁니다. 4KB 버퍼에 3글자를 복사해도 4KB를 씁니다. 대량 처리에서 성능 낭비입니다.</li>
+</ol>
+<p>그래서 strncpy를 쓸 때는 반드시 <code>strncpy(d, s, sizeof d - 1); d[sizeof d - 1] = '\0';</code> 두 줄을 세트로 씁니다. 더 간단하고 안전한 방법은 <code>snprintf(d, sizeof d, "%s", s);</code>입니다(12-2-7). BSD 계열의 <code>strlcpy</code>, C11 부록 K의 <code>strcpy_s</code>도 있지만 glibc에는 오랫동안 없었고 부록 K는 지원 구현이 적어 이식성이 떨어집니다.</p>
+</div>
+
+<div class="box tip"><p class="box-title" data-tag="잠깐">그래도 strncpy가 딱 맞는 곳 — 고정 길이 전문 필드</p>
+<p>strncpy의 "0으로 채우기, 널 종료 없음" 동작은 사실 <strong>고정 길이 필드</strong>를 위한 것입니다. 전문의 10바이트 필드는 '\0' 없이 정확히 10바이트여야 하므로 strncpy가 의도에 맞습니다. 다만 금융 전문은 보통 '\0'이 아니라 <strong>공백으로 채우는</strong> 규칙이 많아서, 실무에서는 <code>memset(field, ' ', 10); memcpy(field, src, len &lt; 10 ? len : 10);</code> 같은 전용 함수를 따로 만들어 씁니다.</p>
+</div>
+
+<h3 id="s12-2-3">strcat과 strncat — 이어 붙이기</h3>
+
+<figure class="code"><figcaption>ex12-8.c 문자열 이어 붙이기</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+
+int main(void)
+{
+    char msg[32] = "Balance: ";      /* 9글자 + '\0', 나머지는 0 */
+    char small[12] = "ID:";
+
+    strcat(msg, "1500");             /* msg의 '\0' 자리부터 덧붙임 */
+    strcat(msg, " KRW");
+    printf("[%s] 길이 %zu\n", msg, strlen(msg));
+
+    /* strncat의 n은 "붙일 최대 글자 수": 남은 공간 = 전체 - 현재 길이 - 1 */
+    strncat(small, "CUST-000123456", sizeof small - strlen(small) - 1);
+    printf("[%s] 길이 %zu\n", small, strlen(small));
+    return 0;
+}</code></pre></figure>
+
+<figure class="code out"><figcaption>실행 결과</figcaption>
+<pre>[Balance: 1500 KRW] 길이 17
+[ID:CUST-000] 길이 11</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">strcat의 숨은 비용과 strncat 계산식</p>
+<p>strcat은 붙이기 전에 <strong>대상의 '\0'을 찾기 위해 처음부터 끝까지 훑습니다</strong>. 그래서 반복문 안에서 strcat을 계속 호출해 긴 문자열을 만들면 매번 처음부터 다시 세므로 O(n²)이 됩니다(일명 "화가 슐레미엘의 알고리즘"). 많이 이어 붙일 때는 현재 끝 위치를 포인터로 기억해 두고 그 자리에 복사하는 편이 낫습니다.</p>
+<p>strncat의 세 번째 인자는 <strong>버퍼 크기가 아니라 "덧붙일 최대 글자 수"</strong>입니다. small은 12바이트, 현재 "ID:"가 3글자이므로 남은 자리는 12 − 3 − 1('\0' 몫) = 8글자입니다. 그래서 "CUST-000"까지 8글자만 붙고 '\0'이 추가되어 총 11글자가 됩니다. <code>strncat(small, src, sizeof small)</code>처럼 버퍼 크기를 그대로 넘기는 것은 매우 흔한 실수로, 오버플로를 막지 못합니다.</p>
+</div>
+
+<h3 id="s12-2-4">strcmp — 문자열 비교</h3>
+
+<p><code>strcmp(a, b)</code>는 두 문자열을 앞에서부터 한 글자씩 비교하다가 처음으로 다른 글자를 만나면 그 차이에 따라 결과를 냅니다.</p>
+<ul>
+<li>a가 사전 순으로 앞서면 <strong>음수</strong>, 같으면 <strong>0</strong>, 뒤면 <strong>양수</strong>.</li>
+<li>비교는 각 글자를 <strong>unsigned char로 본 값</strong>으로 합니다. 그래서 대문자가 소문자보다 앞서고, 한 문자열이 다른 문자열의 앞부분이면 짧은 쪽이 앞섭니다('\0'(0)이 가장 작으므로).</li>
+</ul>
+
+<figure class="code"><figcaption>ex12-9.c strcmp의 결과는 부호만 본다</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+
+/* 결과를 -1, 0, 1로 정규화해서 출력 */
+int sign(int x) { return (x &gt; 0) - (x &lt; 0); }
+
+int main(void)
+{
+    printf("%d\n", sign(strcmp("KRW", "KRW")));     /*  0: 같다 */
+    printf("%d\n", sign(strcmp("EUR", "USD")));     /* -1: 'E' &lt; 'U' */
+    printf("%d\n", sign(strcmp("USD", "USDT")));    /* -1: '\0' &lt; 'T' */
+    printf("%d\n", sign(strcmp("apple", "Apple"))); /*  1: 'a'(97) &gt; 'A'(65) */
+    printf("%d\n", sign(strncmp("110-234", "110-999", 4)));  /* 0: 앞 4글자만 비교 */
+
+    if (strcmp("KRW", "KRW") == 0)     /* 같은지 확인하는 올바른 방법 */
+        printf("같은 통화\n");
+    return 0;
+}</code></pre></figure>
+
+<figure class="code out"><figcaption>실행 결과</figcaption>
+<pre>0
+-1
+-1
+1
+0
+같은 통화</pre></figure>
+
+<figure class="diagram">
+<svg viewBox="0 0 640 200" width="640" role="img" aria-label="strcmp가 USD와 USDT를 한 글자씩 비교하다 네 번째 글자에서 널 문자 0과 T 84의 차이로 결과를 내는 그림">
+  <text x="20" y="50" class="mono bold">a</text>
+  <rect class="hl" x="60" y="28" width="70" height="36"/><text x="95" y="51" text-anchor="middle" class="mono">'U'</text>
+  <rect class="hl" x="130" y="28" width="70" height="36"/><text x="165" y="51" text-anchor="middle" class="mono">'S'</text>
+  <rect class="hl" x="200" y="28" width="70" height="36"/><text x="235" y="51" text-anchor="middle" class="mono">'D'</text>
+  <rect class="bad" x="270" y="28" width="70" height="36"/><text x="305" y="51" text-anchor="middle" class="mono">'\0' 0</text>
+  <text x="20" y="130" class="mono bold">b</text>
+  <rect class="hl" x="60" y="108" width="70" height="36"/><text x="95" y="131" text-anchor="middle" class="mono">'U'</text>
+  <rect class="hl" x="130" y="108" width="70" height="36"/><text x="165" y="131" text-anchor="middle" class="mono">'S'</text>
+  <rect class="hl" x="200" y="108" width="70" height="36"/><text x="235" y="131" text-anchor="middle" class="mono">'D'</text>
+  <rect class="bad" x="270" y="108" width="70" height="36"/><text x="305" y="131" text-anchor="middle" class="mono">'T' 84</text>
+  <rect class="box" x="340" y="108" width="70" height="36"/><text x="375" y="131" text-anchor="middle" class="mono">'\0'</text>
+  <text x="95" y="88" text-anchor="middle" class="small acc">같음</text>
+  <text x="165" y="88" text-anchor="middle" class="small acc">같음</text>
+  <text x="235" y="88" text-anchor="middle" class="small acc">같음</text>
+  <text x="305" y="88" text-anchor="middle" class="small warn-t bold">다름!</text>
+  <text x="440" y="70" class="small">0 - 84 &lt; 0</text>
+  <text x="440" y="90" class="small">→ a가 사전 순으로 앞</text>
+  <text x="320" y="185" text-anchor="middle" class="small mute">처음 다른 위치에서 멈추고, 그 두 글자(unsigned char)의 대소로 결과가 정해진다</text>
+</svg>
+<figcaption>그림 12-5 strcmp("USD", "USDT") 비교 과정</figcaption>
+</figure>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 3가지</p>
+<ul>
+<li><code>if (strcmp(a, b) == 1)</code>: strcmp는 −1/1이 아니라 "음수/양수"를 반환합니다. glibc는 글자 차이(예: 'U'−'E' = 16)를 반환하기도 하므로 <code>&gt; 0</code>, <code>&lt; 0</code>으로 검사해야 합니다.</li>
+<li><code>if (strcmp(a, b))</code>를 "같으면 참"으로 착각: 같을 때 0(거짓)입니다. 의도를 분명히 하려면 <code>strcmp(a, b) == 0</code>으로 씁니다.</li>
+<li><code>if (a == b)</code>: 주소 비교입니다(12-1-4).</li>
+</ul>
+</div>
+
+<h3 id="s12-2-5">직접 구현해 보기 — strlen, strcpy, strcmp</h3>
+
+<p>표준 함수를 직접 구현해 보면 '\0' 규약과 포인터 연산이 손에 익고, 함정이 왜 생기는지 저절로 이해됩니다. 면접에서도 자주 나오는 문제입니다.</p>
+
+<figure class="code"><figcaption>ex12-10.c 문자열 함수 직접 구현</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stddef.h&gt;
+
+size_t my_strlen(const char *s)
+{
+    const char *p = s;
+    while (*p != '\0')       /* '\0'을 만날 때까지 전진 */
+        p++;
+    return (size_t)(p - s);  /* 포인터 뺄셈 = 글자 수 */
+}
+
+char *my_strcpy(char *dst, const char *src)
+{
+    char *ret = dst;                   /* 표준처럼 dst의 시작 주소를 반환 */
+    while ((*dst++ = *src++) != '\0')  /* 복사한 글자가 '\0'이면 종료 ('\0'도 복사됨) */
+        ;
+    return ret;
+}
+
+int my_strcmp(const char *a, const char *b)
+{
+    while (*a != '\0' &amp;&amp; *a == *b) {  /* 같은 동안 전진 */
+        a++;
+        b++;
+    }
+    /* 처음 다른 글자(또는 '\0')를 unsigned char로 비교 */
+    return (unsigned char)*a - (unsigned char)*b;
+}
+
+int main(void)
+{
+    char buf[16];
+    my_strcpy(buf, "MYBANK");
+    printf("%s %zu\n", buf, my_strlen(buf));
+    printf("%d %d %d\n", my_strcmp("ABC", "ABC") == 0,
+                         my_strcmp("ABC", "ABD") &lt; 0,
+                         my_strcmp("ABCD", "ABC") &gt; 0);
+    return 0;
+}</code></pre></figure>
+
+<figure class="code out"><figcaption>실행 결과</figcaption>
+<pre>MYBANK 6
+1 1 1</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">while ((*dst++ = *src++) != '\0') 한 줄 해부</p>
+<ol class="steps">
+<li><code>*src++</code>: src가 가리키는 글자를 읽고, src를 다음 칸으로 옮깁니다(후위 증가는 증가 전 주소를 사용).</li>
+<li><code>*dst++ = ...</code>: 그 글자를 dst가 가리키는 칸에 쓰고, dst를 다음 칸으로 옮깁니다.</li>
+<li>대입식의 값은 대입된 글자이므로, 그것이 '\0'이면 반복을 끝냅니다. '\0'까지 복사된 뒤에 멈추므로 결과는 항상 널 종료됩니다.</li>
+</ol>
+<p>이 코드에는 <strong>dst의 크기를 검사하는 부분이 전혀 없습니다</strong>. 함수는 dst가 충분히 크다고 믿을 수밖에 없습니다. 받은 것이 주소뿐이니까요(10장의 "배열을 넘기면 길이가 사라진다"). 이것이 strcpy가 위험한 근본 이유이며, 안전한 함수들은 모두 크기를 추가 인자로 받습니다.</p>
+<p>my_strcmp에서 <code>(unsigned char)</code>로 바꾸는 이유는, 한글 UTF-8 바이트(0x80 이상)가 signed char에서 음수가 되어 "가" &lt; "A"처럼 순서가 뒤집히는 것을 막기 위해서입니다. 표준 strcmp도 unsigned char 기준으로 비교하도록 규정되어 있습니다.</p>
+</div>
+
+<div class="ex"><p class="ex-title">예제 12-2 <span class="lv">난이도 ★★☆</span></p>
+<p>버퍼 크기를 받아 항상 널 종료를 보장하고, 잘렸는지 알려 주는 안전한 복사 함수 <code>int safe_copy(char *dst, size_t size, const char *src)</code>를 작성하세요. 전부 복사되면 0, 잘렸으면 1, size가 0이면 -1을 반환합니다.</p>
+<details><summary>정답과 해설 보기</summary>
+<figure class="code good"><figcaption>정답 코드</figcaption><pre><code class="language-c">int safe_copy(char *dst, size_t size, const char *src)
+{
+    size_t i;
+    if (size == 0) return -1;                /* '\0' 넣을 자리조차 없음 */
+    for (i = 0; i &lt; size - 1 &amp;&amp; src[i] != '\0'; i++)
+        dst[i] = src[i];                     /* 최대 size-1 글자 */
+    dst[i] = '\0';                           /* 항상 널 종료 */
+    return (src[i] != '\0') ? 1 : 0;         /* 원본이 남았으면 잘린 것 */
+}
+/* char b[5]; safe_copy(b, sizeof b, "1102345") → b = "1102", 반환 1 */</code></pre></figure>
+<p>핵심은 ① 최대 size − 1글자만 복사하고 ② 마지막에 반드시 '\0'을 쓰며 ③ 잘림 여부를 호출자에게 알리는 것입니다. 금융 데이터에서 "조용히 잘리는 것"은 오류보다 위험할 수 있습니다. 계좌번호 끝자리가 잘려 다른 계좌가 되는 상황을 생각해 보세요. 그래서 잘림을 오류로 처리할지 호출자가 결정할 수 있도록 반환값으로 알려 줍니다.</p>
+</details></div>
+
+<h3 id="s12-2-6">strchr, strrchr, strstr — 찾기</h3>
+
+<p>찾기 함수는 찾은 위치를 <strong>포인터로</strong> 돌려줍니다. 못 찾으면 <code>NULL</code>입니다. 찾은 포인터에서 시작 주소를 빼면 인덱스가 됩니다(10장의 포인터 뺄셈).</p>
+
+<figure class="code"><figcaption>ex12-11.c 문자와 부분 문자열 찾기</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+
+int main(void)
+{
+    const char *acct = "110-234-567890";
+    const char *memo = "3월 급여 입금";
+    const char *p;
+
+    p = strchr(acct, '-');                 /* 첫 번째 '-' */
+    printf("첫 '-' 위치: %td, 이후: %s\n", p - acct, p);
+
+    p = strrchr(acct, '-');                /* 마지막 '-' */
+    printf("끝 '-' 위치: %td, 끝자리 그룹: %s\n", p - acct, p + 1);
+
+    p = strstr(memo, "급여");              /* 부분 문자열 (바이트 단위 비교) */
+    if (p != NULL)
+        printf("'급여' 바이트 위치: %td, 이후: %s\n", p - memo, p);
+
+    p = strchr(acct, '#');
+    printf("'#' 검색 결과: %s\n", (p == NULL) ? "없음(NULL)" : p);
+    return 0;
+}</code></pre></figure>
+
+<figure class="code out"><figcaption>실행 결과</figcaption>
+<pre>첫 '-' 위치: 3, 이후: -234-567890
+끝 '-' 위치: 7, 끝자리 그룹: 567890
+'급여' 바이트 위치: 5, 이후: 급여 입금
+'#' 검색 결과: 없음(NULL)</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">'급여'의 위치가 5인 이유와 NULL 검사</p>
+<p>"3월 급여"에서 '3'은 1바이트, '월'은 UTF-8로 3바이트, 공백 1바이트이므로 '급'은 0 + 1 + 3 + 1 = 5번째 바이트에서 시작합니다. 문자열 함수는 모두 <strong>바이트 단위</strong>로 동작한다는 점을 기억하세요. strstr은 바이트열을 그대로 비교하므로 UTF-8 한글 검색도 정확하게 동작하지만, 결과 위치는 글자 수가 아니라 바이트 수입니다.</p>
+<p>못 찾았을 때의 NULL을 검사하지 않고 <code>printf("%s", p)</code>나 <code>p - acct</code>를 쓰면 9장의 널 포인터 역참조가 됩니다. glibc의 printf는 NULL에 대해 "(null)"을 찍어 주기도 하지만 이는 비표준 친절일 뿐이며, 다른 환경에서는 바로 죽습니다.</p>
+</div>
+
+<h3 id="s12-2-7">strtok — 구분자로 나누기</h3>
+
+<p>CSV 형식의 거래 기록 "20261028,110-234-567890,WD,50000"을 쉼표로 나누려면 <code>strtok</code>을 씁니다. 첫 호출에는 문자열을, 이후 호출에는 <code>NULL</code>을 넘기면 "이어서" 다음 토큰을 돌려줍니다.</p>
+
+<figure class="code"><figcaption>ex12-12.c 거래 기록 필드 분리</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+
+int main(void)
+{
+    char line[] = "20261028,110-234-567890,WD,50000";   /* 수정 가능한 배열이어야 한다 */
+    const char *label[] = {"거래일자", "계좌번호", "거래구분", "금액"};
+    char *tok;
+    int i = 0;
+
+    tok = strtok(line, ",");            /* 첫 호출: 문자열 전달 */
+    while (tok != NULL &amp;&amp; i &lt; 4) {
+        printf("%-8s: %s\n", label[i++], tok);
+        tok = strtok(NULL, ",");        /* 이후 호출: NULL → 이어서 */
+    }
+    printf("호출 후 line: \"%s\"\n", line);   /* 원본이 바뀌었다! */
+    return 0;
+}</code></pre></figure>
+
+<figure class="code out"><figcaption>실행 결과</figcaption>
+<pre>거래일자: 20261028
+계좌번호: 110-234-567890
+거래구분: WD
+금액    : 50000
+호출 후 line: "20261028"</pre></figure>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 200" width="700" role="img" aria-label="strtok이 구분자 쉼표 자리에 널 문자를 써 넣어 원본 문자열을 여러 토큰으로 자르는 그림">
+  <text x="20" y="24" class="bold">strtok 호출 전</text>
+  <rect class="box" x="40" y="36" width="120" height="34"/><text x="100" y="58" text-anchor="middle" class="mono small">20261028</text>
+  <rect class="hl2" x="160" y="36" width="24" height="34"/><text x="172" y="58" text-anchor="middle" class="mono small">,</text>
+  <rect class="box" x="184" y="36" width="200" height="34"/><text x="284" y="58" text-anchor="middle" class="mono small">110-234-567890</text>
+  <rect class="hl2" x="384" y="36" width="24" height="34"/><text x="396" y="58" text-anchor="middle" class="mono small">,</text>
+  <rect class="box" x="408" y="36" width="50" height="34"/><text x="433" y="58" text-anchor="middle" class="mono small">WD</text>
+  <rect class="hl2" x="458" y="36" width="24" height="34"/><text x="470" y="58" text-anchor="middle" class="mono small">,</text>
+  <rect class="box" x="482" y="36" width="80" height="34"/><text x="522" y="58" text-anchor="middle" class="mono small">50000</text>
+  <rect class="box" x="562" y="36" width="34" height="34"/><text x="579" y="58" text-anchor="middle" class="mono small">\0</text>
+
+  <text x="20" y="114" class="bold">strtok 호출 후</text>
+  <rect class="hl" x="40" y="126" width="120" height="34"/><text x="100" y="148" text-anchor="middle" class="mono small">20261028</text>
+  <rect class="bad" x="160" y="126" width="24" height="34"/><text x="172" y="148" text-anchor="middle" class="mono small">\0</text>
+  <rect class="hl" x="184" y="126" width="200" height="34"/><text x="284" y="148" text-anchor="middle" class="mono small">110-234-567890</text>
+  <rect class="bad" x="384" y="126" width="24" height="34"/><text x="396" y="148" text-anchor="middle" class="mono small">\0</text>
+  <rect class="hl" x="408" y="126" width="50" height="34"/><text x="433" y="148" text-anchor="middle" class="mono small">WD</text>
+  <rect class="bad" x="458" y="126" width="24" height="34"/><text x="470" y="148" text-anchor="middle" class="mono small">\0</text>
+  <rect class="hl" x="482" y="126" width="80" height="34"/><text x="522" y="148" text-anchor="middle" class="mono small">50000</text>
+  <rect class="box" x="562" y="126" width="34" height="34"/><text x="579" y="148" text-anchor="middle" class="mono small">\0</text>
+  <text x="350" y="190" text-anchor="middle" class="small">쉼표 자리에 '\0'을 써서 문자열 4개로 "잘라" 낸다. 각 토큰 포인터는 원본 안을 가리킨다</text>
+</svg>
+<figcaption>그림 12-6 strtok은 원본 문자열의 구분자를 '\0'으로 덮어써서 토큰을 만듭니다</figcaption>
+</figure>
+
+<div class="box warn"><p class="box-title" data-tag="주의">strtok의 함정 4가지</p>
+<ol class="steps">
+<li><strong>원본을 수정합니다.</strong> 그래서 문자열 리터럴(<code>char *line = "a,b";</code>)을 넘기면 읽기 전용 메모리에 쓰려다 segfault가 납니다. 원본을 보존해야 하면 복사본에 사용합니다.</li>
+<li><strong>내부에 정적 변수로 "다음 위치"를 기억합니다.</strong> 그래서 strtok으로 줄을 나누는 도중에 다른 함수가 strtok을 호출하면 위치가 덮어써집니다. 멀티스레드 환경에서도 안전하지 않습니다(재진입 불가). POSIX의 <code>strtok_r(s, delim, &amp;saveptr)</code>은 상태를 호출자의 변수에 저장해 이 문제를 해결합니다(윈도우는 <code>strtok_s</code>).</li>
+<li><strong>연속된 구분자를 하나로 취급하고 빈 필드를 건너뜁니다.</strong> "20261028,,WD"는 토큰 2개("20261028", "WD")가 되어, 비어 있는 계좌번호 필드가 사라지고 필드 순서가 밀립니다. CSV처럼 빈 필드가 의미 있는 형식에는 부적합하므로 strchr로 직접 나누거나 POSIX <code>strsep</code>을 씁니다.</li>
+<li>토큰 포인터는 원본 배열 안을 가리키므로, 원본 배열의 수명이 끝나면 함께 무효가 됩니다.</li>
+</ol>
+</div>
+
+<h3 id="s12-2-8">snprintf — 안전하게 문자열 만들기</h3>
+
+<p><code>sprintf</code>는 printf의 출력을 화면 대신 문자열 버퍼에 쓰는 함수입니다. 역시 버퍼 크기를 모르므로 위험합니다. C99의 <code>snprintf(buf, size, fmt, ...)</code>는 최대 size − 1글자만 쓰고 <strong>항상 '\0'을 붙이며</strong>, 반환값으로 "잘리지 않았다면 썼을 글자 수"를 알려 줍니다.</p>
+
+<figure class="code"><figcaption>ex12-13.c snprintf와 잘림 검출</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+int main(void)
+{
+    char buf[16];
+    char key[32];
+    int n;
+
+    n = snprintf(buf, sizeof buf, "%s-%06d", "TRX20261028", 42);
+    printf("필요 %d, 버퍼 %zu → [%s]\n", n, sizeof buf, buf);
+    if (n &lt; 0 || (size_t)n &gt;= sizeof buf)
+        printf("경고: 잘렸습니다\n");
+
+    n = snprintf(key, sizeof key, "%s-%06d", "TRX20261028", 42);
+    printf("필요 %d, 버퍼 %zu → [%s]\n", n, sizeof key, key);
+
+    /* 문자열 복사 용도로도 쓸 수 있다: 항상 널 종료 */
+    snprintf(buf, sizeof buf, "%s", "HONG GILDONG BANK");
+    printf("[%s]\n", buf);
+    return 0;
+}</code></pre></figure>
+
+<figure class="code out"><figcaption>실행 결과</figcaption>
+<pre>필요 18, 버퍼 16 → [TRX20261028-000]
+경고: 잘렸습니다
+필요 18, 버퍼 32 → [TRX20261028-000042]
+[HONG GILDONG BA]</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">반환값이 "쓴 길이"가 아니라 "필요한 길이"인 이유</p>
+<p>"TRX20261028-000042"는 18글자입니다. 버퍼가 16바이트이므로 15글자 + '\0'만 들어갔지만, 반환값은 18입니다. 이렇게 설계한 덕분에 ① <code>n &gt;= size</code>이면 잘렸다는 것을 알 수 있고, ② <code>n + 1</code>바이트를 할당해 다시 호출하면 정확히 맞는 버퍼를 만들 수 있습니다. 거래 키나 파일 이름처럼 잘리면 안 되는 문자열은 반드시 반환값을 검사해야 합니다. 잘린 거래 키 두 개가 우연히 같아져 중복 키 오류가 나는 장애는 실제로 일어나는 유형입니다.</p>
+</div>
+
+<h3 id="s12-2-9">strtol과 atoi — 문자열을 숫자로</h3>
+
+<p>11장에서 숫자 문자열을 직접 변환해 보았습니다. 표준 라이브러리에는 <code>atoi</code>, <code>atol</code>과 <code>strtol</code>, <code>strtoll</code>이 있습니다. 둘의 결정적 차이는 <strong>오류를 알 수 있는가</strong>입니다.</p>
+
+<div class="tbl"><table><thead><tr><th>입력</th><th><code>atoi</code> 결과</th><th><code>strtoll</code>로 알 수 있는 것</th></tr></thead><tbody>
+<tr><td>"15000"</td><td>15000</td><td>값 15000, end가 문자열 끝 → 정상</td></tr>
+<tr><td>"15000abc"</td><td>15000 (뒤를 조용히 무시)</td><td>end가 "abc"를 가리킴 → 형식 오류 판단 가능</td></tr>
+<tr><td>"abc"</td><td>0 (정상 0과 구분 불가)</td><td>end == 시작 → 숫자 없음</td></tr>
+<tr><td>"99999999999999999999"</td><td><strong>미정의 동작</strong></td><td>LLONG_MAX 반환, <code>errno == ERANGE</code></td></tr>
+</tbody></table></div>
+
+<figure class="code"><figcaption>ex12-14.c strtoll로 금액 입력 엄격하게 검증</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;errno.h&gt;
+#include &lt;ctype.h&gt;
+
+/* 반환: 0 성공, -1 숫자 없음, -2 범위 초과, -3 뒤에 잘못된 문자 */
+int parse_ll(const char *s, long long *out)
+{
+    char *end;
+    long long v;
+
+    errno = 0;                         /* 호출 전에 반드시 0으로 */
+    v = strtoll(s, &amp;end, 10);          /* end: 변환이 멈춘 위치 */
+    if (end == s)       return -1;     /* 숫자를 하나도 못 읽음 */
+    if (errno == ERANGE) return -2;    /* long long 범위 초과 */
+    while (isspace((unsigned char)*end)) end++;   /* 뒤 공백(개행 포함) 허용 */
+    if (*end != '\0')   return -3;     /* 숫자 뒤에 다른 문자 */
+    *out = v;
+    return 0;
+}
+
+int main(void)
+{
+    const char *inputs[] = {"15000", "15000abc", "abc", "99999999999999999999", " 300\n"};
+    int i;
+    for (i = 0; i &lt; 5; i++) {
+        long long v = 0;
+        int rc = parse_ll(inputs[i], &amp;v);
+        printf("입력 %-24s → rc=%d", inputs[i][0] == ' ' ? "\" 300\\n\"" : inputs[i], rc);
+        if (rc == 0) printf(", 값=%lld", v);
+        printf("\n");
+    }
+    printf("atoi(\"15000abc\") = %d, atoi(\"abc\") = %d\n", atoi("15000abc"), atoi("abc"));
+    return 0;
+}</code></pre></figure>
+
+<figure class="code out"><figcaption>실행 결과</figcaption>
+<pre>입력 15000                    → rc=0, 값=15000
+입력 15000abc                 → rc=-3
+입력 abc                      → rc=-1
+입력 99999999999999999999     → rc=-2
+입력 " 300\n"                  → rc=0, 값=300
+atoi("15000abc") = 15000, atoi("abc") = 0</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 금융 시스템에서 atoi는 금지인가</p>
+<p>atoi는 실패를 알릴 방법이 없습니다. "abc"도 0, "0"도 0입니다. 사용자가 이체 금액에 "5O000"(숫자 0 대신 영문 O)을 입력하면 atoi는 5를 돌려주고, 프로그램은 5원 이체를 정상 처리합니다. 범위를 넘는 입력은 아예 미정의 동작입니다. strtoll은 ① 변환이 멈춘 위치(end)로 형식 오류를, ② errno로 범위 초과를 알려 주므로 입력을 엄격하게 검증할 수 있습니다. 앞쪽 공백은 strtoll이 알아서 건너뛰고, '+'·'-' 부호도 처리합니다. 금액이라면 추가로 음수와 0을 업무 규칙에 따라 거부해야 합니다. 많은 금융권 시큐어 코딩 지침이 atoi 계열 대신 strtol 계열 사용을 권고하는 이유입니다.</p>
+</div>
+
+<h3 id="s12-2-10">버퍼 오버플로와 안전한 대안</h3>
+
+<p>지금까지 여러 번 "버퍼 오버플로"를 언급했습니다. 정확히 어떤 일이 일어나는지 스택 그림으로 확인해 봅시다.</p>
+
+<figure class="code bad"><figcaption>잘못된 예 — 고전적인 스택 버퍼 오버플로</figcaption>
+<pre><code class="language-c">void check_pin(const char *input)
+{
+    int ok = 0;
+    char pin[8];
+    strcpy(pin, input);          /* input 길이 검사 없음 */
+    if (strcmp(pin, "4321") == 0) ok = 1;
+    if (ok) printf("인증 성공\n");
+}</code></pre></figure>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 290" width="700" role="img" aria-label="스택 프레임에서 pin 배열을 넘치게 쓰면 위쪽의 다른 지역 변수와 저장된 프레임 포인터, 반환 주소가 덮어써지는 그림">
+  <text x="200" y="22" text-anchor="middle" class="bold">check_pin의 스택 프레임 (위가 높은 주소)</text>
+  <rect class="bad" x="100" y="36" width="200" height="40"/>
+  <text x="200" y="61" text-anchor="middle" class="small bold">반환 주소 (8바이트)</text>
+  <rect class="hl2" x="100" y="76" width="200" height="40"/>
+  <text x="200" y="101" text-anchor="middle" class="small">저장된 rbp (8바이트)</text>
+  <rect class="box" x="100" y="116" width="200" height="36"/>
+  <text x="200" y="139" text-anchor="middle" class="small">카나리 / 다른 지역 변수 (ok 등)</text>
+  <rect class="hl" x="100" y="152" width="200" height="60"/>
+  <text x="200" y="178" text-anchor="middle" class="bold mono">pin[8]</text>
+  <text x="200" y="198" text-anchor="middle" class="small mute">pin[0]이 아래, pin[7]이 위</text>
+  <path class="arrow" d="M330 210 V 44"/>
+  <text x="345" y="140" class="small warn-t bold">strcpy가 낮은 주소에서</text>
+  <text x="345" y="158" class="small warn-t bold">높은 주소로 계속 쓴다</text>
+  <text x="345" y="200" class="small">① 8바이트까지: pin 안 (정상)</text>
+  <text x="345" y="120" class="small">② 넘치면: 이웃 변수(ok) 변조</text>
+  <text x="345" y="62" class="small">③ 더 넘치면: 반환 주소 변조</text>
+  <text x="350" y="250" text-anchor="middle" class="small warn-t">return 시 CPU가 조작된 주소로 점프 → 공격자 코드 실행 가능</text>
+  <text x="350" y="276" text-anchor="middle" class="small mute">(실제 배치는 컴파일러가 정하며, 보호 기법이 순서를 바꾸기도 한다)</text>
+</svg>
+<figcaption>그림 12-7 스택 버퍼 오버플로: 배열을 넘친 데이터가 이웃 변수와 반환 주소를 덮어씁니다</figcaption>
+</figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 이렇게 위험할까?</p>
+<p>함수의 지역 변수와 "함수가 끝나면 돌아갈 주소(반환 주소)"는 같은 스택에 나란히 저장됩니다. strcpy는 '\0'을 만날 때까지 낮은 주소에서 높은 주소 방향으로 쓰기 때문에, 입력이 pin보다 길면 그 위의 데이터를 차례로 덮어씁니다. 이웃 변수 ok가 0이 아닌 값으로 바뀌면 PIN이 틀려도 "인증 성공"이 나오고, 반환 주소가 공격자가 고른 값으로 바뀌면 함수가 return 하는 순간 CPU가 그 주소로 점프합니다. 1988년 모리스 웜 이래 수많은 해킹이 이 원리를 이용했습니다.</p>
+<p>현대 시스템에는 <strong>스택 카나리</strong>(<code>-fstack-protector</code>: 반환 주소 앞에 비밀 값을 두고 return 전에 변조 여부 검사), <strong>NX 비트</strong>(스택에서 코드 실행 금지), <strong>ASLR</strong>(주소 무작위화) 같은 방어 기법이 있어 공격이 훨씬 어려워졌습니다. 하지만 이는 피해를 줄이는 장치일 뿐, 이웃 변수 변조 같은 논리 오류는 막지 못합니다. 근본 대책은 <strong>버퍼 크기를 넘는 쓰기를 처음부터 하지 않는 것</strong>입니다.</p>
+</div>
+
+<div class="tbl"><table><thead><tr><th>위험한 함수</th><th>안전한 대안</th><th>비고</th></tr></thead><tbody>
+<tr><td><code>gets(buf)</code></td><td><code>fgets(buf, sizeof buf, stdin)</code></td><td>gets는 C11에서 <strong>표준에서 삭제</strong>. 절대 사용 금지</td></tr>
+<tr><td><code>strcpy(d, s)</code></td><td><code>snprintf(d, sizeof d, "%s", s)</code>, 길이 검사 후 <code>memcpy</code></td><td>잘림 여부 확인</td></tr>
+<tr><td><code>strcat(d, s)</code></td><td><code>strncat(d, s, sizeof d - strlen(d) - 1)</code>, snprintf</td><td>n 계산식 주의</td></tr>
+<tr><td><code>sprintf(d, ...)</code></td><td><code>snprintf(d, sizeof d, ...)</code></td><td>반환값 검사</td></tr>
+<tr><td><code>scanf("%s", buf)</code></td><td><code>scanf("%31s", buf)</code> (buf가 32바이트일 때), fgets</td><td>폭 지정은 크기 − 1</td></tr>
+<tr><td><code>atoi(s)</code></td><td><code>strtol</code>/<code>strtoll</code></td><td>오류 검출</td></tr>
+</tbody></table></div>
+
+<figure class="code good"><figcaption>ex12-15.c fgets로 한 줄 안전하게 입력받기</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+
+int main(void)
+{
+    char name[16];
+
+    printf("예금주명(영문): ");
+    if (fgets(name, sizeof name, stdin) == NULL) {   /* EOF 또는 오류 */
+        printf("입력 없음\n");
+        return 1;
+    }
+    /* fgets는 '\n'까지 저장한다 → 있으면 제거 */
+    name[strcspn(name, "\n")] = '\0';
+    printf("[%s] (%zu자)\n", name, strlen(name));
+    return 0;
+}</code></pre></figure>
+
+<figure class="code out"><figcaption>실행 결과 (HONG GILDONG 입력 후 엔터)</figcaption>
+<pre>예금주명(영문): HONG GILDONG
+[HONG GILDONG] (12자)</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">fgets의 동작과 '\n' 제거 관용구</p>
+<p><code>fgets(buf, n, fp)</code>는 최대 n − 1바이트까지, 또는 '\n'을 읽을 때까지(그 '\n'도 저장) 읽고 항상 '\0'을 붙입니다. 그래서 버퍼를 넘치지 않습니다. 대신 ① 저장된 '\n'을 직접 지워야 하고, ② 입력이 n − 1자보다 길면 나머지가 입력 버퍼에 남아 다음 fgets가 그것을 읽습니다(11장의 버퍼 문제와 같은 원리).</p>
+<p><code>name[strcspn(name, "\n")] = '\0';</code>은 '\n'의 위치(없으면 문자열 끝, 즉 strlen)를 구해 그 자리에 '\0'을 쓰는 관용구입니다. '\n'이 없을 때도 안전하게 동작합니다. 반대로 <code>name[strlen(name) - 1] = '\0';</code>은 '\n'이 없는 경우 마지막 글자를 지우고, 빈 문자열이면 <code>name[-1]</code>(실제로는 size_t 언더플로로 거대한 인덱스)에 써 버리는 버그가 있습니다. '\n'이 없다는 것은 줄이 버퍼보다 길었다는 뜻이므로, 엄격한 프로그램이라면 그 경우 남은 입력을 버리고 "입력이 너무 깁니다" 오류를 냅니다.</p>
+</div>
+
+<h3 id="s12-2-11">금융 예제 — 계좌번호 하이픈 제거와 마스킹</h3>
+
+<p>은행 시스템에서 계좌번호는 화면에는 "123-4567-7890"처럼 하이픈을 넣어 보여 주고, 원장 조회 키로는 "12345677890"처럼 숫자만 쓰며, 로그·영수증·알림 문자에는 "123-****-7890"처럼 <strong>가운데를 가려서(마스킹)</strong> 남깁니다. 이 장에서 배운 포인터·배열·문자 판별·널 종료 규약을 모두 사용해 이 기능을 만들어 봅시다.</p>
+
+<ol class="steps">
+<li><code>remove_hyphen</code>: 숫자만 골라 복사합니다. 숫자·하이픈 외의 문자가 있으면 오류, 대상 버퍼가 작으면 오류입니다.</li>
+<li><code>mask_account</code>: 하이픈 위치는 그대로 두고, 숫자 중 <strong>앞 3자리와 뒤 4자리만 남기고</strong> 나머지를 '*'로 바꿉니다. 계좌번호 체계마다 하이픈 위치가 달라도 동작하도록 "숫자 순번" 기준으로 판단합니다.</li>
+<li>두 함수 모두 대상 버퍼 크기를 받아 오버플로를 막고, 항상 널 종료합니다. 원본은 const로 보호합니다.</li>
+</ol>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 250" width="700" role="img" aria-label="계좌번호 123-4567-7890에서 숫자 순번 기준으로 앞 3자리와 뒤 4자리를 남기고 가운데를 별표로 가리는 과정">
+  <text x="20" y="30" class="small bold">원본</text>
+  <rect class="hl" x="90" y="12" width="40" height="30"/><text x="110" y="32" text-anchor="middle" class="mono small">1</text>
+  <rect class="hl" x="130" y="12" width="40" height="30"/><text x="150" y="32" text-anchor="middle" class="mono small">2</text>
+  <rect class="hl" x="170" y="12" width="40" height="30"/><text x="190" y="32" text-anchor="middle" class="mono small">3</text>
+  <rect class="box" x="210" y="12" width="40" height="30"/><text x="230" y="32" text-anchor="middle" class="mono small">-</text>
+  <rect class="hl2" x="250" y="12" width="40" height="30"/><text x="270" y="32" text-anchor="middle" class="mono small">4</text>
+  <rect class="hl2" x="290" y="12" width="40" height="30"/><text x="310" y="32" text-anchor="middle" class="mono small">5</text>
+  <rect class="hl2" x="330" y="12" width="40" height="30"/><text x="350" y="32" text-anchor="middle" class="mono small">6</text>
+  <rect class="hl2" x="370" y="12" width="40" height="30"/><text x="390" y="32" text-anchor="middle" class="mono small">7</text>
+  <rect class="box" x="410" y="12" width="40" height="30"/><text x="430" y="32" text-anchor="middle" class="mono small">-</text>
+  <rect class="hl" x="450" y="12" width="40" height="30"/><text x="470" y="32" text-anchor="middle" class="mono small">7</text>
+  <rect class="hl" x="490" y="12" width="40" height="30"/><text x="510" y="32" text-anchor="middle" class="mono small">8</text>
+  <rect class="hl" x="530" y="12" width="40" height="30"/><text x="550" y="32" text-anchor="middle" class="mono small">9</text>
+  <rect class="hl" x="570" y="12" width="40" height="30"/><text x="590" y="32" text-anchor="middle" class="mono small">0</text>
+  <text x="20" y="70" class="small bold">숫자 순번</text>
+  <text x="110" y="70" text-anchor="middle" class="small mono mute">0</text><text x="150" y="70" text-anchor="middle" class="small mono mute">1</text><text x="190" y="70" text-anchor="middle" class="small mono mute">2</text>
+  <text x="270" y="70" text-anchor="middle" class="small mono mute">3</text><text x="310" y="70" text-anchor="middle" class="small mono mute">4</text><text x="350" y="70" text-anchor="middle" class="small mono mute">5</text><text x="390" y="70" text-anchor="middle" class="small mono mute">6</text>
+  <text x="470" y="70" text-anchor="middle" class="small mono mute">7</text><text x="510" y="70" text-anchor="middle" class="small mono mute">8</text><text x="550" y="70" text-anchor="middle" class="small mono mute">9</text><text x="590" y="70" text-anchor="middle" class="small mono mute">10</text>
+  <text x="150" y="100" text-anchor="middle" class="small acc">순번 &lt; 3 : 유지</text>
+  <text x="330" y="100" text-anchor="middle" class="small warn-t">3 ≤ 순번 &lt; 11−4 : '*'</text>
+  <text x="530" y="100" text-anchor="middle" class="small acc">순번 ≥ 7 : 유지</text>
+  <path class="arrow-m" d="M350 112 V 136"/>
+  <text x="20" y="166" class="small bold">마스킹</text>
+  <rect class="hl" x="90" y="148" width="40" height="30"/><text x="110" y="168" text-anchor="middle" class="mono small">1</text>
+  <rect class="hl" x="130" y="148" width="40" height="30"/><text x="150" y="168" text-anchor="middle" class="mono small">2</text>
+  <rect class="hl" x="170" y="148" width="40" height="30"/><text x="190" y="168" text-anchor="middle" class="mono small">3</text>
+  <rect class="box" x="210" y="148" width="40" height="30"/><text x="230" y="168" text-anchor="middle" class="mono small">-</text>
+  <rect class="bad" x="250" y="148" width="40" height="30"/><text x="270" y="168" text-anchor="middle" class="mono small">*</text>
+  <rect class="bad" x="290" y="148" width="40" height="30"/><text x="310" y="168" text-anchor="middle" class="mono small">*</text>
+  <rect class="bad" x="330" y="148" width="40" height="30"/><text x="350" y="168" text-anchor="middle" class="mono small">*</text>
+  <rect class="bad" x="370" y="148" width="40" height="30"/><text x="390" y="168" text-anchor="middle" class="mono small">*</text>
+  <rect class="box" x="410" y="148" width="40" height="30"/><text x="430" y="168" text-anchor="middle" class="mono small">-</text>
+  <rect class="hl" x="450" y="148" width="40" height="30"/><text x="470" y="168" text-anchor="middle" class="mono small">7</text>
+  <rect class="hl" x="490" y="148" width="40" height="30"/><text x="510" y="168" text-anchor="middle" class="mono small">8</text>
+  <rect class="hl" x="530" y="148" width="40" height="30"/><text x="550" y="168" text-anchor="middle" class="mono small">9</text>
+  <rect class="hl" x="570" y="148" width="40" height="30"/><text x="590" y="168" text-anchor="middle" class="mono small">0</text>
+  <text x="350" y="214" text-anchor="middle" class="small">하이픈은 그대로, 숫자는 "몇 번째 숫자인가"로 판단 (총 숫자 11개)</text>
+  <text x="350" y="236" text-anchor="middle" class="small mute">하이픈 제거 결과: 12345677890</text>
+</svg>
+<figcaption>그림 12-8 숫자 순번을 기준으로 앞 3자리·뒤 4자리를 남기는 계좌번호 마스킹</figcaption>
+</figure>
+
+<figure class="code"><figcaption>ex12-16.c 계좌번호 하이픈 제거와 마스킹</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+#include &lt;ctype.h&gt;
+
+#define KEEP_HEAD 3   /* 앞에서 보여 줄 숫자 개수 */
+#define KEEP_TAIL 4   /* 뒤에서 보여 줄 숫자 개수 */
+
+/* 숫자만 dst에 복사. 반환: 숫자 개수, -1 잘못된 문자, -2 버퍼 부족 */
+int remove_hyphen(const char *src, char *dst, size_t size)
+{
+    size_t n = 0;
+    const char *p;
+    if (size == 0) return -2;
+    for (p = src; *p != '\0'; p++) {
+        unsigned char c = (unsigned char)*p;
+        if (c == '-') continue;
+        if (!isdigit(c)) { dst[0] = '\0'; return -1; }
+        if (n + 1 &gt;= size) { dst[0] = '\0'; return -2; }   /* '\0' 자리 확보 */
+        dst[n++] = (char)c;
+    }
+    dst[n] = '\0';
+    return (int)n;
+}
+
+/* 하이픈은 유지, 숫자는 앞 KEEP_HEAD개와 뒤 KEEP_TAIL개만 남기고 '*' */
+int mask_account(const char *src, char *dst, size_t size)
+{
+    size_t len = strlen(src);
+    int digits = 0, idx = 0;
+    size_t i;
+
+    if (len + 1 &gt; size) return -2;                  /* 결과 길이 = 원본 길이 */
+    for (i = 0; i &lt; len; i++)                          /* 1차: 숫자 개수 세기 */
+        if (isdigit((unsigned char)src[i])) digits++;
+    if (digits &lt;= KEEP_HEAD + KEEP_TAIL) return -1;  /* 가릴 숫자가 없으면 거부 */
+
+    for (i = 0; i &lt; len; i++) {                       /* 2차: 순번 기준 마스킹 */
+        unsigned char c = (unsigned char)src[i];
+        if (isdigit(c)) {
+            dst[i] = (idx &lt; KEEP_HEAD || idx &gt;= digits - KEEP_TAIL) ? (char)c : '*';
+            idx++;
+        } else {
+            dst[i] = (char)c;                         /* 하이픈 등은 그대로 */
+        }
+    }
+    dst[len] = '\0';
+    return 0;
+}
+
+int main(void)
+{
+    const char *accts[] = {"123-4567-7890", "110-234-567890", "12-34A-5678"};
+    char plain[20], masked[20];
+    int i, rc;
+
+    for (i = 0; i &lt; 3; i++) {
+        printf("원본       : %s\n", accts[i]);
+        rc = remove_hyphen(accts[i], plain, sizeof plain);
+        if (rc &lt; 0) { printf("하이픈 제거: 오류(rc=%d)\n\n", rc); continue; }
+        printf("하이픈 제거: %s (%d자리)\n", plain, rc);
+        if (mask_account(accts[i], masked, sizeof masked) == 0)
+            printf("마스킹     : %s\n\n", masked);
+    }
+    return 0;
+}</code></pre></figure>
+
+<figure class="code out"><figcaption>실행 결과</figcaption>
+<pre>원본       : 123-4567-7890
+하이픈 제거: 12345677890 (11자리)
+마스킹     : 123-****-7890
+
+원본       : 110-234-567890
+하이픈 제거: 110234567890 (12자리)
+마스킹     : 110-***-**7890
+
+원본       : 12-34A-5678
+하이픈 제거: 오류(rc=-1)
+</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">설계 포인트 다시 보기</p>
+<ul>
+<li><strong>하이픈 위치가 아니라 숫자 순번으로 판단</strong>: 은행마다, 상품마다 계좌번호 자릿수와 하이픈 위치가 다릅니다(3-3-6, 3-4-4, 6-2-6 등). "첫 하이픈과 마지막 하이픈 사이를 가린다"는 규칙은 하이픈 없는 입력에서 아무것도 가리지 못하는 사고로 이어집니다. 숫자 순번 기준이면 형식과 무관하게 같은 개수의 숫자가 노출됩니다.</li>
+<li><strong>두 번 순회</strong>: 뒤에서 4자리를 판단하려면 전체 숫자 개수를 먼저 알아야 하므로 1차로 세고 2차로 마스킹합니다.</li>
+<li><strong>버퍼 크기 검사</strong>: remove_hyphen은 쓰기 직전마다 <code>n + 1 &gt;= size</code>를 검사해 '\0' 자리까지 확보합니다. mask_account는 결과 길이가 원본과 같으므로 시작할 때 한 번만 검사합니다.</li>
+<li><strong>실패 시 dst를 빈 문자열로</strong>: 오류가 나도 dst가 쓰레기나 반쯤 만들어진 값으로 남지 않게 합니다. 호출자가 실수로 dst를 출력해도 안전합니다.</li>
+<li><strong>가릴 것이 없으면 거부</strong>: 숫자가 7개 이하인데 "마스킹 성공"으로 원본을 그대로 돌려주면 개인정보가 노출됩니다. 보안 기능은 애매할 때 실패하는 쪽이 안전합니다(fail-safe).</li>
+</ul>
+</div>
+
+<div class="box fin"><p class="box-title" data-tag="금융 실무">은행 시스템에서는 — 개인정보·금융정보 마스킹 의무</p>
+<p>계좌번호, 카드번호, 주민등록번호 같은 정보는 관련 법령과 금융권 보안 가이드에 따라 화면 출력·로그·출력물에서 일부를 가려야 합니다. 예를 들어 카드번호는 흔히 "1234-56**-****-7890"처럼 앞 6자리와 뒤 4자리만 남기는 방식이 쓰이고(PCI DSS 기준), 계좌번호·전화번호는 기관별 표준 규칙을 따릅니다. 실무에서 마스킹 함수는 ① 공통 모듈 하나로 만들어 전 시스템이 같은 규칙을 쓰게 하고, ② 로그 출력 함수 내부에서 자동 적용하며, ③ 원본 버퍼는 사용 후 <code>memset</code>으로 지워 메모리 덤프에 남지 않게 합니다. 특히 "디버깅용으로 전문 전체를 로그에 찍는" 코드가 운영에 반영되어 계좌번호가 평문으로 남는 사고가 감사에서 자주 지적되므로, 코드 리뷰와 정적 분석에서 중점적으로 확인합니다.</p>
+</div>
+
+<div class="ex"><p class="ex-title">예제 12-3 <span class="lv">난이도 ★★☆</span></p>
+<p>숫자만으로 된 계좌번호 "110234567890"을 받아 "3-3-나머지" 형식의 하이픈을 넣는 함수 <code>int format_account(const char *digits, char *dst, size_t size)</code>를 작성하세요. 결과는 "110-234-567890"입니다.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>원본 길이 n에 하이픈 2개가 더해지므로 결과 길이는 n + 2, 버퍼는 n + 3바이트 이상 필요합니다. 인덱스 3과 6 앞에 하이픈을 넣으며 복사합니다.</p>
+<figure class="code good"><figcaption>정답 코드</figcaption><pre><code class="language-c">int format_account(const char *digits, char *dst, size_t size)
+{
+    size_t n = strlen(digits), i, j = 0;
+    if (n &lt; 7) return -1;                     /* 3-3-1 이상이어야 의미 있음 */
+    if (n + 3 &gt; size) return -2;              /* 하이픈 2개 + '\0' */
+    for (i = 0; i &lt; n; i++) {
+        if (!isdigit((unsigned char)digits[i])) return -1;
+        if (i == 3 || i == 6) dst[j++] = '-';
+        dst[j++] = digits[i];
+    }
+    dst[j] = '\0';
+    return 0;
+}</code></pre></figure>
+</details></div>
+
+<h2 id="summary">핵심 정리</h2>
+<ul class="summary-list">
+<li>C의 문자열은 '\0'으로 끝나는 char 배열이며, 함수에는 첫 글자의 주소로 전달됩니다. 문자열 함수는 '\0'을 만날 때까지 처리하므로 널 종료가 깨지면 UB입니다.</li>
+<li>문자열 리터럴은 정적 저장 기간을 가진 이름 없는 char 배열로, 보통 읽기 전용 영역(.rodata)에 저장됩니다. 수정하면 UB이며 실제로는 페이지 보호 위반으로 segfault가 납니다. 리터럴을 가리키는 포인터는 <code>const char *</code>로 선언합니다.</li>
+<li><code>char s[] = "..."</code>는 수정 가능한 복사본(sizeof = 길이 + 1), <code>const char *s = "..."</code>는 리터럴을 가리키는 포인터(sizeof = 8)입니다. 배열에는 대입이 불가하고, 포인터는 다른 문자열을 가리킬 수 있습니다.</li>
+<li>문자열 내용 비교는 <code>strcmp(a, b) == 0</code>으로 합니다. <code>==</code>는 주소 비교이며, 리터럴 풀링 때문에 우연히 같게 나올 수 있습니다.</li>
+<li>2차원 char 배열은 고정 칸·수정 가능, 포인터 배열은 가변 길이·리터럴 테이블에 적합합니다.</li>
+<li>strlen은 실행 시간 O(n), sizeof는 컴파일 시간 크기입니다. 루프 조건에 strlen을 반복 호출하지 않습니다.</li>
+<li>strcpy·strcat·sprintf·gets는 대상 크기를 검사하지 않습니다. strncpy는 널 종료를 보장하지 않고, strncat의 n은 덧붙일 글자 수입니다. snprintf는 항상 널 종료하고 필요한 길이를 반환하므로 잘림을 검출할 수 있습니다.</li>
+<li>strchr·strrchr·strstr은 못 찾으면 NULL을 반환합니다. strtok은 원본을 수정하고 정적 상태를 가지며 빈 필드를 건너뜁니다(strtok_r, strsep 대안).</li>
+<li>atoi는 오류를 알릴 수 없고 범위 초과 시 UB입니다. strtol/strtoll로 end 포인터와 errno를 검사해 형식·범위 오류를 잡습니다.</li>
+<li>버퍼 오버플로는 이웃 변수와 반환 주소를 덮어써 보안 취약점이 됩니다. fgets + strcspn, snprintf, 폭 지정 scanf, 길이 검사로 예방합니다.</li>
+<li>계좌번호 마스킹은 숫자 순번 기준으로, 버퍼 크기를 검사하고, 실패 시 안전한 쪽(fail-safe)으로 동작하게 작성합니다.</li>
+</ul>
+
+<h2 id="interview">CS 면접 단골 질문</h2>
+<div class="box iv"><p class="box-title" data-tag="면접">이 장에서 나오는 면접 질문</p>
+<details><summary>Q1. char str[] = "abc"와 char *str = "abc"의 차이는?</summary>
+<p>첫 번째는 4바이트 배열을 만들고 리터럴의 내용을 복사하므로 지역 변수라면 스택에 수정 가능한 복사본이 생기고, sizeof는 4입니다. 두 번째는 읽기 전용 영역에 있는 리터럴의 주소를 포인터 변수에 저장하므로 sizeof는 포인터 크기 8이고, 글자를 수정하면 미정의 동작으로 보통 segfault가 납니다. 또 배열 이름에는 다른 문자열을 대입할 수 없지만 포인터는 다른 문자열을 가리키게 바꿀 수 있습니다.</p>
+<p><em>꼬리 질문</em>: "왜 segfault가 나나요?" → 리터럴이 .rodata에 있고, OS가 그 페이지를 읽기 전용으로 매핑해 MMU가 쓰기를 차단하기 때문이라고 답합니다.</p></details>
+
+<details><summary>Q2. 프로세스의 메모리 구조(코드, 데이터, BSS, 힙, 스택)를 설명하고, 문자열 리터럴·전역 변수·지역 변수·malloc 메모리는 각각 어디에 있나요?</summary>
+<p>낮은 주소부터 실행 코드가 있는 텍스트 영역, 읽기 전용 상수(.rodata), 초기화된 전역·정적 변수의 데이터 영역, 0으로 초기화되는 전역·정적 변수의 BSS, 위로 자라는 힙, 높은 주소에서 아래로 자라는 스택이 있습니다. 문자열 리터럴은 .rodata, 초기값이 있는 전역 변수는 데이터, 초기값이 없는 전역 변수는 BSS, 지역 변수는 스택, malloc으로 받은 메모리는 힙에 있습니다.</p></details>
+
+<details><summary>Q3. strcpy와 strncpy의 차이와 각각의 문제점은?</summary>
+<p>strcpy는 원본의 '\0'까지 복사하지만 대상 버퍼의 크기를 검사하지 않아 버퍼 오버플로가 생길 수 있습니다. strncpy는 최대 n바이트만 복사하지만, 원본이 n바이트 이상이면 '\0'을 붙이지 않아 널 종료되지 않은 문자열을 만들고, 원본이 짧으면 남은 공간을 모두 0으로 채워 비효율적입니다. 그래서 strncpy 후 마지막 바이트에 직접 '\0'을 넣거나, snprintf나 길이 검사 후 memcpy를 쓰는 방식을 권장합니다.</p></details>
+
+<details><summary>Q4. 버퍼 오버플로란 무엇이고, 어떻게 방어하나요?</summary>
+<p>할당된 버퍼 크기를 넘어 데이터를 써서 인접 메모리를 덮어쓰는 현상입니다. 스택에서는 이웃 지역 변수나 반환 주소를 변조해 프로그램 흐름을 탈취할 수 있습니다. 방어는 코드 수준에서 크기를 받는 안전한 함수 사용과 입력 길이 검증, 컴파일러 수준에서 스택 카나리, OS 수준에서 ASLR과 NX(DEP) 같은 기법이 있습니다. 정적 분석과 AddressSanitizer로 사전에 찾아내는 것도 중요합니다.</p></details>
+
+<details><summary>Q5. strlen의 시간 복잡도는? sizeof와의 차이는?</summary>
+<p>strlen은 '\0'을 만날 때까지 한 바이트씩 세므로 O(n)이고 실행 시간에 계산됩니다. sizeof는 컴파일 시간에 자료형의 크기를 계산하는 연산자로, 배열이면 배열 전체 크기('\0'과 남은 공간 포함), 포인터면 포인터 크기를 돌려줍니다. 그래서 루프 조건에 strlen을 두면 O(n²)이 될 수 있어 미리 길이를 구해 두는 것이 좋습니다.</p></details>
+
+<details><summary>Q6. strcmp의 반환값과 두 문자열을 ==로 비교하면 안 되는 이유는?</summary>
+<p>strcmp는 첫 번째로 다른 문자를 unsigned char로 비교해 첫 문자열이 사전 순으로 앞서면 음수, 같으면 0, 뒤면 양수를 반환합니다. -1과 1로 정해진 것이 아니므로 부호로 판단해야 합니다. ==는 두 포인터의 주소를 비교하므로 내용이 같아도 다른 메모리에 있으면 거짓이고, 컴파일러의 리터럴 풀링 때문에 우연히 참이 될 수도 있어 신뢰할 수 없습니다.</p></details>
+
+<details><summary>Q7. atoi와 strtol의 차이는?</summary>
+<p>atoi는 변환 실패를 알릴 방법이 없어 "abc"와 "0"이 모두 0이 되고, 범위를 넘는 값은 미정의 동작입니다. strtol은 변환이 멈춘 위치를 end 포인터로 돌려주어 숫자가 없거나 뒤에 잘못된 문자가 있는지 확인할 수 있고, 범위를 넘으면 LONG_MAX나 LONG_MIN을 반환하며 errno를 ERANGE로 설정합니다. 진법도 지정할 수 있습니다. 그래서 입력 검증이 중요한 시스템에서는 strtol 계열을 씁니다.</p></details>
+
+<details><summary>Q8. strtok이 스레드 안전하지 않은 이유와 대안은?</summary>
+<p>strtok은 다음 토큰의 시작 위치를 함수 내부의 정적 변수에 저장해 두고, NULL을 넘긴 다음 호출에서 그 위치부터 이어서 처리합니다. 여러 스레드나 중첩된 호출이 같은 정적 변수를 공유하므로 서로의 위치를 덮어써 결과가 꼬입니다. 또 원본 문자열을 수정합니다. 대안으로 상태를 호출자 변수에 저장하는 POSIX strtok_r이나 윈도우의 strtok_s, 빈 필드를 보존하는 strsep을 쓰거나 strchr로 직접 파싱합니다.</p></details>
+
+<details><summary>Q9. gets 함수는 왜 표준에서 삭제되었나요?</summary>
+<p>gets는 버퍼 크기를 인자로 받지 않아 입력이 버퍼보다 길면 무조건 오버플로가 발생하고, 프로그래머가 이를 막을 방법이 원천적으로 없습니다. 실제 모리스 웜이 gets 취약점을 이용했을 정도로 위험해 C99에서 사용 중단 권고, C11에서 표준에서 완전히 삭제되었습니다. 대신 크기를 받는 fgets를 사용하고, 저장되는 개행 문자를 처리해야 합니다.</p></details>
+
+<details><summary>Q10. 문자열을 뒤집는 함수를 구현해 보세요. (화이트보드 단골)</summary>
+<p>strlen으로 길이를 구한 뒤 양 끝을 가리키는 두 포인터를 두고, 왼쪽이 오른쪽보다 작은 동안 두 글자를 교환하며 가운데로 이동합니다. 추가 메모리 없이 O(n)입니다. 길이가 0이면 끝 포인터 계산이 범위를 벗어나므로 먼저 처리해야 하고, 리터럴을 넘기면 수정할 수 없으므로 배열을 넘겨야 한다는 점, UTF-8 한글은 바이트 단위로 뒤집으면 깨진다는 점까지 언급하면 좋습니다.</p></details>
+</div>
+
+<h2 id="exercises">연습문제</h2>
+
+<div class="ex"><p class="ex-title">연습문제 12-1 sizeof와 strlen <span class="lv">난이도 ★☆☆</span></p>
+<p>64비트 리눅스에서 출력값을 쓰세요.</p>
+<figure class="code"><pre><code class="language-c">char a[10] = "WON";
+char b[] = "WON";
+const char *c = "WON";
+printf("%zu %zu %zu %zu %zu %zu\n", sizeof a, strlen(a), sizeof b, strlen(b), sizeof c, strlen(c));</code></pre></figure>
+<details><summary>정답과 해설 보기</summary>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>10 3 4 3 8 3</pre></figure>
+<p>a는 크기를 10으로 지정했으므로 10, b는 초기값에 맞춰 3 + 1 = 4, c는 포인터 8입니다. strlen은 모두 '\0' 전까지인 3입니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 12-2 출력 예측 <span class="lv">난이도 ★☆☆</span></p>
+<figure class="code"><pre><code class="language-c">const char *s = "DEPOSIT";
+printf("%s %c %s %c\n", s + 3, *(s + 1), s + strlen(s) - 3, s[strlen(s)]  == '\0' ? 'Y' : 'N');</code></pre></figure>
+<details><summary>정답과 해설 보기</summary>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>OSIT E SIT Y</pre></figure>
+<p>s + 3은 'O'부터 → "OSIT". *(s + 1)은 'E'. strlen(s) = 7이므로 s + 4는 'S'부터 → "SIT". s[7]은 '\0'이므로 Y.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 12-3 버그 찾기 <span class="lv">난이도 ★★☆</span></p>
+<p>다음 코드의 문제를 모두 찾고 고치세요.</p>
+<figure class="code bad"><pre><code class="language-c">char *code = "wd";
+char name[4];
+code[0] = 'W';
+strcpy(name, "WITHDRAW");
+if (code == "WD") printf("출금\n");</code></pre></figure>
+<details><summary>정답과 해설 보기</summary>
+<ol>
+<li><code>code[0] = 'W'</code>: 리터럴 수정 → UB(segfault). <code>char code[] = "wd";</code>로 배열을 만들어야 합니다.</li>
+<li><code>strcpy(name, "WITHDRAW")</code>: 9바이트를 4바이트 배열에 → 오버플로. 버퍼를 9 이상으로 키우거나 snprintf를 씁니다.</li>
+<li><code>code == "WD"</code>: 주소 비교. <code>strcmp(code, "WD") == 0</code>으로 고칩니다.</li>
+</ol>
+<figure class="code good"><figcaption>정답 코드</figcaption><pre><code class="language-c">char code[] = "wd";
+char name[16];
+code[0] = 'W';
+code[1] = 'D';
+snprintf(name, sizeof name, "%s", "WITHDRAW");
+if (strcmp(code, "WD") == 0) printf("출금\n");</code></pre></figure>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 12-4 strncpy 결과 <span class="lv">난이도 ★★☆</span></p>
+<p><code>char d[6] = "XXXXX"; strncpy(d, "AB", 4);</code> 실행 후 d의 여섯 바이트를 쓰세요. 또 <code>strncpy(d, "ABCDEFG", 6);</code> 실행 후 <code>printf("%s", d)</code>가 위험한 이유를 쓰세요.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>첫 번째: 'A' 'B' '\0' '\0' 'X' '\0'. 원본이 짧으므로 n = 4까지 '\0'으로 채우고, 5번째('X')와 6번째(원래의 '\0')는 그대로입니다. 두 번째: "ABCDEF" 6바이트만 복사되고 '\0'이 없으므로 printf가 d 뒤의 메모리까지 읽어 UB입니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 12-5 직접 구현 — strcat <span class="lv">난이도 ★★☆</span></p>
+<p>버퍼 크기를 받아 안전하게 이어 붙이는 <code>int safe_cat(char *dst, size_t size, const char *src)</code>를 작성하세요. 전부 붙었으면 0, 잘렸으면 1, dst가 이미 널 종료되지 않았으면(size 안에 '\0' 없음) -1을 반환합니다.</p>
+<details><summary>정답과 해설 보기</summary>
+<figure class="code good"><figcaption>정답 코드</figcaption><pre><code class="language-c">int safe_cat(char *dst, size_t size, const char *src)
+{
+    size_t len = 0;
+    while (len &lt; size &amp;&amp; dst[len] != '\0') len++;   /* size 안에서만 '\0' 찾기 */
+    if (len == size) return -1;                       /* 이미 깨진 문자열 */
+    while (*src != '\0' &amp;&amp; len + 1 &lt; size)
+        dst[len++] = *src++;
+    dst[len] = '\0';
+    return (*src != '\0') ? 1 : 0;
+}</code></pre></figure>
+<p>strlen(dst)를 그냥 쓰지 않고 size 범위 안에서만 '\0'을 찾는 것이 핵심입니다. dst가 이미 널 종료되지 않았다면 strlen 자체가 버퍼 밖을 읽기 때문입니다(BSD strlcat과 같은 발상).</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 12-6 문자열 뒤집기 <span class="lv">난이도 ★★☆</span></p>
+<p>ASCII 문자열을 제자리에서 뒤집는 <code>void str_reverse(char *s)</code>를 두 포인터로 작성하세요. "ABC123" → "321CBA".</p>
+<details><summary>정답과 해설 보기</summary>
+<figure class="code good"><figcaption>정답 코드</figcaption><pre><code class="language-c">void str_reverse(char *s)
+{
+    char *l = s, *r, t;
+    size_t n = strlen(s);
+    if (n &lt; 2) return;          /* 빈 문자열이면 s + n - 1 계산이 범위 밖 */
+    r = s + n - 1;              /* 마지막 글자 ('\0' 직전) */
+    while (l &lt; r) {
+        t = *l; *l = *r; *r = t;
+        l++; r--;
+    }
+}</code></pre></figure>
+<p>10장의 배열 뒤집기와 같지만 길이를 strlen으로 구하고, '\0'은 제자리에 둡니다. 리터럴을 넘기면 안 되고(<code>char s[] = "ABC123";</code>로 호출), UTF-8 한글은 바이트 단위로 뒤집으면 깨집니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 12-7 strtok 결과 <span class="lv">난이도 ★★☆</span></p>
+<p><code>char s[] = "KRW,,USD, ,JPY";</code>를 <code>strtok(s, ",")</code>로 나누면 토큰은 몇 개이고 각각 무엇인가요? 빈 필드를 보존하려면 어떻게 해야 하나요?</p>
+<details><summary>정답과 해설 보기</summary>
+<p>토큰은 <strong>4개</strong>: "KRW", "USD", " "(공백 한 칸), "JPY". 연속된 쉼표 ",,"는 하나의 구분자로 취급되어 빈 필드가 사라지고, " "는 쉼표가 아니므로 공백 한 칸짜리 토큰이 됩니다. 빈 필드를 보존하려면 strchr로 쉼표 위치를 찾아 직접 자르거나 POSIX strsep을 사용합니다. CSV 전문 처리에서 필드 개수가 달라지면 이후 모든 필드가 밀리므로 strtok은 부적합합니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 12-8 snprintf 반환값 <span class="lv">난이도 ★★☆</span></p>
+<p><code>char b[8]; int n = snprintf(b, sizeof b, "%lld원", 1234567LL);</code> 실행 후 n과 b의 내용을 쓰세요(UTF-8 기준, '원'은 3바이트).</p>
+<details><summary>정답과 해설 보기</summary>
+<p>만들려던 문자열은 "1234567원" = 7 + 3 = 10바이트이므로 <strong>n = 10</strong>입니다. b에는 7바이트 + '\0'만 들어가므로 "1234567"이 저장되고 '원'은 통째로 잘립니다. 만약 경계가 한글 중간에 걸리면 UTF-8 바이트가 반쯤 잘려 깨진 글자가 남습니다. 한글이 들어가는 버퍼는 바이트 수로 넉넉히 잡고 반드시 반환값을 검사해야 합니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 12-9 strtoll 검증 <span class="lv">난이도 ★★☆</span></p>
+<p>12-2-9의 <code>parse_ll</code>에 다음을 입력하면 반환값은? (1) "-500" (2) "0x1F" (3) "  42  " (4) "" (5) "12 34"</p>
+<details><summary>정답과 해설 보기</summary>
+<p>(1) 0, 값 -500 — 부호를 처리합니다. 금액이라면 별도로 음수를 거부해야 합니다. (2) -3 — 10진수로 "0"까지만 읽고 'x'에서 멈춥니다. (3) 0, 값 42 — 앞 공백은 strtoll이, 뒤 공백은 우리 코드가 건너뜁니다. (4) -1 — 숫자 없음. (5) -3 — "12" 뒤 공백을 건너뛴 뒤 '3'이 남아 있습니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 12-10 fgets 처리 <span class="lv">난이도 ★★☆</span></p>
+<p><code>char buf[6]; fgets(buf, sizeof buf, stdin);</code>에서 사용자가 "KOREA BANK⏎"를 입력했습니다. buf의 내용과, 다음 fgets 호출이 읽는 내용을 쓰세요.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>fgets는 최대 5바이트를 읽고 '\0'을 붙이므로 buf = "KOREA"('\n' 없음). 입력 버퍼에는 " BANK\n"이 남아, 다음 fgets(같은 크기)는 " BANK"를, 그다음은 "\n"을 읽습니다. buf에 '\n'이 없다는 것으로 "줄이 잘렸다"는 것을 감지하고, 남은 입력을 버리거나 오류 처리해야 합니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 12-11 금융 응용 — 카드번호 마스킹 <span class="lv">난이도 ★★★</span></p>
+<p>"1234-5678-9012-3456"처럼 하이픈이 있거나 없는 16자리 카드번호를 받아, 앞 6자리와 뒤 4자리만 남기고 가리는 함수를 이 장의 mask_account를 일반화하여 작성하세요(<code>int mask_digits(const char *src, char *dst, size_t size, int head, int tail)</code>). 결과는 "1234-56**-****-3456"입니다.</p>
+<details><summary>정답과 해설 보기</summary>
+<figure class="code good"><figcaption>정답 코드</figcaption><pre><code class="language-c">int mask_digits(const char *src, char *dst, size_t size, int head, int tail)
+{
+    size_t len = strlen(src), i;
+    int digits = 0, idx = 0;
+    if (len + 1 &gt; size) return -2;
+    for (i = 0; i &lt; len; i++)
+        if (isdigit((unsigned char)src[i])) digits++;
+    if (digits &lt;= head + tail) return -1;
+    for (i = 0; i &lt; len; i++) {
+        unsigned char c = (unsigned char)src[i];
+        if (isdigit(c)) {
+            dst[i] = (idx &lt; head || idx &gt;= digits - tail) ? (char)c : '*';
+            idx++;
+        } else {
+            dst[i] = (char)c;
+        }
+    }
+    dst[len] = '\0';
+    return 0;
+}
+/* mask_digits("1234-5678-9012-3456", out, sizeof out, 6, 4) → "1234-56**-****-3456" */</code></pre></figure>
+<p>숫자 16개 중 순번 0~5(123456)와 12~15(3456)가 남고 6~11(789012)이 가려집니다. 노출 자릿수를 매개변수로 빼면 계좌번호(3, 4), 카드번호(6, 4), 전화번호 등 규칙이 다른 정보에 하나의 함수를 재사용할 수 있습니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 12-12 금융 응용 — 고정 길이 필드 채우기 <span class="lv">난이도 ★★★</span></p>
+<p>전문의 문자 필드는 "왼쪽 정렬, 남는 자리는 공백, '\0' 없음" 규칙입니다. <code>void put_field(char *field, size_t width, const char *src)</code>를 작성하세요. 예: width 10, "HONG" → "HONG      "(공백 6개, 널 종료 없음). 원본이 더 길면 width만큼 자릅니다.</p>
+<details><summary>정답과 해설 보기</summary>
+<figure class="code good"><figcaption>정답 코드</figcaption><pre><code class="language-c">#include &lt;string.h&gt;
+
+void put_field(char *field, size_t width, const char *src)
+{
+    size_t len = strlen(src);
+    if (len &gt; width) len = width;     /* 넘치면 자른다 */
+    memset(field, ' ', width);        /* 먼저 전체를 공백으로 */
+    memcpy(field, src, len);          /* 앞부분에 내용 복사 ('\0'은 복사하지 않음) */
+}
+/* char msg[100]; put_field(msg + 20, 10, "HONG"); 처럼 전문 버퍼의 오프셋에 직접 쓴다 */</code></pre></figure>
+<p>strcpy나 snprintf를 쓰면 '\0'이 필드 뒤의 다음 필드 첫 바이트를 덮어써 버립니다. 고정 길이 전문에서는 "문자열"이 아니라 "바이트 영역"으로 다뤄야 하므로 memset/memcpy가 정답입니다. 다만 UTF-8 한글이 width 경계에서 잘리면 깨진 바이트가 남으므로, 실무에서는 바이트 경계가 글자 중간인지 확인하는 로직을 추가합니다.</p>
+</details></div>
+
+</main>
+<aside class="rail" aria-label="이 페이지 목차"></aside>
+</div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-c.min.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>

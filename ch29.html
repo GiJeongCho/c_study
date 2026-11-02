@@ -1,0 +1,1228 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ch29 DB 연동과 트랜잭션 · C언어 금융 IT 마스터</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+KR:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-ch="ch29">
+<header class="topbar">
+  <button class="menu-btn" type="button" aria-expanded="false" aria-controls="sidebar">목차</button>
+  <a class="brand" href="index.html"><b>C</b>금융 IT 마스터</a>
+  <span class="where"></span>
+  <span class="progress"></span>
+</header>
+<div class="layout">
+<nav id="sidebar" class="sidebar" aria-label="과정 목차"></nav>
+<div class="page">
+<main class="content">
+
+<header class="ch-head">
+  <p class="eyebrow">PART 2 · 금융 IT 베테랑 트랙 · CHAPTER</p>
+  <div class="bignum">29</div>
+  <h1>DB 연동과 트랜잭션</h1>
+  <p class="lede">은행의 진짜 돈은 C 프로그램의 변수가 아니라 데이터베이스의 원장 테이블에 있습니다. 계정계 C 프로그램의 대부분은 "DB에서 읽고, 계산하고, DB에 쓰고, 커밋한다"입니다. 이 장에서는 C 코드 안에 SQL을 직접 쓰는 Embedded SQL(Pro*C)과, 돈이 사라지거나 두 번 생기지 않게 지켜 주는 트랜잭션, 그리고 수천 건의 거래를 동시에 처리하는 TP 모니터 구조를 익힙니다.</p>
+  <div class="goals"><p class="goals-title">이 장에서 배울 것</p><ul>
+    <li>Pro*C 전처리 과정(.pc → .c → 실행 파일)과 EXEC SQL 문법</li>
+    <li>호스트 변수, 지시자 변수로 NULL 다루기, VARCHAR 타입</li>
+    <li>SQLCA와 sqlcode로 모든 SQL의 성공·실패를 검사하는 습관</li>
+    <li>커서 FETCH 루프와 배열 FETCH로 배치 성능 끌어올리기</li>
+    <li>동적 SQL과 바인드 변수, SQL 인젝션 방지</li>
+    <li>ACID, COMMIT/ROLLBACK, 격리 수준과 이상 현상</li>
+    <li>SELECT FOR UPDATE(비관적 락)와 버전 컬럼(낙관적 락)</li>
+    <li>2단계 커밋, TP 모니터(서비스, tpcall, 트랜잭션 경계)와 계정계 온라인 구조, 보상 트랜잭션</li>
+  </ul></div>
+</header>
+
+<div class="box tip"><p class="box-title" data-tag="잠깐">이 장의 코드에 대하여</p>
+<p>Pro*C와 TP 모니터는 상용 제품(Oracle 데이터베이스와 프리컴파일러, Tuxedo 계열 TP 모니터)이 설치된 환경에서만 빌드됩니다. 이 장의 코드는 Oracle 문법을 기준으로 개념적으로 정확하게 작성했지만, 여러분의 PC에서 바로 컴파일되지는 않을 수 있습니다. 대신 각 코드가 <strong>전처리 후 어떤 C 코드가 되는지</strong>, <strong>DB에서 어떤 일이 벌어지는지</strong>를 그림과 함께 자세히 설명합니다. 실무에 들어가면 회사의 개발 서버에서 같은 코드를 그대로 써 볼 수 있습니다. 테이블은 다음 두 개를 가정합니다.</p>
+<figure class="code"><figcaption>예제 테이블 (Oracle DDL)</figcaption>
+<pre><code class="language-c">CREATE TABLE ACCT_MST (              -- 계좌 원장(마스터)
+    ACCT_NO     VARCHAR2(14) PRIMARY KEY,   -- 계좌번호
+    CUST_NM     VARCHAR2(40) NOT NULL,      -- 고객명
+    BAL         NUMBER(15)   NOT NULL,      -- 잔액(원)
+    STAT_CD     CHAR(2)      NOT NULL,      -- 상태: '01' 정상, '02' 정지, '09' 해지
+    LAST_TX_DT  CHAR(8),                    -- 최종거래일 YYYYMMDD (NULL 가능)
+    VER         NUMBER(10)   DEFAULT 0      -- 낙관적 락용 버전
+);
+
+CREATE TABLE TX_HIST (               -- 거래내역
+    TX_DT       CHAR(8),
+    TX_SEQ      NUMBER(10),
+    ACCT_NO     VARCHAR2(14),
+    TX_TP       CHAR(2),                    -- '10' 입금, '20' 출금
+    TX_AMT      NUMBER(15),
+    AFT_BAL     NUMBER(15),                 -- 거래 후 잔액
+    GUID        VARCHAR2(32),               -- 거래 추적 ID
+    CONSTRAINT PK_TX_HIST PRIMARY KEY (TX_DT, TX_SEQ)
+);</code></pre></figure>
+</div>
+
+<h2 id="s29-1"><span class="num">29-1</span>Embedded SQL(Pro*C)</h2>
+
+<p>C 프로그램이 데이터베이스를 쓰는 방법은 크게 두 가지입니다. 하나는 OCI(Oracle Call Interface)나 ODBC 같은 <strong>함수 호출 API</strong>로, SQL 문자열을 만들어 라이브러리 함수에 넘기고, 결과를 함수로 하나씩 꺼내는 방식입니다. 다른 하나는 C 소스 안에 SQL을 <strong>그대로 섞어 쓰는</strong> Embedded SQL입니다. Oracle의 Embedded SQL 구현이 <strong>Pro*C/C++</strong>이며, 국내 금융권 계정계 C 프로그램의 상당수가 이 방식으로 작성되어 있습니다. SQL을 SQL답게 읽을 수 있고, C 변수와 컬럼을 직접 연결할 수 있어 업무 로직이 한눈에 보이기 때문입니다.</p>
+
+<h3 id="s29-1-1">Pro*C 전처리 과정: .pc에서 실행 파일까지</h3>
+
+<p>C 컴파일러는 <code>EXEC SQL SELECT ...</code> 같은 문장을 이해하지 못합니다. 그래서 컴파일 전에 <strong>프리컴파일러(precompiler)</strong> <code>proc</code>가 <code>.pc</code> 파일을 읽어, EXEC SQL 문장을 Oracle 런타임 라이브러리 함수 호출(<code>sqlcxt</code> 등)로 바꾼 순수 C 파일(<code>.c</code>)을 만듭니다. 그다음은 우리가 아는 일반 C 빌드 과정입니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 720 230" width="720" role="img" aria-label="Pro*C 빌드 과정">
+  <rect class="hl2" x="10" y="60" width="110" height="60" rx="6"/>
+  <text x="65" y="85" text-anchor="middle" class="bold mono">acct.pc</text>
+  <text x="65" y="105" text-anchor="middle" class="small mute">C + EXEC SQL</text>
+  <path class="arrow" d="M120 90 H 160"/>
+  <rect class="hl" x="160" y="55" width="110" height="70" rx="6"/>
+  <text x="215" y="82" text-anchor="middle" class="bold mono">proc</text>
+  <text x="215" y="102" text-anchor="middle" class="small">프리컴파일러</text>
+  <path class="arrow" d="M270 90 H 310"/>
+  <rect class="box" x="310" y="60" width="110" height="60" rx="6"/>
+  <text x="365" y="85" text-anchor="middle" class="bold mono">acct.c</text>
+  <text x="365" y="105" text-anchor="middle" class="small mute">순수 C 코드</text>
+  <path class="arrow" d="M420 90 H 460"/>
+  <rect class="box" x="460" y="55" width="100" height="70" rx="6"/>
+  <text x="510" y="82" text-anchor="middle" class="bold mono">gcc/cc</text>
+  <text x="510" y="102" text-anchor="middle" class="small">컴파일·링크</text>
+  <path class="arrow" d="M560 90 H 600"/>
+  <rect class="hl" x="600" y="60" width="110" height="60" rx="6"/>
+  <text x="655" y="85" text-anchor="middle" class="bold mono">acct</text>
+  <text x="655" y="105" text-anchor="middle" class="small mute">실행 파일</text>
+  <rect class="box" x="440" y="160" width="140" height="44" rx="6"/>
+  <text x="510" y="180" text-anchor="middle" class="small mono">libclntsh.so</text>
+  <text x="510" y="196" text-anchor="middle" class="small mute">Oracle 클라이언트 라이브러리</text>
+  <path class="arrow-m" d="M510 160 V 125"/>
+  <text x="215" y="160" text-anchor="middle" class="small mute">EXEC SQL → sqlcxt() 호출 등으로 치환</text>
+  <text x="215" y="178" text-anchor="middle" class="small mute">호스트 변수 주소·길이를 구조체로 전달</text>
+  <text x="65" y="30" text-anchor="middle" class="small acc">개발자가 작성</text>
+  <text x="365" y="30" text-anchor="middle" class="small acc">자동 생성(직접 수정 금지)</text>
+</svg>
+<figcaption>그림 29-1 Pro*C 빌드 과정. 프리컴파일러가 EXEC SQL 문장을 라이브러리 호출로 바꾼 C 파일을 만들고, 그다음은 일반 C 빌드입니다.</figcaption>
+</figure>
+
+<figure class="code"><figcaption>빌드 명령 예 (환경마다 경로·옵션은 다름)</figcaption>
+<pre><code class="language-bash"># 1) 프리컴파일: .pc → .c
+proc iname=acct.pc oname=acct.c \
+     include=$ORACLE_HOME/precomp/public \
+     sqlcheck=semantics userid=$DB_CHECK_USER \
+     code=ANSI_C mode=ORACLE
+
+# 2) 컴파일·링크
+gcc -Wall -g -c acct.c -I$ORACLE_HOME/precomp/public
+gcc -o acct acct.o -L$ORACLE_HOME/lib -lclntsh</code></pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 프리컴파일러가 필요할까?</p>
+<p>SQL과 C는 서로 다른 언어입니다. DB 서버는 SQL 문자열을 받아 파싱하고, 실행 계획을 세우고, 결과를 네트워크로 돌려줍니다. C 프로그램이 이를 하려면 "이 SQL 문자열을 보내고, 바인드 변수 1번은 이 메모리 주소의 8바이트 정수이고, 결과 1번 컬럼은 저 주소에 최대 40바이트로 받아라" 같은 정보를 런타임 라이브러리에 일일이 알려 줘야 합니다. OCI로 직접 쓰면 SELECT 하나에 수십 줄의 함수 호출이 필요합니다. 프리컴파일러는 이 지루하고 실수하기 쉬운 코드를 자동으로 생성해 줍니다. <code>sqlcheck=semantics</code>를 주면 빌드 시점에 DB에 접속해 테이블·컬럼 이름과 타입까지 검사하므로 오타가 운영에서야 발견되는 일을 줄여 줍니다. 생성된 <code>.c</code> 파일은 사람이 읽기 어렵고 다시 생성되므로 <strong>절대 직접 수정하지 않습니다</strong>.</p>
+</div>
+
+<h3 id="s29-1-2">EXEC SQL과 호스트 변수</h3>
+
+<p>C 변수 중 SQL 문장 안에서 쓰는 변수를 <strong>호스트 변수(host variable)</strong>라고 합니다. SQL 안에서는 이름 앞에 콜론(<code>:</code>)을 붙여 C 변수임을 표시합니다. 호스트 변수는 <code>BEGIN DECLARE SECTION</code>과 <code>END DECLARE SECTION</code> 사이에 선언하는 것이 전통적인 방식입니다(최신 Pro*C는 옵션에 따라 생략도 가능하지만, 명시하는 편이 이식성과 가독성이 좋습니다).</p>
+
+<figure class="code"><figcaption>acct_inq.pc — 잔액 조회 (단건 SELECT)</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+#include &lt;stdlib.h&gt;
+EXEC SQL INCLUDE SQLCA;                 /* sqlca 구조체: 모든 SQL의 결과 상태 */
+
+EXEC SQL BEGIN DECLARE SECTION;
+    char      h_acct_no[15];            /* VARCHAR2(14) + 널 문자 */
+    char      h_cust_nm[41];            /* VARCHAR2(40) + 1 */
+    long long h_bal;                    /* NUMBER(15): 원 단위 정수 */
+    char      h_stat_cd[3];             /* CHAR(2) + 1 */
+EXEC SQL END DECLARE SECTION;
+
+/* 반환: 0 정상, 1 계좌 없음, -1 DB 오류 */
+int inquire_balance(const char *acct_no)
+{
+    snprintf(h_acct_no, sizeof h_acct_no, "%s", acct_no);
+
+    EXEC SQL SELECT CUST_NM, BAL, STAT_CD
+               INTO :h_cust_nm, :h_bal, :h_stat_cd     /* 결과를 받을 C 변수 */
+               FROM ACCT_MST
+              WHERE ACCT_NO = :h_acct_no;              /* 입력으로 쓰는 C 변수 */
+
+    if (sqlca.sqlcode == 1403) {                       /* NO DATA FOUND */
+        return 1;
+    } else if (sqlca.sqlcode != 0) {                   /* 그 밖의 오류 */
+        fprintf(stderr, "SELECT 오류 %d: %.*s\n", sqlca.sqlcode,
+                sqlca.sqlerrm.sqlerrml, sqlca.sqlerrm.sqlerrmc);
+        return -1;
+    }
+    printf("%s %s 잔액 %lld원 상태 %s\n", h_acct_no, h_cust_nm, h_bal, h_stat_cd);
+    return 0;
+}</code></pre></figure>
+
+<figure class="code out"><figcaption>실행 결과 (예)</figcaption><pre>11012345678901 홍길동 잔액 1520000원 상태 01</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 char 배열 크기를 컬럼 길이 + 1로 잡을까?</p>
+<p>Pro*C의 기본 설정(<code>char_map=charz</code>, MODE=ORACLE)에서 <code>char[n]</code> 호스트 변수는 <strong>널 종료 문자열</strong>로 취급됩니다. 컬럼 값을 받을 때 오른쪽을 공백으로 채우고 마지막에 <code>'\0'</code>을 붙입니다. 따라서 VARCHAR2(40)을 손실 없이 받으려면 41바이트가 필요합니다. 배열이 작으면 값이 잘리고(truncation), 지시자 변수가 없으면 경고 플래그만 남거나 오류가 됩니다. 한글은 DB 문자셋(AL32UTF8이면 한글 한 글자가 3바이트)에 따라 바이트 수가 달라지므로, <strong>컬럼 길이가 BYTE 단위인지 CHAR 단위인지</strong>까지 확인해 넉넉히 잡아야 합니다. 18장에서 배운 "문자열 버퍼에는 항상 널 문자 자리"가 DB에서도 그대로 적용되는 것입니다.</p>
+</div>
+
+<div class="box tip"><p class="box-title" data-tag="잠깐">NUMBER와 C 타입의 대응</p>
+<p>Oracle NUMBER는 최대 38자리 십진수입니다. 금액 컬럼 NUMBER(15)는 C의 <code>long long</code>(최대 약 9.2×10<sup>18</sup>)에 안전하게 들어갑니다. 소수가 있는 이율 같은 컬럼을 <code>double</code>로 받으면 부동소수점 오차가 생기므로(7장), 금융 계산에서는 이율을 "만분율 정수"로 저장하거나 문자열로 받아 고정소수점으로 처리하는 경우가 많습니다. <code>int</code>(4바이트)로 금액을 받으면 21억 원을 넘는 순간 오류(ORA-01455 등)나 오버플로가 나니 금액은 무조건 <code>long long</code>입니다.</p>
+</div>
+
+<h3 id="s29-1-3">지시자 변수로 NULL 처리하기</h3>
+
+<p>DB의 NULL은 "값이 없음"이라는 특별한 상태입니다. 그런데 C의 <code>char</code>나 <code>long long</code>에는 "값 없음"을 나타낼 방법이 없습니다. 0은 0원이라는 값이고, 빈 문자열도 값입니다. 그래서 Pro*C는 호스트 변수 옆에 <strong>지시자 변수(indicator variable)</strong>라는 <code>short</code> 변수를 짝지어 NULL 여부를 따로 알려 줍니다.</p>
+
+<figure class="diagram"><div class="mem">
+  <div class="cell hl"><span class="addr">h_last_dt</span><span class="val">"20261027"</span><span class="name">값</span></div>
+  <div class="cell hl"><span class="addr">i_last_dt</span><span class="val">0</span><span class="name">정상 값</span></div>
+  <div class="cell bad"><span class="addr">h_last_dt</span><span class="val">(쓰레기)</span><span class="name">값 무의미</span></div>
+  <div class="cell bad"><span class="addr">i_last_dt</span><span class="val">-1</span><span class="name">NULL</span></div>
+  <div class="cell hl2"><span class="addr">h_memo[11]</span><span class="val">"가나다..."</span><span class="name">잘림</span></div>
+  <div class="cell hl2"><span class="addr">i_memo</span><span class="val">30</span><span class="name">원래 길이</span></div>
+</div><figcaption>그림 29-2 호스트 변수와 지시자 변수의 짝. 지시자가 -1이면 호스트 변수의 내용은 의미가 없고, 양수면 값이 잘렸으며 원래 길이를 알려 줍니다.</figcaption></figure>
+
+<div class="tbl"><table>
+<thead><tr><th>지시자 값</th><th>FETCH/SELECT 시 의미(출력)</th><th>INSERT/UPDATE 시 의미(입력)</th></tr></thead>
+<tbody>
+<tr><td><code>0</code></td><td>정상 값이 들어옴</td><td>호스트 변수 값을 사용</td></tr>
+<tr><td><code>-1</code></td><td>컬럼이 NULL(호스트 변수는 변경되지 않음)</td><td>호스트 변수 값을 무시하고 NULL을 저장</td></tr>
+<tr><td><code>&gt; 0</code></td><td>값이 잘림. 지시자 = 원래 길이</td><td>-</td></tr>
+<tr><td><code>-2</code></td><td>값이 잘렸고 원래 길이가 너무 커서 알 수 없음</td><td>-</td></tr>
+</tbody></table></div>
+
+<figure class="code"><figcaption>acct_last.pc — NULL 가능한 최종거래일 조회</figcaption>
+<pre><code class="language-c">EXEC SQL BEGIN DECLARE SECTION;
+    char  h_acct_no[15];
+    char  h_last_dt[9];        /* CHAR(8) + 1 */
+    short i_last_dt;           /* 지시자 변수: 반드시 short */
+EXEC SQL END DECLARE SECTION;
+
+int get_last_tx_date(const char *acct_no, char *out, size_t outsz)
+{
+    snprintf(h_acct_no, sizeof h_acct_no, "%s", acct_no);
+
+    EXEC SQL SELECT LAST_TX_DT
+               INTO :h_last_dt:i_last_dt          /* 호스트변수:지시자 (붙여 씀) */
+               FROM ACCT_MST
+              WHERE ACCT_NO = :h_acct_no;
+    /* 위는 INTO :h_last_dt INDICATOR :i_last_dt 로도 쓸 수 있다 */
+
+    if (sqlca.sqlcode != 0) return -1;
+
+    if (i_last_dt == -1)
+        snprintf(out, outsz, "%s", "거래없음");    /* NULL: 신규 계좌 */
+    else
+        snprintf(out, outsz, "%s", h_last_dt);
+    return 0;
+}
+
+/* 입력 쪽: 해지일을 NULL로 되돌리기 */
+void clear_close_date(void)
+{
+    i_last_dt = -1;                               /* 이 값은 NULL로 저장하라 */
+    EXEC SQL UPDATE ACCT_MST
+                SET LAST_TX_DT = :h_last_dt:i_last_dt
+              WHERE ACCT_NO = :h_acct_no;
+}</code></pre></figure>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수: 지시자 없이 NULL 컬럼 FETCH</p>
+<p>NULL이 될 수 있는 컬럼을 지시자 없이 받으면, 기본 설정(<code>UNSAFE_NULL=NO</code>)에서는 <strong>ORA-01405: fetched column value is NULL</strong> 오류(sqlcode -1405)가 납니다. 개발 DB에서는 모든 데이터가 채워져 있어 통과했다가, 운영의 오래된 계좌 하나에 NULL이 있어 야간 배치가 그 지점에서 멈추는 일이 흔합니다. 또 지시자가 -1일 때 호스트 변수에는 <strong>이전 FETCH의 값이 그대로 남아</strong> 있으므로, 지시자를 확인하지 않고 호스트 변수를 쓰면 앞 계좌의 날짜가 다음 계좌에 찍힙니다. 해결: 테이블 정의서에서 NULL 허용 컬럼을 모두 찾아 지시자를 붙이거나, SQL에서 <code>NVL(LAST_TX_DT, ' ')</code>처럼 기본값으로 바꿔 받습니다.</p>
+</div>
+
+<h3 id="s29-1-4">VARCHAR 호스트 변수</h3>
+
+<p>Pro*C는 <code>VARCHAR</code>라는 특별한 의사 타입을 제공합니다. 프리컴파일러가 이를 <strong>길이와 바이트 배열을 가진 구조체</strong>로 바꿔 줍니다.</p>
+
+<figure class="code"><figcaption>VARCHAR 선언과 전처리 결과</figcaption>
+<pre><code class="language-c">/* .pc 파일에 쓴 것 */
+EXEC SQL BEGIN DECLARE SECTION;
+    VARCHAR h_cust_nm[40];
+EXEC SQL END DECLARE SECTION;
+
+/* proc가 만든 .c 파일에서는 다음과 같이 바뀐다 */
+struct { unsigned short len; unsigned char arr[40]; } h_cust_nm;</code></pre></figure>
+
+<p>VARCHAR는 <strong>널 문자로 끝나지 않습니다</strong>. 길이는 <code>len</code> 필드에 따로 있습니다. 그래서 다음 규칙을 반드시 지켜야 합니다.</p>
+
+<figure class="code"><figcaption>VARCHAR 사용 규칙</figcaption>
+<pre><code class="language-c">/* (1) 입력으로 쓸 때: arr에 복사하고 len을 반드시 설정 */
+size_t n = strlen(name);
+if (n &gt; sizeof h_cust_nm.arr) n = sizeof h_cust_nm.arr;   /* 넘치지 않게 */
+memcpy(h_cust_nm.arr, name, n);
+h_cust_nm.len = (unsigned short)n;
+
+/* (2) 출력으로 받은 뒤: C 문자열로 쓰려면 직접 널 종료 */
+EXEC SQL SELECT CUST_NM INTO :h_cust_nm FROM ACCT_MST WHERE ACCT_NO = :h_acct_no;
+char nm[41];
+memcpy(nm, h_cust_nm.arr, h_cust_nm.len);
+nm[h_cust_nm.len] = '\0';                 /* arr[len]에 직접 쓰면 arr[40]일 때 범위 초과! */
+printf("고객명: %s\n", nm);
+/* 또는 printf("%.*s", h_cust_nm.len, h_cust_nm.arr); */</code></pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 VARCHAR라는 타입이 따로 있을까?</p>
+<p>C 문자열은 "0바이트를 만날 때까지"가 길이라서 길이를 알려면 매번 처음부터 세어야 하고, 데이터 안에 0바이트가 있으면 표현할 수 없습니다. DB의 VARCHAR2는 길이와 내용을 따로 관리합니다. Pro*C의 VARCHAR는 DB 쪽 표현과 같은 "길이 + 바이트" 모양이라 변환 없이 주고받을 수 있고, CHAR 컬럼의 오른쪽 공백 채움 같은 혼란도 없습니다. 대신 C 표준 문자열 함수(<code>strlen</code>, <code>printf("%s")</code>)를 바로 쓸 수 없다는 대가가 있습니다. 실무에서 가장 흔한 버그가 <code>len</code> 설정을 빠뜨려 이전 길이로 검색하는 것과, <code>arr[len] = '\0'</code>을 했는데 len이 배열 크기와 같아 바로 옆 변수를 덮어쓰는 것입니다.</p>
+</div>
+
+<h3 id="s29-1-5">SQLCA와 sqlcode 검사</h3>
+
+<p>모든 EXEC SQL 문장이 실행되면 그 결과가 <code>sqlca</code>(SQL Communications Area) 구조체에 기록됩니다. 가장 중요한 필드는 다음과 같습니다.</p>
+
+<div class="tbl"><table>
+<thead><tr><th>필드</th><th>의미</th></tr></thead>
+<tbody>
+<tr><td><code>sqlca.sqlcode</code></td><td>0: 성공, 양수: 경고/데이터 없음(MODE=ORACLE에서 1403, ANSI 모드에서 100), 음수: 오류(ORA 번호의 음수, 예 -1 = ORA-00001 중복 키)</td></tr>
+<tr><td><code>sqlca.sqlerrm.sqlerrmc</code>, <code>sqlerrml</code></td><td>오류 메시지 텍스트와 그 길이(널 종료가 보장되지 않으므로 길이와 함께 출력, 최대 70자)</td></tr>
+<tr><td><code>sqlca.sqlerrd[2]</code></td><td>처리된 행 수(UPDATE/DELETE된 행 수, FETCH 누적 행 수)</td></tr>
+<tr><td><code>sqlca.sqlwarn[]</code></td><td>경고 플래그(값 잘림 등)</td></tr>
+</tbody></table></div>
+
+<div class="tbl"><table>
+<thead><tr><th>실무 빈출 sqlcode</th><th>ORA 오류</th><th>의미와 대응</th></tr></thead>
+<tbody>
+<tr><td>1403</td><td>ORA-01403</td><td>데이터 없음. 조회는 "계좌 없음" 응답, FETCH 루프는 종료 조건</td></tr>
+<tr><td>-1</td><td>ORA-00001</td><td>유일 키 중복. 거래내역 중복 입력(이중 거래 의심) — 절대 무시 금지</td></tr>
+<tr><td>-54</td><td>ORA-00054</td><td>NOWAIT로 락 획득 실패. "처리 중" 응답 후 재시도 유도</td></tr>
+<tr><td>-60</td><td>ORA-00060</td><td>데드락 탐지. 해당 문장만 실패하므로 ROLLBACK 후 재시도</td></tr>
+<tr><td>-1405</td><td>ORA-01405</td><td>NULL을 지시자 없이 FETCH</td></tr>
+<tr><td>-1722</td><td>ORA-01722</td><td>숫자 변환 실패(문자 컬럼에 숫자 비교 등)</td></tr>
+<tr><td>-3113, -3114</td><td>ORA-03113/03114</td><td>DB 연결 끊김. 재접속 로직 필요</td></tr>
+<tr><td>-8177</td><td>ORA-08177</td><td>SERIALIZABLE 격리에서 직렬화 실패. 재시도</td></tr>
+</tbody></table></div>
+
+<p>매 SQL마다 if문을 쓰는 대신 <code>WHENEVER</code> 지시문으로 오류 처리를 일괄 지정할 수도 있습니다.</p>
+
+<figure class="code"><figcaption>WHENEVER 지시문과 공통 오류 함수</figcaption>
+<pre><code class="language-c">static void sql_error(const char *where)
+{
+    char msg[128];
+    snprintf(msg, sizeof msg, "%.*s", sqlca.sqlerrm.sqlerrml, sqlca.sqlerrm.sqlerrmc);
+    LOG_ERROR("[%s] sqlcode=%d %s", where, sqlca.sqlcode, msg);
+
+    EXEC SQL WHENEVER SQLERROR CONTINUE;     /* 아래 ROLLBACK이 실패해도 무한 재귀 방지 */
+    EXEC SQL ROLLBACK WORK;
+}
+
+void batch_main(void)
+{
+    EXEC SQL WHENEVER SQLERROR DO sql_error("batch_main");
+    EXEC SQL WHENEVER NOT FOUND CONTINUE;    /* 1403은 각자 코드에서 판단 */
+    /* ... 이후의 모든 EXEC SQL 뒤에 자동으로 sqlcode 검사 코드가 삽입됨 ... */
+}</code></pre></figure>
+
+<div class="box warn"><p class="box-title" data-tag="주의">WHENEVER는 실행 흐름이 아니라 소스 위치 기준</p>
+<p><code>WHENEVER</code>는 함수 호출처럼 런타임에 동작하는 것이 아니라, 프리컴파일러가 <strong>소스 파일에서 그 지시문 아래에 나오는 EXEC SQL 문장들</strong>에 검사 코드를 끼워 넣는 방식입니다. 그래서 파일 위쪽 함수에 쓴 WHENEVER가 파일 아래쪽 다른 함수에도 적용되고, if문 안에 써도 조건과 무관하게 이후 모든 문장에 적용됩니다. <code>WHENEVER NOT FOUND GOTO end_loop;</code>를 썼는데 그 레이블이 없는 다른 함수에서 컴파일 오류가 나는 것이 흔한 혼란입니다. 많은 팀이 WHENEVER는 <code>CONTINUE</code>로 두고 <strong>매 SQL 직후 sqlcode를 명시적으로 검사</strong>하는 규칙을 씁니다. 코드가 길어지는 대신 흐름이 명확합니다.</p>
+</div>
+
+<div class="box fin"><p class="box-title" data-tag="금융 실무">사고 사례: 무시된 sqlcode 하나가 만든 이중 입금</p>
+<p>한 이자 지급 배치는 거래내역 INSERT 후 잔액 UPDATE를 하도록 되어 있었는데, INSERT의 sqlcode를 검사하지 않았습니다. 어느 날 배치가 중간에 비정상 종료되어 운영자가 재실행했고, 이미 처리된 계좌의 거래내역 INSERT는 ORA-00001(중복 키)로 실패했지만 코드는 이를 무시하고 잔액 UPDATE를 그대로 수행했습니다. 결과적으로 수천 계좌에 이자가 두 번 입금되었고, 거래내역에는 한 번만 남아 원장과 내역이 불일치했습니다. 다음 날 대사 작업에서 발견되어 회수 처리에 며칠이 걸렸습니다. 재발 방지책은 (1) 모든 SQL 직후 sqlcode 검사 의무화와 정적 분석 규칙 추가, (2) 배치의 <strong>재실행 안전성(멱등성)</strong> 확보 — 처리 완료 여부를 먼저 확인하고 건너뛰는 로직, (3) 내역 INSERT와 잔액 UPDATE를 같은 트랜잭션으로 묶어 함께 커밋/롤백하는 것이었습니다.</p>
+</div>
+
+<h3 id="s29-1-6">커서와 FETCH 루프</h3>
+
+<p>단건 SELECT INTO는 결과가 정확히 한 행일 때만 씁니다. 결과가 0행이면 1403, 두 행 이상이면 <strong>ORA-01422(exact fetch returns more than requested number of rows)</strong> 오류입니다. 여러 행을 처리하려면 <strong>커서(cursor)</strong>를 씁니다. 커서는 결과 집합 위를 움직이는 "책갈피"입니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 220" width="700" role="img" aria-label="커서 생명주기">
+  <rect class="box" x="10" y="80" width="120" height="56" rx="6"/>
+  <text x="70" y="104" text-anchor="middle" class="bold small">DECLARE</text>
+  <text x="70" y="122" text-anchor="middle" class="small mute">SQL과 이름 연결</text>
+  <path class="arrow" d="M130 108 H 170"/>
+  <rect class="hl" x="170" y="80" width="120" height="56" rx="6"/>
+  <text x="230" y="104" text-anchor="middle" class="bold small">OPEN</text>
+  <text x="230" y="122" text-anchor="middle" class="small mute">실행, 바인드 확정</text>
+  <path class="arrow" d="M290 108 H 330"/>
+  <rect class="hl2" x="330" y="80" width="120" height="56" rx="6"/>
+  <text x="390" y="104" text-anchor="middle" class="bold small">FETCH</text>
+  <text x="390" y="122" text-anchor="middle" class="small mute">한 행씩 꺼냄</text>
+  <path class="arrow-m" d="M370 80 C 370 30, 410 30, 410 80"/>
+  <text x="390" y="28" text-anchor="middle" class="small mute">1403까지 반복</text>
+  <path class="arrow" d="M450 108 H 490"/>
+  <rect class="box" x="490" y="80" width="120" height="56" rx="6"/>
+  <text x="550" y="104" text-anchor="middle" class="bold small">CLOSE</text>
+  <text x="550" y="122" text-anchor="middle" class="small mute">자원 반납</text>
+  <text x="350" y="180" text-anchor="middle" class="small">OPEN 시점의 데이터 스냅샷 기준으로 FETCH (Oracle 읽기 일관성)</text>
+  <text x="350" y="200" text-anchor="middle" class="small warn-t">CLOSE 누락 → ORA-01000 maximum open cursors exceeded</text>
+</svg>
+<figcaption>그림 29-3 커서의 생명주기. OPEN에서 쿼리가 실행되고, FETCH가 1403을 반환할 때까지 반복한 뒤 반드시 CLOSE합니다.</figcaption>
+</figure>
+
+<figure class="code"><figcaption>daily_list.pc — 지점별 휴면 예정 계좌 목록(한 행씩 FETCH)</figcaption>
+<pre><code class="language-c">EXEC SQL BEGIN DECLARE SECTION;
+    char      h_base_dt[9];
+    char      h_acct_no[15];
+    char      h_cust_nm[41];
+    long long h_bal;
+    char      h_last_dt[9];
+    short     i_last_dt;
+EXEC SQL END DECLARE SECTION;
+
+int list_dormant(const char *base_dt)
+{
+    long long cnt = 0, sum = 0;
+    snprintf(h_base_dt, sizeof h_base_dt, "%s", base_dt);
+
+    EXEC SQL DECLARE c_dorm CURSOR FOR
+        SELECT ACCT_NO, CUST_NM, BAL, LAST_TX_DT
+          FROM ACCT_MST
+         WHERE STAT_CD = '01'
+           AND (LAST_TX_DT IS NULL OR LAST_TX_DT &lt; :h_base_dt)
+         ORDER BY ACCT_NO;
+
+    EXEC SQL OPEN c_dorm;
+    if (sqlca.sqlcode != 0) { sql_error("open c_dorm"); return -1; }
+
+    for (;;) {
+        EXEC SQL FETCH c_dorm
+                  INTO :h_acct_no, :h_cust_nm, :h_bal, :h_last_dt:i_last_dt;
+        if (sqlca.sqlcode == 1403) break;           /* 정상 종료 조건 */
+        if (sqlca.sqlcode != 0) {                   /* 오류 */
+            sql_error("fetch c_dorm");
+            EXEC SQL CLOSE c_dorm;
+            return -1;
+        }
+        cnt++;
+        sum += h_bal;
+        printf("%-14s %-10s %12lld %s\n", h_acct_no, h_cust_nm, h_bal,
+               i_last_dt == -1 ? "(없음)" : h_last_dt);
+    }
+    EXEC SQL CLOSE c_dorm;                          /* 오류 경로에서도 반드시 */
+    printf("대상 %lld건, 잔액 합계 %lld원\n", cnt, sum);
+    return 0;
+}</code></pre></figure>
+
+<div class="box tip"><p class="box-title" data-tag="잠깐">날짜를 YYYYMMDD 문자열로 저장하는 이유</p>
+<p>위 코드의 <code>LAST_TX_DT &lt; :h_base_dt</code>에서 보듯 SQL 안의 문자열 비교는 CHAR(8) 'YYYYMMDD' 형식이라 사전순 비교가 곧 날짜 비교가 됩니다. 날짜를 'YYYYMMDD' 고정 길이 문자열로 저장하는 관행은 이 성질 덕분입니다. 'MM/DD/YYYY' 같은 형식이었다면 문자열 비교가 날짜 순서와 달라 대상 계좌가 틀어집니다.</p>
+</div>
+
+<h3 id="s29-1-7">배열 FETCH로 배치 성능 끌어올리기</h3>
+
+<p>위의 FETCH 루프는 100만 계좌를 처리하면 FETCH를 100만 번 호출합니다. FETCH 한 번마다 애플리케이션 서버와 DB 서버 사이에 네트워크 왕복(round trip)이 일어나고, 같은 데이터센터 안이라도 왕복 한 번에 0.2~0.5밀리초가 걸립니다. 100만 번이면 왕복 대기만 3~8분입니다. <strong>배열 FETCH</strong>는 호스트 변수를 배열로 선언해 한 번에 수백~수천 행을 가져옵니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 250" width="700" role="img" aria-label="단건 FETCH와 배열 FETCH의 네트워크 왕복 비교">
+  <text x="170" y="22" text-anchor="middle" class="bold">단건 FETCH</text>
+  <rect class="box" x="20" y="35" width="80" height="200" rx="6"/><text x="60" y="140" text-anchor="middle" class="small">AP</text>
+  <rect class="box" x="240" y="35" width="80" height="200" rx="6"/><text x="280" y="140" text-anchor="middle" class="small">DB</text>
+  <path class="arrow-m" d="M100 55 H 240"/><path class="arrow-m" d="M240 70 H 100"/>
+  <path class="arrow-m" d="M100 90 H 240"/><path class="arrow-m" d="M240 105 H 100"/>
+  <path class="arrow-m" d="M100 125 H 240"/><path class="arrow-m" d="M240 140 H 100"/>
+  <path class="arrow-m" d="M100 160 H 240"/><path class="arrow-m" d="M240 175 H 100"/>
+  <text x="170" y="205" text-anchor="middle" class="small warn-t">1행당 왕복 1회</text>
+  <text x="170" y="222" text-anchor="middle" class="small warn-t">100만 행 → 100만 회</text>
+  <line class="dash" x1="350" y1="20" x2="350" y2="240"/>
+  <text x="530" y="22" text-anchor="middle" class="bold">배열 FETCH (500행)</text>
+  <rect class="box" x="380" y="35" width="80" height="200" rx="6"/><text x="420" y="140" text-anchor="middle" class="small">AP</text>
+  <rect class="box" x="600" y="35" width="80" height="200" rx="6"/><text x="640" y="140" text-anchor="middle" class="small">DB</text>
+  <path class="arrow" d="M460 70 H 600"/>
+  <rect class="hl" x="470" y="95" width="120" height="50" rx="4"/>
+  <text x="530" y="117" text-anchor="middle" class="small">행 1~500</text>
+  <text x="530" y="134" text-anchor="middle" class="small mute">한 번에 전송</text>
+  <path class="arrow" d="M600 155 H 460"/>
+  <text x="530" y="205" text-anchor="middle" class="small acc">500행당 왕복 1회</text>
+  <text x="530" y="222" text-anchor="middle" class="small acc">100만 행 → 2,000회</text>
+</svg>
+<figcaption>그림 29-4 단건 FETCH와 배열 FETCH의 왕복 횟수 비교. 왕복 횟수가 500분의 1로 줄어듭니다.</figcaption>
+</figure>
+
+<figure class="code"><figcaption>interest_batch.pc — 배열 FETCH와 배열 UPDATE로 이자 계산</figcaption>
+<pre><code class="language-c">#define ARR 500                                   /* 한 번에 가져올 행 수 */
+
+EXEC SQL BEGIN DECLARE SECTION;
+    char      a_acct_no[ARR][15];                 /* 호스트 배열 */
+    long long a_bal[ARR];
+    long long a_intr[ARR];                        /* 계산된 이자 */
+    int       h_rate_bp;                          /* 연이율(bp) */
+    int       h_n;                                /* 이번에 처리할 행 수 */
+EXEC SQL END DECLARE SECTION;
+
+int run_interest(int rate_bp)
+{
+    long long done = 0;                           /* 지금까지 처리한 누적 행 수 */
+    h_rate_bp = rate_bp;
+
+    EXEC SQL DECLARE c_intr CURSOR FOR
+        SELECT ACCT_NO, BAL FROM ACCT_MST
+         WHERE STAT_CD = '01' AND BAL &gt; 0;
+    EXEC SQL OPEN c_intr;
+    if (sqlca.sqlcode != 0) { sql_error("open"); return -1; }
+
+    for (;;) {
+        EXEC SQL FETCH c_intr INTO :a_acct_no, :a_bal;   /* 최대 ARR행 */
+        if (sqlca.sqlcode != 0 &amp;&amp; sqlca.sqlcode != 1403) {
+            sql_error("fetch"); EXEC SQL CLOSE c_intr; return -1;
+        }
+        /* sqlerrd[2]는 OPEN 이후 "누적" 행 수 → 이번 회차 행 수 = 누적 - 이전 누적 */
+        int n = (int)(sqlca.sqlerrd[2] - done);
+        int last = (sqlca.sqlcode == 1403);       /* 마지막 묶음(ARR보다 적을 수 있음) */
+
+        for (int i = 0; i &lt; n; i++)
+            a_intr[i] = a_bal[i] * h_rate_bp / 10000 / 12;   /* 월 이자, 원 미만 절사 */
+
+        if (n &gt; 0) {
+            h_n = n;
+            EXEC SQL FOR :h_n                     /* 배열의 앞 n개만 사용 */
+                UPDATE ACCT_MST SET BAL = BAL + :a_intr
+                 WHERE ACCT_NO = :a_acct_no;
+            if (sqlca.sqlcode != 0) { sql_error("update"); EXEC SQL CLOSE c_intr; return -1; }
+            done += n;
+        }
+        if (last) break;                          /* 1403이라도 남은 n행을 먼저 처리했다 */
+    }
+    EXEC SQL CLOSE c_intr;
+    EXEC SQL COMMIT WORK;
+    printf("이자 지급 %lld계좌\n", done);
+    return 0;
+}</code></pre></figure>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수: 1403을 받자마자 break</p>
+<p>배열 FETCH에서 1403은 "이번 FETCH에서 배열을 다 채우지 못했다(데이터가 끝났다)"는 뜻이지 "이번에 한 행도 없다"는 뜻이 아닙니다. 1,234행이면 500, 500을 받고 세 번째 FETCH는 234행을 받으면서 동시에 1403을 반환합니다. 단건 FETCH 습관대로 <code>if (sqlcode == 1403) break;</code>를 처리 전에 두면 <strong>마지막 234행이 조용히 누락</strong>됩니다. 배치 결과 건수가 매번 "조금씩" 모자라는데 오류 로그는 없는, 찾기 매우 어려운 버그입니다. 위 코드처럼 누적 행 수 차이로 이번 회차 행 수를 구하고, 처리한 뒤에 종료합니다.</p>
+</div>
+
+<div class="box tip"><p class="box-title" data-tag="잠깐">대용량 배치와 커밋 주기</p>
+<p>위 코드는 마지막에 한 번만 커밋합니다. 100만 행을 하나의 트랜잭션으로 처리하면 언두(UNDO) 공간이 커지고, 중간 실패 시 전부 롤백되어 처음부터 다시 해야 합니다. 그래서 실무 배치는 1만 행 단위 등으로 <strong>중간 커밋</strong>하고 "어디까지 처리했는지"(마지막 계좌번호)를 재시작 테이블에 함께 커밋해, 실패 시 그 지점부터 이어서 처리합니다. 단 커서를 연 상태로 같은 테이블을 갱신하며 오래 커밋을 반복하면 ORA-01555(snapshot too old)가 날 수 있어, 키 범위로 나누어 커서를 다시 여는 방식을 함께 씁니다.</p>
+</div>
+
+<h3 id="s29-1-8">동적 SQL과 바인드 변수, SQL 인젝션 방지</h3>
+
+<p>지금까지의 SQL은 프리컴파일 시점에 문장이 정해진 <strong>정적 SQL</strong>입니다. 조회 화면에서 "조건이 입력된 항목만 WHERE에 넣기"처럼 실행 시점에 SQL 문장이 정해지는 경우 <strong>동적 SQL</strong>을 씁니다. Pro*C는 네 가지 방법을 제공합니다.</p>
+
+<div class="tbl"><table>
+<thead><tr><th>방법</th><th>형태</th><th>용도</th></tr></thead>
+<tbody>
+<tr><td>Method 1</td><td><code>EXECUTE IMMEDIATE :sql</code></td><td>바인드 변수 없는 비조회문(DDL, 단순 DML)</td></tr>
+<tr><td>Method 2</td><td><code>PREPARE s FROM :sql</code> → <code>EXECUTE s USING :a, :b</code></td><td>바인드 변수가 있는 비조회문</td></tr>
+<tr><td>Method 3</td><td>PREPARE → DECLARE CURSOR FOR s → <code>OPEN c USING ...</code> → FETCH</td><td>선택 컬럼 목록이 정해진 조회문</td></tr>
+<tr><td>Method 4</td><td>SQLDA 기술자(descriptor)</td><td>컬럼 개수·타입까지 실행 시점에 결정(범용 조회 도구)</td></tr>
+</tbody></table></div>
+
+<figure class="code bad"><figcaption>잘못된 예 — 사용자 입력을 SQL 문자열에 붙이기 (SQL 인젝션)</figcaption>
+<pre><code class="language-c">/* 고객명 검색: 화면에서 받은 이름을 그대로 문자열에 붙임 */
+snprintf(sqlbuf, sizeof sqlbuf,
+         "SELECT ACCT_NO, BAL FROM ACCT_MST WHERE CUST_NM = '%s'", user_input);
+/* user_input = "x' OR '1'='1"  이면
+   ... WHERE CUST_NM = 'x' OR '1'='1'   → 모든 고객의 계좌와 잔액이 조회됨 */</code></pre></figure>
+
+<figure class="code good"><figcaption>고친 코드 — 바인드 변수를 쓰는 동적 SQL (Method 3)</figcaption>
+<pre><code class="language-c">EXEC SQL BEGIN DECLARE SECTION;
+    char      sqlbuf[512];
+    char      h_nm[41];
+    char      h_branch[5];
+    char      o_acct_no[15];
+    long long o_bal;
+EXEC SQL END DECLARE SECTION;
+
+int search(const char *nm, const char *branch)     /* branch는 선택 조건 */
+{
+    int has_branch = (branch &amp;&amp; branch[0] != '\0');
+    /* SQL 구조(어떤 조건이 있는지)만 동적으로, "값"은 절대 문자열에 넣지 않는다 */
+    snprintf(sqlbuf, sizeof sqlbuf,
+             "SELECT ACCT_NO, BAL FROM ACCT_MST WHERE CUST_NM = :v1%s",
+             has_branch ? " AND SUBSTR(ACCT_NO,1,4) = :v2" : "");
+    snprintf(h_nm, sizeof h_nm, "%s", nm);
+    if (has_branch) snprintf(h_branch, sizeof h_branch, "%s", branch);
+
+    EXEC SQL PREPARE s_search FROM :sqlbuf;
+    EXEC SQL DECLARE c_search CURSOR FOR s_search;
+    if (has_branch) {                     /* EXEC SQL은 여러 문장으로 펼쳐지므로 중괄호 필수 */
+        EXEC SQL OPEN c_search USING :h_nm, :h_branch;   /* 값은 바인드로 전달 */
+    } else {
+        EXEC SQL OPEN c_search USING :h_nm;
+    }
+    if (sqlca.sqlcode != 0) { sql_error("open search"); return -1; }
+
+    for (;;) {
+        EXEC SQL FETCH c_search INTO :o_acct_no, :o_bal;
+        if (sqlca.sqlcode != 0) break;
+        printf("%s %lld\n", o_acct_no, o_bal);
+    }
+    int rc = (sqlca.sqlcode == 1403) ? 0 : -1;
+    EXEC SQL CLOSE c_search;
+    return rc;
+}</code></pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 바인드 변수는 인젝션에 안전할까?</p>
+<p>DB는 SQL을 <strong>파싱(문법 분석과 실행 계획 수립)</strong>한 뒤, 실행할 때 바인드 변수 자리에 값을 끼워 넣습니다. 바인드 값은 파싱이 끝난 뒤에 "데이터"로만 전달되므로, 그 안에 <code>' OR '1'='1</code>이 들어 있어도 SQL 문법의 일부가 될 수 없고 그냥 "그런 이름을 가진 고객"을 찾을 뿐입니다. 반면 문자열 연결은 값이 파싱 전에 SQL 텍스트에 섞이므로, 값이 SQL의 구조를 바꿀 수 있습니다. 이것이 핵심 차이입니다. 덤으로 성능 이점도 큽니다. 값만 다른 같은 SQL은 텍스트가 동일하므로 DB가 공유 풀에서 실행 계획을 재사용(소프트 파싱)합니다. 값을 문자열로 붙이면 계좌번호마다 다른 SQL이 되어 매번 하드 파싱이 일어나고, 초당 수천 건의 온라인 거래에서는 DB CPU와 공유 풀 래치 경합으로 전체가 느려집니다.</p>
+</div>
+
+<div class="box warn"><p class="box-title" data-tag="주의">바인드 변수로 바꿀 수 없는 것</p>
+<p>바인드 변수는 <strong>값</strong> 자리에만 쓸 수 있습니다. 테이블명, 컬럼명, ORDER BY 대상 컬럼, ASC/DESC 같은 SQL 구조는 바인드할 수 없습니다. 이런 것을 사용자 입력으로 정해야 한다면, 입력값을 SQL에 직접 넣지 말고 <strong>허용 목록(whitelist)</strong>과 비교해 미리 정해 둔 문자열 중 하나를 고르게 하십시오. 예: 정렬 기준 코드 "1"이면 <code>"ORDER BY ACCT_NO"</code>, "2"면 <code>"ORDER BY BAL DESC"</code>, 그 외는 오류.</p>
+</div>
+
+<div class="box fin"><p class="box-title" data-tag="금융 실무">은행 시스템에서는: 보안 점검 단골 항목</p>
+<p>금융권은 정기적인 취약점 점검과 소스 코드 보안 점검을 받습니다. 동적 SQL에서 <code>sprintf</code>로 사용자 입력을 연결한 코드는 거의 항상 지적 대상입니다. 내부 관리자 화면이라도 예외가 아닙니다. 실무 규칙은 단순합니다. (1) 정적 SQL을 우선한다, (2) 동적 SQL이 필요하면 구조만 동적으로 만들고 값은 모두 바인드한다, (3) 구조를 바꾸는 입력은 허용 목록으로만 받는다, (4) 동적 SQL을 쓴 곳에는 왜 정적 SQL로 안 되는지 주석을 단다.</p>
+</div>
+
+<div class="box tip"><p class="box-title" data-tag="잠깐">멀티스레드 Pro*C</p>
+<p>28장의 스레드와 함께 Pro*C를 쓰려면 프리컴파일 옵션 <code>threads=yes</code>, 프로그램 시작 시 <code>EXEC SQL ENABLE THREADS;</code>, 그리고 스레드마다 <code>sql_context</code>를 만들어 <code>EXEC SQL CONTEXT USE :ctx;</code>로 지정해야 합니다. 하나의 DB 연결(컨텍스트)을 여러 스레드가 동시에 쓰면 안 됩니다. 또 기본 <code>sqlca</code>가 전역 변수라는 점을 기억하십시오. 스레드 환경에서는 각 스레드가 자신의 지역 <code>struct sqlca</code>를 쓰도록 선언해야 합니다(28-1의 스레드 안전 문제와 같은 원리).</p>
+</div>
+
+<div class="box key"><p class="box-title" data-tag="핵심">29-1 한 줄 요약</p>
+<p>Pro*C는 EXEC SQL을 라이브러리 호출로 바꿔 주는 프리컴파일러입니다. 호스트 변수 크기는 널 문자까지, NULL 가능 컬럼에는 지시자, 모든 SQL 뒤에는 sqlcode 검사, 대량 처리는 배열 FETCH, 값은 반드시 바인드 변수로 전달합니다.</p>
+</div>
+
+<h2 id="s29-2"><span class="num">29-2</span>트랜잭션과 TP 모니터</h2>
+
+<p>28장에서 우리는 mutex로 "두 계좌의 잔액을 한 덩어리로" 바꾸는 법을 배웠습니다. 하지만 mutex는 한 프로세스의 메모리만 보호합니다. 프로그램이 이체 도중 죽으면? 서버 전원이 나가면? 여러 서버의 여러 프로세스가 같은 계좌를 만지면? 이 모든 상황에서 "돈이 사라지거나 두 번 생기지 않음"을 보장하는 장치가 데이터베이스의 <strong>트랜잭션</strong>입니다. 이 절에서는 트랜잭션의 성질과 C 코드에서의 사용법, 동시성 제어(락)와 격리 수준, 그리고 대규모 온라인 시스템의 뼈대인 TP 모니터를 다룹니다.</p>
+
+<h3 id="s29-2-1">트랜잭션과 ACID</h3>
+
+<p><strong>트랜잭션(transaction)</strong>은 "모두 성공하거나 모두 없던 일이 되어야 하는" 작업의 논리적 단위입니다. 계좌이체라면 "A 출금 + B 입금 + 거래내역 2건 기록"이 하나의 트랜잭션입니다. 트랜잭션은 다음 네 가지 성질, <strong>ACID</strong>를 보장합니다.</p>
+
+<div class="tbl"><table>
+<thead><tr><th>성질</th><th>뜻</th><th>이체 예에서</th><th>DB가 보장하는 방법</th></tr></thead>
+<tbody>
+<tr><td><strong>A</strong>tomicity 원자성</td><td>전부 반영되거나 전혀 반영되지 않음</td><td>출금만 되고 입금이 안 되는 일은 없다</td><td>언두(UNDO) 로그로 롤백</td></tr>
+<tr><td><strong>C</strong>onsistency 일관성</td><td>트랜잭션 전후로 무결성 규칙이 지켜짐</td><td>잔액 합계 보존, 잔액 &gt;= 0 제약</td><td>제약 조건 + 애플리케이션 로직</td></tr>
+<tr><td><strong>I</strong>solation 격리성</td><td>동시에 실행되는 트랜잭션이 서로의 중간 상태를 보지 않음</td><td>이체 중간(출금만 된 상태)을 다른 조회가 보지 않는다</td><td>락, MVCC(다중 버전)</td></tr>
+<tr><td><strong>D</strong>urability 지속성</td><td>커밋된 결과는 장애가 나도 사라지지 않음</td><td>커밋 직후 정전이 나도 이체는 유지</td><td>리두(REDO) 로그를 디스크에 먼저 기록(WAL)</td></tr>
+</tbody></table></div>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 커밋이 "디스크에 데이터를 다 쓰는 것"이 아닌데도 지속성이 보장될까?</p>
+<p>데이터 파일의 블록을 매번 디스크에 쓰면 너무 느립니다(테이블, 인덱스 여기저기의 무작위 쓰기). 그래서 DB는 변경 내용을 <strong>리두 로그</strong>라는 순차 파일에 먼저 기록하고, 커밋 시점에는 이 로그가 디스크에 확실히 기록(fsync)된 것만 확인합니다. 이를 <strong>WAL(Write-Ahead Logging)</strong>이라고 합니다. 데이터 블록은 나중에 천천히 씁니다. 장애가 나면 재기동 시 리두 로그를 재생해 커밋된 변경을 복구하고(roll forward), 커밋되지 않은 변경은 언두 정보로 되돌립니다(roll back). 순차 쓰기 한 번은 무작위 쓰기 여러 번보다 훨씬 빠르기 때문에 이 방식이 성능과 지속성을 동시에 잡습니다. 커밋 응답 시간의 상당 부분이 이 "로그 디스크 기록 대기"이므로, 건마다 커밋하는 배치가 느린 이유이기도 합니다.</p>
+</div>
+
+<h3 id="s29-2-2">이체 트랜잭션: COMMIT과 ROLLBACK</h3>
+
+<p>Oracle에서는 첫 번째 DML(INSERT/UPDATE/DELETE)이 실행될 때 트랜잭션이 암묵적으로 시작되고, <code>COMMIT</code>이나 <code>ROLLBACK</code>으로 끝납니다. 이제 실무 수준의 이체 함수를 Pro*C로 작성해 봅시다.</p>
+
+<figure class="code"><figcaption>transfer.pc — 계좌이체 트랜잭션</figcaption>
+<pre><code class="language-c">EXEC SQL BEGIN DECLARE SECTION;
+    char      h_from[15], h_to[15], h_dt[9], h_guid[33];
+    char      h_stat[3];
+    long long h_amt, h_bal_from, h_bal_to, h_seq;
+EXEC SQL END DECLARE SECTION;
+
+enum { OK = 0, E_NOACCT = 10, E_STAT = 11, E_FUNDS = 12, E_BUSY = 20, E_DB = 99 };
+
+/* 한 계좌 행을 잠그고 상태·잔액을 읽는다 */
+static int lock_acct(const char *acct, long long *bal)
+{
+    snprintf(h_from, sizeof h_from, "%s", acct);     /* 임시로 h_from 사용 */
+    EXEC SQL SELECT BAL, STAT_CD INTO :h_bal_from, :h_stat
+               FROM ACCT_MST WHERE ACCT_NO = :h_from
+                FOR UPDATE WAIT 3;                    /* 행 락, 최대 3초 대기 */
+    if (sqlca.sqlcode == 1403) return E_NOACCT;
+    if (sqlca.sqlcode == -30006 || sqlca.sqlcode == -54) return E_BUSY;  /* 락 대기 초과 */
+    if (sqlca.sqlcode != 0) return E_DB;
+    if (strcmp(h_stat, "01") != 0) return E_STAT;     /* 정상 계좌가 아님 */
+    *bal = h_bal_from;
+    return OK;
+}
+
+int do_transfer(const char *from, const char *to, long long amt,
+                const char *tx_dt, const char *guid)
+{
+    long long bal_from, bal_to;
+    int rc;
+
+    /* (1) 락 순서: 계좌번호 오름차순 (28장과 같은 규칙을 DB 행 락에도 적용) */
+    const char *lo = strcmp(from, to) &lt; 0 ? from : to;
+    const char *hi = (lo == from) ? to : from;
+    long long bal_lo, bal_hi;
+    if ((rc = lock_acct(lo, &amp;bal_lo)) != OK) goto fail;
+    if ((rc = lock_acct(hi, &amp;bal_hi)) != OK) goto fail;
+    bal_from = (lo == from) ? bal_lo : bal_hi;
+    bal_to   = (lo == from) ? bal_hi : bal_lo;
+
+    /* (2) 업무 검증: 잠근 뒤에 판단해야 TOCTOU가 없다 */
+    if (bal_from &lt; amt) { rc = E_FUNDS; goto fail; }
+
+    /* (3) 원장 갱신: 바인드 변수를 먼저 모두 채운다 */
+    snprintf(h_from, sizeof h_from, "%s", from);
+    snprintf(h_to,   sizeof h_to,   "%s", to);
+    snprintf(h_dt,   sizeof h_dt,   "%s", tx_dt);
+    snprintf(h_guid, sizeof h_guid, "%s", guid);
+    h_amt = amt;
+    EXEC SQL UPDATE ACCT_MST SET BAL = BAL - :h_amt, LAST_TX_DT = :h_dt
+              WHERE ACCT_NO = :h_from;
+    if (sqlca.sqlcode != 0 || sqlca.sqlerrd[2] != 1) { rc = E_DB; goto fail; }
+    EXEC SQL UPDATE ACCT_MST SET BAL = BAL + :h_amt, LAST_TX_DT = :h_dt
+              WHERE ACCT_NO = :h_to;
+    if (sqlca.sqlcode != 0 || sqlca.sqlerrd[2] != 1) { rc = E_DB; goto fail; }
+
+    /* (4) 거래내역 2건: 출금, 입금 (같은 트랜잭션) */
+    h_bal_from = bal_from - amt;
+    h_bal_to   = bal_to + amt;
+    EXEC SQL SELECT SEQ_TX.NEXTVAL INTO :h_seq FROM DUAL;
+    EXEC SQL INSERT INTO TX_HIST VALUES (:h_dt, :h_seq, :h_from, '20', :h_amt, :h_bal_from, :h_guid);
+    if (sqlca.sqlcode != 0) { rc = E_DB; goto fail; }
+    EXEC SQL SELECT SEQ_TX.NEXTVAL INTO :h_seq FROM DUAL;
+    EXEC SQL INSERT INTO TX_HIST VALUES (:h_dt, :h_seq, :h_to, '10', :h_amt, :h_bal_to, :h_guid);
+    if (sqlca.sqlcode != 0) { rc = E_DB; goto fail; }
+
+    /* (5) 모두 성공했을 때만 커밋 */
+    EXEC SQL COMMIT WORK;
+    if (sqlca.sqlcode != 0) { rc = E_DB; goto fail; }
+    return OK;
+
+fail:
+    LOG_ERROR("[%s] 이체 실패 rc=%d sqlcode=%d", guid, rc, sqlca.sqlcode);
+    EXEC SQL ROLLBACK WORK;           /* 지금까지의 UPDATE/INSERT와 행 락을 모두 취소 */
+    return rc;
+}</code></pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 UPDATE 후 sqlerrd[2]가 1인지까지 확인할까?</p>
+<p>UPDATE는 조건에 맞는 행이 0개여도 <strong>오류가 아닙니다</strong>(sqlcode 0, 처리 행 수 0). 계좌번호에 공백이 섞였거나 앞의 SELECT와 다른 변수를 바인드하는 실수가 있으면, 출금 UPDATE는 1행, 입금 UPDATE는 0행인 채로 "성공"해서 커밋되어 돈이 증발합니다. 금융 코드에서는 "몇 행이 바뀌어야 하는지"를 알고 있다면 <strong>반드시 행 수까지 검증</strong>합니다. 이것이 sqlcode만 보는 코드와 베테랑 코드의 차이입니다.</p>
+</div>
+
+<div class="box tip"><p class="box-title" data-tag="잠깐">SAVEPOINT: 부분 롤백</p>
+<p><code>EXEC SQL SAVEPOINT sp_fee;</code>로 중간 지점을 표시하고 <code>EXEC SQL ROLLBACK TO SAVEPOINT sp_fee;</code>로 그 이후만 되돌릴 수 있습니다. 예를 들어 "이체는 진행하되 수수료 우대 쿠폰 적용이 실패하면 쿠폰 부분만 취소하고 일반 수수료로 처리" 같은 경우에 씁니다. 세이브포인트로 되돌려도 트랜잭션은 계속 열려 있으므로 마지막에 COMMIT이나 ROLLBACK을 해야 합니다.</p>
+</div>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수: 커밋 없이 종료, 그리고 RELEASE</p>
+<p>Pro*C 프로그램이 COMMIT 없이 정상 종료하면 Oracle 클라이언트 동작에 따라 커밋될 수도 롤백될 수도 있어(버전과 설정에 따라 다름) 의존하면 안 됩니다. 비정상 종료(세그폴트)면 연결이 끊기며 DB가 롤백합니다. 배치 마지막에는 <code>EXEC SQL COMMIT WORK RELEASE;</code>(커밋하고 연결 해제)를, 오류 종료 시에는 <code>EXEC SQL ROLLBACK WORK RELEASE;</code>를 명시하십시오. 또 COMMIT 직전에 프로그램이 죽으면 그 트랜잭션은 롤백되므로, 온라인 거래에서는 "응답을 받지 못한 거래"가 실제로 처리되었는지 거래 추적 ID로 조회하는 <strong>결과 확인 거래</strong>가 필요합니다(30장).</p>
+</div>
+
+<h3 id="s29-2-3">격리 수준과 이상 현상</h3>
+
+<p>격리성을 완벽하게 지키면(모든 트랜잭션을 한 줄로 세우면) 정확하지만 느립니다. 그래서 SQL 표준은 네 가지 <strong>격리 수준(isolation level)</strong>을 정의하고, 낮은 수준일수록 성능을 위해 특정 <strong>이상 현상(anomaly)</strong>을 허용합니다.</p>
+
+<div class="tbl"><table>
+<thead><tr><th>격리 수준</th><th>Dirty Read</th><th>Non-Repeatable Read</th><th>Phantom Read</th><th>비고</th></tr></thead>
+<tbody>
+<tr><td>READ UNCOMMITTED</td><td>발생</td><td>발생</td><td>발생</td><td>Oracle은 지원하지 않음</td></tr>
+<tr><td>READ COMMITTED</td><td>방지</td><td>발생</td><td>발생</td><td><strong>Oracle 기본값</strong></td></tr>
+<tr><td>REPEATABLE READ</td><td>방지</td><td>방지</td><td>발생(표준 기준)</td><td>MySQL InnoDB 기본값</td></tr>
+<tr><td>SERIALIZABLE</td><td>방지</td><td>방지</td><td>방지</td><td>Oracle은 스냅샷 기반, ORA-08177 가능</td></tr>
+</tbody></table></div>
+
+<ul>
+<li><strong>Dirty Read</strong>: 다른 트랜잭션이 아직 커밋하지 않은 변경을 읽음. 그 트랜잭션이 롤백하면 존재한 적 없는 잔액을 본 셈입니다.</li>
+<li><strong>Non-Repeatable Read</strong>: 같은 트랜잭션에서 같은 행을 두 번 읽었는데, 그사이 다른 트랜잭션이 수정·커밋해서 값이 다름.</li>
+<li><strong>Phantom Read</strong>: 같은 조건으로 두 번 조회했는데, 그사이 다른 트랜잭션이 행을 삽입·커밋해서 행 개수가 다름(유령 행).</li>
+<li><strong>Lost Update</strong>: 두 트랜잭션이 같은 값을 읽고 각자 계산해 덮어써 한쪽 갱신이 사라짐. 그림 28-4의 DB 버전입니다. 표준 표에는 없지만 금융에서 가장 중요합니다.</li>
+</ul>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 270" width="700" role="img" aria-label="READ COMMITTED에서 Lost Update 발생 타임라인">
+  <text x="140" y="22" text-anchor="middle" class="bold">트랜잭션 T1 (이체 출금)</text>
+  <text x="560" y="22" text-anchor="middle" class="bold">트랜잭션 T2 (카드 결제)</text>
+  <text x="350" y="22" text-anchor="middle" class="bold">BAL</text>
+  <line class="dash" x1="350" y1="30" x2="350" y2="260"/>
+  <rect class="box" x="20" y="40" width="240" height="30" rx="4"/><text x="140" y="60" text-anchor="middle" class="small mono">SELECT BAL → 100,000</text>
+  <rect class="box" x="440" y="80" width="240" height="30" rx="4"/><text x="560" y="100" text-anchor="middle" class="small mono">SELECT BAL → 100,000</text>
+  <rect class="box" x="20" y="120" width="240" height="30" rx="4"/><text x="140" y="140" text-anchor="middle" class="small mono">UPDATE BAL = 70,000; COMMIT</text>
+  <rect class="hl2" x="310" y="120" width="80" height="30" rx="4"/><text x="350" y="140" text-anchor="middle" class="small mono">70,000</text>
+  <rect class="bad" x="440" y="170" width="240" height="30" rx="4"/><text x="560" y="190" text-anchor="middle" class="small mono">UPDATE BAL = 50,000; COMMIT</text>
+  <rect class="bad" x="310" y="170" width="80" height="30" rx="4"/><text x="350" y="190" text-anchor="middle" class="small mono">50,000</text>
+  <text x="350" y="230" text-anchor="middle" class="small warn-t">3만 원 + 5만 원 = 8만 원이 나갔는데 잔액은 5만 원 (정답 2만 원)</text>
+  <text x="350" y="250" text-anchor="middle" class="small mute">"읽은 값으로 계산해 덮어쓰기"는 격리 수준과 별개로 직접 막아야 한다</text>
+</svg>
+<figcaption>그림 29-5 READ COMMITTED에서의 Lost Update. 각 트랜잭션은 커밋된 값만 읽었지만, 읽기와 쓰기 사이에 다른 트랜잭션이 끼어들어 갱신 하나가 사라졌습니다.</figcaption>
+</figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 Oracle의 조회는 갱신을 기다리지 않을까? (MVCC)</p>
+<p>Oracle은 <strong>다중 버전 동시성 제어(MVCC)</strong>를 씁니다. 행을 수정하면 이전 값을 언두 영역에 보관하고, 다른 세션이 그 행을 읽으면 "쿼리 시작 시점에 커밋되어 있던 버전"을 언두에서 재구성해 보여 줍니다. 그래서 <strong>읽기는 쓰기를 막지 않고, 쓰기는 읽기를 막지 않습니다</strong>. 잔액 조회가 아무리 많아도 이체가 느려지지 않는 이유입니다. 대신 일반 SELECT는 락을 걸지 않으므로, 읽은 값을 근거로 갱신하는 코드는 그림 29-5처럼 Lost Update에 노출됩니다. 이를 막는 두 가지 방법이 다음의 비관적 락과 낙관적 락입니다. 또한 해결책 중 가장 간단한 것은 "읽어서 계산해 덮어쓰기" 대신 <code>UPDATE ... SET BAL = BAL - :amt WHERE ACCT_NO = :a AND BAL &gt;= :amt</code>처럼 <strong>DB 안에서 원자적으로 계산</strong>하고 처리 행 수(0이면 잔액 부족)를 확인하는 것입니다.</p>
+</div>
+
+<h3 id="s29-2-4">SELECT FOR UPDATE: 비관적 락</h3>
+
+<p><strong>비관적 락(pessimistic lock)</strong>은 "누군가 반드시 끼어들 것이다"라고 보고, 읽는 시점에 미리 행을 잠그는 방식입니다. <code>SELECT ... FOR UPDATE</code>는 조회한 행에 <strong>행 단위 배타 락</strong>을 걸고, 트랜잭션이 COMMIT/ROLLBACK할 때까지 다른 트랜잭션의 UPDATE와 FOR UPDATE를 대기시킵니다(일반 SELECT는 여전히 막지 않음).</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 250" width="700" role="img" aria-label="SELECT FOR UPDATE에 의한 대기와 직렬화">
+  <text x="140" y="22" text-anchor="middle" class="bold">T1 (이체 출금 3만)</text>
+  <text x="560" y="22" text-anchor="middle" class="bold">T2 (카드 결제 5만)</text>
+  <line class="dash" x1="350" y1="30" x2="350" y2="240"/>
+  <rect class="hl" x="20" y="40" width="240" height="30" rx="4"/><text x="140" y="60" text-anchor="middle" class="small mono">SELECT .. FOR UPDATE → 100,000</text>
+  <rect class="hl2" x="440" y="80" width="240" height="50" rx="4"/><text x="560" y="100" text-anchor="middle" class="small mono">SELECT .. FOR UPDATE</text><text x="560" y="120" text-anchor="middle" class="small">행 락 대기...</text>
+  <rect class="hl" x="20" y="100" width="240" height="30" rx="4"/><text x="140" y="120" text-anchor="middle" class="small mono">UPDATE BAL = 70,000</text>
+  <rect class="hl" x="20" y="140" width="240" height="30" rx="4"/><text x="140" y="160" text-anchor="middle" class="small mono">COMMIT → 락 해제</text>
+  <path class="arrow" d="M260 155 L 440 175"/>
+  <rect class="hl" x="440" y="165" width="240" height="30" rx="4"/><text x="560" y="185" text-anchor="middle" class="small mono">→ 70,000 (최신값)</text>
+  <rect class="hl" x="440" y="205" width="240" height="30" rx="4"/><text x="560" y="225" text-anchor="middle" class="small mono">UPDATE BAL = 20,000; COMMIT</text>
+</svg>
+<figcaption>그림 29-6 SELECT FOR UPDATE에 의한 직렬화. T2는 T1이 커밋할 때까지 기다린 뒤 최신 잔액을 읽으므로 Lost Update가 없습니다.</figcaption>
+</figure>
+
+<div class="tbl"><table>
+<thead><tr><th>구문</th><th>락을 못 얻으면</th><th>용도</th></tr></thead>
+<tbody>
+<tr><td><code>FOR UPDATE</code></td><td>무한 대기</td><td>배치(대기해도 됨). 온라인에는 위험</td></tr>
+<tr><td><code>FOR UPDATE NOWAIT</code></td><td>즉시 ORA-00054</td><td>"다른 거래 처리 중" 즉시 응답</td></tr>
+<tr><td><code>FOR UPDATE WAIT n</code></td><td>n초 대기 후 ORA-30006</td><td>온라인 거래(응답 제한 시간 안에서 대기)</td></tr>
+<tr><td><code>FOR UPDATE SKIP LOCKED</code></td><td>잠긴 행은 건너뜀</td><td>작업 큐 테이블을 여러 프로세스가 나눠 처리</td></tr>
+</tbody></table></div>
+
+<div class="box warn"><p class="box-title" data-tag="주의">DB에서도 데드락은 생깁니다</p>
+<p>28장의 두 계좌 이체 데드락은 DB 행 락에서도 똑같이 일어납니다. 세션 1이 A행을 FOR UPDATE하고 B행을 기다리는데 세션 2가 B행을 잡고 A행을 기다리면, Oracle은 몇 초 안에 이를 탐지해 <strong>한쪽 세션의 문장을 ORA-00060으로 실패</strong>시킵니다. 이때 트랜잭션 전체가 아니라 그 문장만 롤백되므로, 애플리케이션이 반드시 ROLLBACK하고 재시도(또는 오류 응답)해야 합니다. 예방책은 C 코드와 완전히 같습니다. <strong>여러 행을 잠글 때는 계좌번호 오름차순</strong>(위 <code>do_transfer</code>의 (1)). 여러 행을 한 문장으로 잠글 때는 <code>... WHERE ACCT_NO IN (:a, :b) ORDER BY ACCT_NO FOR UPDATE</code>처럼 정렬을 주는 것이 관례이지만, 락 획득 순서가 ORDER BY대로라는 보장은 구현 의존이므로 행 단위로 순서대로 잠그는 편이 확실합니다.</p>
+</div>
+
+<h3 id="s29-2-5">낙관적 락: 버전 컬럼</h3>
+
+<p><strong>낙관적 락(optimistic lock)</strong>은 "충돌은 드물 것이다"라고 보고, 읽을 때는 잠그지 않고 <strong>쓸 때 그사이 누가 바꿨는지 검사</strong>하는 방식입니다. 28장의 CAS와 같은 원리를 DB에서 구현한 것입니다. 테이블에 버전 컬럼(<code>VER</code>)을 두고, 갱신할 때 "내가 읽은 버전과 같을 때만" 갱신합니다.</p>
+
+<figure class="code"><figcaption>opt_lock.pc — 고객 정보 변경(낙관적 락)</figcaption>
+<pre><code class="language-c">EXEC SQL BEGIN DECLARE SECTION;
+    char h_acct[15];
+    char h_nm[41];
+    long h_ver;
+EXEC SQL END DECLARE SECTION;
+
+/* 1단계: 화면 조회 시 버전도 함께 읽어 화면에 숨겨 둔다(락 없음) */
+EXEC SQL SELECT CUST_NM, VER INTO :h_nm, :h_ver
+           FROM ACCT_MST WHERE ACCT_NO = :h_acct;
+
+/* ... 사용자가 화면에서 몇 분 동안 수정 ... */
+
+/* 2단계: 저장 시 "읽었던 버전 그대로일 때만" 갱신하고 버전을 올린다 */
+EXEC SQL UPDATE ACCT_MST
+            SET CUST_NM = :h_nm, VER = VER + 1
+          WHERE ACCT_NO = :h_acct
+            AND VER = :h_ver;                     /* 비교와 갱신이 한 문장 = 원자적 */
+
+if (sqlca.sqlcode == 0 &amp;&amp; sqlca.sqlerrd[2] == 1) {
+    EXEC SQL COMMIT WORK;                         /* 성공 */
+} else if (sqlca.sqlcode == 0 &amp;&amp; sqlca.sqlerrd[2] == 0) {
+    EXEC SQL ROLLBACK WORK;
+    /* 그사이 다른 사용자가 수정함 → "다른 곳에서 변경되었습니다. 다시 조회하세요" */
+} else {
+    sql_error("opt update");
+}</code></pre></figure>
+
+<div class="tbl"><table>
+<thead><tr><th>구분</th><th>비관적 락 (FOR UPDATE)</th><th>낙관적 락 (버전 컬럼)</th></tr></thead>
+<tbody>
+<tr><td>가정</td><td>충돌이 잦다</td><td>충돌이 드물다</td></tr>
+<tr><td>락 보유 시간</td><td>조회부터 커밋까지</td><td>갱신 문장 순간만</td></tr>
+<tr><td>충돌 시</td><td>대기(또는 NOWAIT 오류)</td><td>갱신 0행 → 재시도/사용자 알림</td></tr>
+<tr><td>적합한 곳</td><td>잔액 차감 등 짧고 경합 많은 거래</td><td>고객정보 변경 등 사용자가 화면을 오래 보는 작업</td></tr>
+<tr><td>주의</td><td>데드락, 락 대기 연쇄</td><td>경합이 많으면 재시도 폭증</td></tr>
+</tbody></table></div>
+
+<div class="box fin"><p class="box-title" data-tag="금융 실무">은행 시스템에서는: 사용자 화면에 락을 걸지 않는다</p>
+<p>창구 단말에서 고객 정보를 조회한 뒤 직원이 전화를 받느라 10분 동안 화면을 열어 두었다고 합시다. 만약 조회 시점에 FOR UPDATE를 걸고 저장 시 커밋하는 구조라면, 그 10분 동안 해당 계좌의 모든 입출금이 락 대기에 걸립니다. 실제로 이런 설계 때문에 "특정 고객의 급여 이체만 계속 타임아웃 나는" 장애가 있었습니다. 원칙: <strong>사람의 생각 시간 동안 DB 락을 쥐지 않는다.</strong> 화면 조회-수정은 낙관적 락으로, 잔액 차감처럼 짧은 서버 내부 처리는 비관적 락이나 조건부 UPDATE로 처리합니다.</p>
+</div>
+
+<div class="ex"><p class="ex-title">예제 29-1 <span class="lv">난이도 ★★☆</span></p>
+<p>다음 출금 SQL 하나만으로 Lost Update와 마이너스 잔액을 동시에 막을 수 있는 이유를 설명하고, C 코드에서 결과를 어떻게 판별해야 하는지 쓰십시오.</p>
+<figure class="code"><figcaption>SQL</figcaption><pre><code class="language-c">UPDATE ACCT_MST SET BAL = BAL - :amt
+ WHERE ACCT_NO = :acct AND STAT_CD = '01' AND BAL &gt;= :amt</code></pre></figure>
+<details><summary>정답과 해설 보기</summary>
+<p>UPDATE 문장은 대상 행에 배타 락을 건 상태에서 WHERE 조건을 평가하고 값을 바꿉니다. 다른 트랜잭션이 같은 행을 갱신 중이면 그 커밋을 기다린 뒤 <strong>최신 값으로 조건을 다시 평가</strong>합니다(Oracle의 재시작 동작). 따라서 잔액 확인(<code>BAL &gt;= :amt</code>)과 차감이 하나의 원자적 연산이 되어 TOCTOU 틈이 없고, 애플리케이션이 읽은 옛 값으로 덮어쓰지 않으므로 Lost Update도 없습니다. 판별은 처리 행 수로 합니다.</p>
+<figure class="code good"><figcaption>판별 코드</figcaption><pre><code class="language-c">if (sqlca.sqlcode != 0)            rc = E_DB;          /* DB 오류 */
+else if (sqlca.sqlerrd[2] == 1)    rc = OK;            /* 출금 성공 */
+else {
+    /* 0행: 계좌 없음/상태 이상/잔액 부족 중 무엇인지 구분하려면 추가 조회 */
+    rc = classify_fail(acct);
+}</code></pre></figure>
+</details></div>
+
+<h3 id="s29-2-6">2단계 커밋: 여러 자원을 하나의 트랜잭션으로</h3>
+
+<p>지금까지는 DB 하나 안의 트랜잭션이었습니다. 그런데 예금 원장은 계정계 DB에, 카드 결제 대금은 카드 DB에 있다면? 또는 DB 갱신과 메시지 큐 전송을 "함께 성공하거나 함께 실패"하게 해야 한다면? 서로 다른 <strong>자원 관리자(Resource Manager, RM)</strong>에 걸친 트랜잭션을 <strong>분산 트랜잭션</strong>이라고 하며, 이를 원자적으로 끝내는 표준 프로토콜이 <strong>2단계 커밋(2PC, Two-Phase Commit)</strong>입니다. X/Open의 <strong>XA</strong> 인터페이스가 그 표준 API이고, TP 모니터가 보통 조정자 역할을 합니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 300" width="700" role="img" aria-label="2단계 커밋 프로토콜">
+  <rect class="hl" x="270" y="20" width="160" height="50" rx="8"/>
+  <text x="350" y="42" text-anchor="middle" class="bold">조정자</text>
+  <text x="350" y="60" text-anchor="middle" class="small mute">(TP 모니터의 TM)</text>
+  <rect class="box" x="40" y="220" width="160" height="56" rx="8"/>
+  <text x="120" y="244" text-anchor="middle" class="bold">RM1: 예금 DB</text>
+  <text x="120" y="262" text-anchor="middle" class="small mute">출금 계좌</text>
+  <rect class="box" x="500" y="220" width="160" height="56" rx="8"/>
+  <text x="580" y="244" text-anchor="middle" class="bold">RM2: 카드 DB</text>
+  <text x="580" y="262" text-anchor="middle" class="small mute">결제 대금</text>
+  <text x="350" y="100" text-anchor="middle" class="small acc bold">1단계: 준비(Prepare)</text>
+  <path class="arrow" d="M300 70 L 150 220"/>
+  <path class="arrow" d="M400 70 L 550 220"/>
+  <text x="170" y="135" class="small mono">prepare?</text>
+  <text x="470" y="135" class="small mono">prepare?</text>
+  <path class="arrow-m" d="M175 220 L 320 70"/>
+  <path class="arrow-m" d="M525 220 L 380 70"/>
+  <text x="225" y="190" class="small mono">YES(준비완료)</text>
+  <text x="400" y="190" class="small mono">YES(준비완료)</text>
+  <text x="350" y="150" text-anchor="middle" class="small acc bold">2단계: 커밋(Commit)</text>
+  <text x="350" y="168" text-anchor="middle" class="small">모두 YES → commit 지시</text>
+  <text x="350" y="186" text-anchor="middle" class="small warn-t">하나라도 NO/무응답 → rollback 지시</text>
+  <text x="350" y="296" text-anchor="middle" class="small mute">준비 완료한 RM은 결과를 받을 때까지 락을 쥔 채 대기(in-doubt)</text>
+</svg>
+<figcaption>그림 29-7 2단계 커밋. 1단계에서 모든 참여자가 "커밋할 수 있음"을 디스크에 기록하고 약속한 뒤에야, 2단계에서 실제 커밋을 지시합니다.</figcaption>
+</figure>
+
+<ol class="steps">
+<li><strong>준비 단계</strong>: 조정자가 모든 RM에 "커밋할 준비가 되었는가?"를 묻습니다. 각 RM은 변경 내용을 리두 로그에 확실히 기록하고, 이후 어떤 장애가 나도 커밋할 수 있는 상태가 되면 YES를 답합니다. 이 순간부터 RM은 혼자 롤백할 권리를 포기합니다.</li>
+<li><strong>결정 기록</strong>: 조정자는 모두 YES면 "커밋" 결정을 자신의 로그에 기록합니다. 이 기록이 트랜잭션의 운명을 확정하는 순간입니다.</li>
+<li><strong>커밋 단계</strong>: 조정자가 모든 RM에 커밋을 지시하고, RM은 커밋 후 락을 풉니다. 하나라도 NO였으면 모두에게 롤백을 지시합니다.</li>
+</ol>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 "2단계"가 필요할까? 그냥 차례로 커밋하면 안 될까?</p>
+<p>RM1을 커밋한 직후 RM2의 커밋이 실패하면(디스크 가득, 제약 위반, 네트워크 단절), RM1은 이미 커밋되어 되돌릴 수 없습니다. 출금은 됐는데 입금이 안 된 상태가 됩니다. 2PC는 "실패할 수 있는 모든 일"을 1단계에서 미리 해 두고 "이제 무슨 일이 있어도 커밋할 수 있다"는 약속만 받은 뒤에 결정을 내립니다. 그래서 2단계의 커밋은 실패할 이유가 없고, 장애가 나도 재기동 후 로그를 보고 커밋을 완료합니다. <strong>대가</strong>도 분명합니다. 준비를 마친 RM은 조정자의 결정을 받을 때까지 락을 쥔 채 기다려야 하는데, 그 사이 조정자가 죽으면 그 행들이 결정이 날 때까지 잠긴 상태(<strong>in-doubt 트랜잭션</strong>)로 남습니다. 이것이 2PC의 <strong>블로킹 문제</strong>이며, 네트워크 왕복도 두 배라 느립니다. 그래서 대외기관처럼 조직 경계를 넘는 거래에는 2PC 대신 다음에 볼 보상 트랜잭션을 씁니다.</p>
+</div>
+
+<h3 id="s29-2-7">TP 모니터와 계정계 온라인 구조</h3>
+
+<p>은행 온라인 시스템에는 영업점 단말, 인터넷·모바일 뱅킹, ATM, 대외기관에서 초당 수천 건의 거래가 들어옵니다. 거래마다 프로세스를 띄우거나 DB 연결을 새로 맺는다면 감당할 수 없습니다. <strong>TP 모니터(Transaction Processing Monitor)</strong>는 이런 대량 온라인 거래 처리를 위한 미들웨어입니다. Tuxedo가 대표적인 제품이며, 국내 금융권에도 유사한 개념의 제품들이 널리 쓰입니다. 핵심 개념은 다음과 같습니다.</p>
+
+<div class="tbl"><table>
+<thead><tr><th>개념</th><th>설명</th></tr></thead>
+<tbody>
+<tr><td>서비스(service)</td><td>이름이 붙은 업무 처리 단위. 예: <code>"TRANSFER"</code>, <code>"BAL_INQ"</code>. C 함수 하나로 구현</td></tr>
+<tr><td>서버 프로세스</td><td>서비스를 담고 있는 실행 파일. 미리 여러 개 띄워 두고(프로세스 풀) DB 연결도 미리 맺어 둠</td></tr>
+<tr><td>큐와 라우팅</td><td>요청은 서비스 이름으로 큐에 들어가고, 한가한 서버 프로세스가 꺼내 처리(부하 분산)</td></tr>
+<tr><td><code>tpcall</code></td><td>클라이언트나 다른 서비스가 서비스를 동기 호출. <code>tpacall</code>/<code>tpgetrply</code>는 비동기</td></tr>
+<tr><td>트랜잭션 경계</td><td><code>tpbegin</code>~<code>tpcommit</code>/<code>tpabort</code> 사이의 모든 서비스 호출이 하나의 전역 트랜잭션(XA, 2PC)</td></tr>
+<tr><td>타임아웃·재기동</td><td>서비스 처리 제한 시간, 서버 프로세스가 죽으면 자동 재기동</td></tr>
+</tbody></table></div>
+
+<figure class="diagram">
+<svg viewBox="0 0 720 330" width="720" role="img" aria-label="계정계 온라인 구조">
+  <rect class="box" x="10" y="30" width="110" height="36" rx="6"/><text x="65" y="53" text-anchor="middle" class="small">영업점 단말</text>
+  <rect class="box" x="10" y="80" width="110" height="36" rx="6"/><text x="65" y="103" text-anchor="middle" class="small">인터넷·모바일</text>
+  <rect class="box" x="10" y="130" width="110" height="36" rx="6"/><text x="65" y="153" text-anchor="middle" class="small">ATM</text>
+  <rect class="box" x="10" y="180" width="110" height="36" rx="6"/><text x="65" y="203" text-anchor="middle" class="small">대외기관</text>
+  <rect class="hl2" x="150" y="30" width="110" height="186" rx="8"/>
+  <text x="205" y="110" text-anchor="middle" class="bold small">채널/대외계</text>
+  <text x="205" y="128" text-anchor="middle" class="small mute">전문 변환</text>
+  <text x="205" y="144" text-anchor="middle" class="small mute">GUID 부여</text>
+  <path class="arrow-m" d="M120 48 H 150"/><path class="arrow-m" d="M120 98 H 150"/>
+  <path class="arrow-m" d="M120 148 H 150"/><path class="arrow-m" d="M120 198 H 150"/>
+  <path class="arrow" d="M260 123 H 300"/>
+  <text x="280" y="115" text-anchor="middle" class="small mono">tpcall</text>
+  <rect class="box" x="300" y="20" width="250" height="210" rx="10"/>
+  <text x="425" y="42" text-anchor="middle" class="bold">TP 모니터 (계정계)</text>
+  <rect class="hl" x="315" y="55" width="220" height="30" rx="4"/>
+  <text x="425" y="75" text-anchor="middle" class="small">서비스 큐 / 라우팅 / TM(XA)</text>
+  <rect class="hl" x="315" y="100" width="100" height="50" rx="4"/>
+  <text x="365" y="122" text-anchor="middle" class="small mono">TRANSFER</text>
+  <text x="365" y="140" text-anchor="middle" class="small mute">서버 x 8</text>
+  <rect class="hl" x="435" y="100" width="100" height="50" rx="4"/>
+  <text x="485" y="122" text-anchor="middle" class="small mono">BAL_INQ</text>
+  <text x="485" y="140" text-anchor="middle" class="small mute">서버 x 16</text>
+  <rect class="hl" x="315" y="165" width="100" height="50" rx="4"/>
+  <text x="365" y="187" text-anchor="middle" class="small mono">FEE_CALC</text>
+  <text x="365" y="205" text-anchor="middle" class="small mute">서버 x 4</text>
+  <rect class="hl" x="435" y="165" width="100" height="50" rx="4"/>
+  <text x="485" y="187" text-anchor="middle" class="small mono">LEDGER</text>
+  <text x="485" y="205" text-anchor="middle" class="small mute">서버 x 8</text>
+  <path class="arrow" d="M550 125 H 600"/>
+  <rect class="hl2" x="600" y="70" width="110" height="110" rx="8"/>
+  <text x="655" y="115" text-anchor="middle" class="bold">원장 DB</text>
+  <text x="655" y="135" text-anchor="middle" class="small mute">계좌·거래내역</text>
+  <rect class="box" x="300" y="260" width="250" height="50" rx="8"/>
+  <text x="425" y="282" text-anchor="middle" class="small bold">배치(일마감·이자·대사)</text>
+  <text x="425" y="299" text-anchor="middle" class="small mute">야간에 같은 DB를 대량 처리</text>
+  <path class="arrow-m" d="M550 285 L 640 180"/>
+</svg>
+<figcaption>그림 29-8 계정계 온라인 구조(개념). 채널계와 대외계가 전문을 받아 TP 모니터의 서비스를 호출하고, 서비스 서버 프로세스들이 미리 연결해 둔 원장 DB를 갱신합니다.</figcaption>
+</figure>
+
+<figure class="code"><figcaption>svc_transfer.c — Tuxedo 스타일 서비스와 클라이언트(개념 코드)</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+#include &lt;atmi.h&gt;           /* Tuxedo ATMI API */
+#include &lt;userlog.h&gt;
+
+/* 요청/응답 전문 레이아웃(고정 길이, CARRAY 버퍼로 주고받음) */
+typedef struct {
+    char guid[32];
+    char from[14];
+    char to[14];
+    char amt[15];          /* 숫자 문자열, 앞 0 채움 */
+} TrReq;
+typedef struct {
+    char guid[32];
+    char rsp_cd[4];        /* "0000" 정상 */
+    char bal_from[15];
+} TrRsp;
+
+/* 서버 프로세스 기동 시 1회: DB 연결(XA면 tpopen) */
+int tpsvrinit(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    if (tpopen() == -1) {                       /* 설정된 RM(DB)에 연결 */
+        userlog("tpopen 실패: %s", tpstrerror(tperrno));
+        return -1;
+    }
+    return 0;
+}
+
+/* 서비스 함수: 이름 TRANSFER로 광고(advertise)됨 */
+void TRANSFER(TPSVCINFO *rqst)
+{
+    TrReq req;
+    TrRsp *rsp;
+    if (rqst-&gt;len &lt; (long)sizeof req) {         /* 전문 길이 검증 */
+        tpreturn(TPFAIL, 0, rqst-&gt;data, 0L, 0);
+    }
+    memcpy(&amp;req, rqst-&gt;data, sizeof req);
+
+    rsp = (TrRsp *)tpalloc("CARRAY", NULL, sizeof *rsp);   /* 응답 버퍼 */
+    if (rsp == NULL) tpreturn(TPFAIL, 0, rqst-&gt;data, 0L, 0);
+    memcpy(rsp-&gt;guid, req.guid, sizeof rsp-&gt;guid);
+
+    /* 업무 처리: 이 서비스가 호출자의 전역 트랜잭션 안에서 실행되면
+       여기서 COMMIT/ROLLBACK 하지 않는다! 경계는 호출자가 정한다 */
+    int rc = transfer_in_tx(&amp;req, rsp);            /* 29-2-2의 로직(커밋 제외) */
+
+    memcpy(rsp-&gt;rsp_cd, rc == 0 ? "0000" : "E012", 4);
+    /* tpreturn은 return하지 않는다: 응답을 보내고 서비스 함수를 끝낸다 */
+    tpreturn(rc == 0 ? TPSUCCESS : TPFAIL, rc, (char *)rsp, sizeof *rsp, 0);
+}
+
+/* ---- 호출 측(채널계 서비스 또는 클라이언트) ---- */
+int call_transfer(const TrReq *in, TrRsp *out)
+{
+    char *sbuf = tpalloc("CARRAY", NULL, sizeof *in);
+    char *rbuf = tpalloc("CARRAY", NULL, sizeof *out);
+    long rlen = sizeof *out;
+    int  ret = -1;
+    if (!sbuf || !rbuf) goto done;
+    memcpy(sbuf, in, sizeof *in);
+
+    if (tpbegin(30, 0) == -1) goto done;           /* 트랜잭션 시작, 30초 제한 */
+    if (tpcall("TRANSFER", sbuf, sizeof *in, &amp;rbuf, &amp;rlen, 0) == -1) {
+        userlog("[%.32s] tpcall 실패: %s", in-&gt;guid, tpstrerror(tperrno));
+        tpabort(0);                                /* 전역 트랜잭션 롤백 */
+        goto done;
+    }
+    if (tpcommit(0) == -1) {                        /* 2PC 커밋 */
+        userlog("[%.32s] tpcommit 실패: %s", in-&gt;guid, tpstrerror(tperrno));
+        goto done;
+    }
+    memcpy(out, rbuf, sizeof *out);
+    ret = 0;
+done:
+    if (sbuf) tpfree(sbuf);
+    if (rbuf) tpfree(rbuf);                         /* tpcall이 rbuf를 재할당했을 수 있음 */
+    return ret;
+}</code></pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 서비스 안에서 COMMIT하지 않을까?</p>
+<p><code>tpbegin</code>으로 시작된 전역 트랜잭션 안에서 여러 서비스(출금 서비스, 수수료 서비스, 원장 서비스)가 호출된다고 합시다. 출금 서비스가 자기 마음대로 COMMIT해 버리면, 뒤의 수수료 서비스가 실패해도 출금은 이미 확정되어 원자성이 깨집니다. 그래서 <strong>트랜잭션의 경계(시작과 끝)는 업무 흐름 전체를 아는 쪽 한 곳</strong>에서만 정하고, 각 서비스는 자기 일만 하고 성공/실패(<code>TPSUCCESS</code>/<code>TPFAIL</code>)를 보고합니다. 서비스가 <code>TPFAIL</code>을 반환하면 TP 모니터가 전역 트랜잭션을 롤백 전용(rollback-only)으로 표시합니다. 마찬가지로 <code>tpreturn</code>은 C의 <code>return</code>과 달리 함수로 돌아오지 않으므로(내부적으로 longjmp와 유사), 그 뒤에 정리 코드를 두면 실행되지 않습니다.</p>
+</div>
+
+<div class="box fin"><p class="box-title" data-tag="금융 실무">사고 사례: 타임아웃은 났는데 이체는 됐다</p>
+<p>채널계가 <code>tpcall</code>의 블로킹 타임아웃을 10초로, 계정계 서비스의 트랜잭션 타임아웃을 30초로 잡아 둔 시스템이 있었습니다. DB 부하가 높던 날, 이체 서비스가 12초 만에 정상 커밋되었지만 채널계는 이미 10초에 타임아웃으로 고객에게 "이체 실패"를 표시한 뒤였습니다. 고객이 다시 이체해 결국 두 번 출금되었습니다. 원인은 <strong>호출자의 타임아웃이 피호출자의 처리 시간보다 짧았던 것</strong>과, 타임아웃을 "실패"로 단정한 것입니다. 타임아웃은 "실패"가 아니라 <strong>"결과를 모름"</strong>입니다. 재발 방지책은 (1) 타임아웃 계층 정렬(바깥쪽이 안쪽보다 길게), (2) 타임아웃 시 고객에게 "처리 결과 확인 중"으로 안내하고 GUID로 결과 조회 거래 수행, (3) 동일 GUID 거래의 <strong>중복 처리 방지</strong>(거래내역의 GUID 유일 제약)였습니다.</p>
+</div>
+
+<h3 id="s29-2-8">원장과 거래내역 동시 갱신</h3>
+
+<p>계정계에서 거의 모든 거래는 두 종류의 데이터를 함께 바꿉니다. <strong>원장(마스터)</strong>은 계좌의 현재 상태(잔액)이고, <strong>거래내역</strong>은 어떤 거래로 잔액이 변했는지에 대한 기록입니다. 이 둘은 항상 맞아야 합니다. "어제 잔액 + 오늘 거래내역의 입금 합계 - 출금 합계 = 오늘 잔액"이라는 등식이 깨지면 대사 오류입니다. 이를 지키는 실무 원칙은 다음과 같습니다.</p>
+
+<ol class="steps">
+<li><strong>같은 트랜잭션</strong>: 원장 UPDATE와 거래내역 INSERT는 반드시 하나의 트랜잭션에서 함께 커밋합니다. 따로 커밋하면 그 사이 장애 시 불일치가 생깁니다.</li>
+<li><strong>원장 락 먼저</strong>: 원장 행을 먼저 잠그고(FOR UPDATE 또는 조건부 UPDATE), 그 잔액을 기준으로 거래 후 잔액을 계산해 거래내역에 기록합니다. 락 없이 읽은 잔액으로 거래 후 잔액을 기록하면, 동시 거래 시 내역의 "거래 후 잔액"이 서로 꼬입니다.</li>
+<li><strong>일련번호 채번</strong>: 계좌별 거래 일련번호를 원장 행의 컬럼으로 두고 <code>UPDATE ... SET LAST_SEQ = LAST_SEQ + 1</code>로 원장 락 안에서 채번하면, 계좌별로 빈틈없이 연속된 번호를 얻습니다(시퀀스 객체는 롤백 시 번호가 비는 것을 허용).</li>
+<li><strong>중복 방지 키</strong>: 거래내역에 거래 추적 ID(GUID)나 "채널+전문번호"의 유일 제약을 두어, 재전송된 같은 거래가 두 번 처리되지 않게 합니다(ORA-00001이 곧 중복 거래 탐지).</li>
+<li><strong>대사 배치</strong>: 매일 마감 후 원장 잔액과 거래내역 합계를 비교하는 배치를 돌려, 어떤 경로로든 생긴 불일치를 다음 날 영업 전에 찾아냅니다.</li>
+</ol>
+
+<figure class="code"><figcaption>ledger_post.pc — 원장 락 안에서 일련번호 채번과 내역 기록</figcaption>
+<pre><code class="language-c">/* 출금 1건 전기(posting). 호출자가 트랜잭션 경계를 관리한다 */
+int post_withdraw(const char *acct, long long amt, const char *guid, const char *dt)
+{
+    snprintf(h_acct, sizeof h_acct, "%s", acct);
+    snprintf(h_guid, sizeof h_guid, "%s", guid);
+    snprintf(h_dt,   sizeof h_dt,   "%s", dt);
+    h_amt = amt;
+
+    /* (1) 원장 갱신 + 채번 + 거래 후 잔액 획득을 한 문장으로 (RETURNING 절) */
+    EXEC SQL UPDATE ACCT_MST
+                SET BAL = BAL - :h_amt,
+                    LAST_SEQ = LAST_SEQ + 1,
+                    LAST_TX_DT = :h_dt
+              WHERE ACCT_NO = :h_acct AND STAT_CD = '01' AND BAL &gt;= :h_amt
+          RETURNING BAL, LAST_SEQ INTO :h_aft_bal, :h_seq;
+    if (sqlca.sqlcode != 0) return E_DB;
+    if (sqlca.sqlerrd[2] != 1) return E_FUNDS;        /* 0행: 잔액 부족 또는 상태 이상 */
+
+    /* (2) 거래내역: 계좌별 일련번호, GUID 유일 제약으로 중복 차단 */
+    EXEC SQL INSERT INTO TX_HIST2 (ACCT_NO, TX_SEQ, TX_DT, TX_TP, TX_AMT, AFT_BAL, GUID)
+             VALUES (:h_acct, :h_seq, :h_dt, '20', :h_amt, :h_aft_bal, :h_guid);
+    if (sqlca.sqlcode == -1) return E_DUP;             /* 같은 GUID 이미 처리됨 */
+    if (sqlca.sqlcode != 0) return E_DB;
+    return OK;
+}</code></pre></figure>
+
+<h3 id="s29-2-9">보상 트랜잭션: 되돌릴 수 없을 때 되돌리는 법</h3>
+
+<p>타행 이체를 생각해 봅시다. 우리 은행에서 출금하고, 대외기관 망을 통해 다른 은행에 입금을 요청합니다. 다른 은행의 DB는 우리가 2PC로 묶을 수 없습니다. 조직도 다르고, 상대가 응답하지 않는 동안 우리 고객 계좌의 락을 쥐고 기다릴 수도 없습니다. 그래서 각 단계를 <strong>독립된 로컬 트랜잭션으로 커밋</strong>하고, 뒤 단계가 실패하면 앞 단계의 효과를 <strong>반대 거래로 상쇄</strong>합니다. 이 반대 거래를 <strong>보상 트랜잭션(compensating transaction)</strong>이라고 하며, 이런 단계별 커밋과 보상의 연쇄를 <strong>사가(Saga) 패턴</strong>이라고도 부릅니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 260" width="700" role="img" aria-label="타행이체 보상 트랜잭션 흐름">
+  <rect class="hl" x="20" y="40" width="150" height="56" rx="8"/>
+  <text x="95" y="63" text-anchor="middle" class="bold small">T1: 출금</text>
+  <text x="95" y="81" text-anchor="middle" class="small mute">로컬 커밋</text>
+  <path class="arrow" d="M170 68 H 250"/>
+  <rect class="hl2" x="250" y="40" width="190" height="56" rx="8"/>
+  <text x="345" y="63" text-anchor="middle" class="bold small">T2: 대외 입금 요청</text>
+  <text x="345" y="81" text-anchor="middle" class="small mute">상대 은행 처리</text>
+  <path class="arrow" d="M440 68 H 520"/>
+  <rect class="hl" x="520" y="40" width="160" height="56" rx="8"/>
+  <text x="600" y="63" text-anchor="middle" class="bold small">완료</text>
+  <text x="600" y="81" text-anchor="middle" class="small mute">정상 응답 수신</text>
+  <path class="arrow-m" d="M345 96 V 150"/>
+  <text x="360" y="128" class="small warn-t">거절 응답(계좌 없음 등)</text>
+  <rect class="bad" x="250" y="150" width="190" height="56" rx="8"/>
+  <text x="345" y="173" text-anchor="middle" class="bold small">C1: 출금 취소 입금</text>
+  <text x="345" y="191" text-anchor="middle" class="small mute">보상 트랜잭션</text>
+  <path class="arrow-m" d="M250 178 L 95 100"/>
+  <text x="120" y="155" class="small">T1 효과 상쇄</text>
+  <text x="350" y="240" text-anchor="middle" class="small mute">응답 없음(타임아웃) → 즉시 보상 금지, 결과 조회 후 결정</text>
+</svg>
+<figcaption>그림 29-9 타행이체의 보상 트랜잭션. 출금은 먼저 커밋하고, 상대 은행이 거절하면 반대 거래(출금 취소)로 상쇄합니다.</figcaption>
+</figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 보상은 "ROLLBACK"이 아니라 "반대 거래"일까?</p>
+<p>T1은 이미 커밋되어 다른 트랜잭션들이 그 결과를 보았을 수 있습니다(고객이 잔액을 조회했고, 그 뒤 다른 출금도 있었을 수 있음). 커밋된 과거를 지울 수는 없습니다. 그래서 금융에서는 기록을 지우지 않고 <strong>"취소 거래"라는 새 기록을 추가</strong>해 효과를 상쇄합니다. 거래내역에는 출금 1건과 출금취소 1건이 모두 남고, 이것이 감사 추적(audit trail)이 됩니다. 이 때문에 보상 트랜잭션에는 몇 가지 조건이 따릅니다. (1) 원거래를 가리키는 키(원거래 GUID)를 가져야 하고, (2) <strong>멱등</strong>해야 합니다. 보상 요청이 재전송되어도 한 번만 반영되어야 합니다. (3) 보상 자체가 실패하면 재시도 큐에 넣어 결국 성공시켜야 합니다(사람이 개입하는 미결 목록 포함). ACID의 격리성은 포기한 것이므로, 그 사이 다른 거래가 중간 상태를 볼 수 있다는 점도 업무적으로 수용 가능한지 검토해야 합니다.</p>
+</div>
+
+<div class="box warn"><p class="box-title" data-tag="주의">타임아웃 시 바로 보상하면 안 됩니다</p>
+<p>대외 입금 요청에 응답이 없을 때 "실패했겠지" 하고 즉시 출금 취소를 하면, 사실은 상대 은행에서 입금이 처리된 경우 고객은 돈을 받기도 하고 돌려받기도 해서 이중 지급이 됩니다. 응답 없음은 <strong>결과 불명</strong>입니다. 정해진 절차(결과 조회 전문, 일정 시간 후 재조회, 그래도 불명이면 마감 후 대사 파일로 확정)에 따라 결과를 확정한 뒤에만 보상합니다. 이것이 금융 대외계 프로그램에 "미결 거래 처리" 모듈이 꼭 있는 이유입니다.</p>
+</div>
+
+<div class="box key"><p class="box-title" data-tag="핵심">29-2 한 줄 요약</p>
+<p>원장과 거래내역은 같은 트랜잭션에서 함께 커밋하고, 읽고-판단하고-쓰는 갱신은 FOR UPDATE나 조건부 UPDATE로 보호하며, 여러 행 락은 계좌번호 순서로 잡습니다. 트랜잭션 경계는 한 곳에서 정하고, 조직을 넘는 거래는 보상 트랜잭션으로, 타임아웃은 "결과 불명"으로 다룹니다.</p>
+</div>
+
+<h2 id="summary">핵심 정리</h2>
+<ul class="summary-list">
+<li>Pro*C는 프리컴파일러 <code>proc</code>가 EXEC SQL을 런타임 라이브러리 호출로 바꾼 C 파일을 만들고, 그 파일을 일반 C처럼 컴파일·링크합니다. 생성된 .c 파일은 수정하지 않습니다.</li>
+<li>호스트 변수는 SQL 안에서 <code>:</code>를 붙여 쓰며, char 배열은 컬럼 길이 + 1(널 문자), 금액은 <code>long long</code>으로 받습니다.</li>
+<li>NULL 가능 컬럼에는 <code>short</code> 지시자 변수를 붙입니다. -1은 NULL, 양수는 잘림(원래 길이). 지시자 없이 NULL을 받으면 ORA-01405입니다.</li>
+<li>VARCHAR는 <code>len</code> + <code>arr</code> 구조체로 바뀌며 널 종료되지 않습니다. 입력 시 len 설정, 출력 후 직접 널 종료가 필요합니다.</li>
+<li>모든 SQL 뒤에 <code>sqlca.sqlcode</code>를 검사합니다(0 성공, 1403 데이터 없음, 음수 오류). 갱신은 <code>sqlerrd[2]</code>로 처리 행 수까지 확인합니다.</li>
+<li>여러 행은 커서(DECLARE-OPEN-FETCH-CLOSE)로 처리하고, 대량 처리는 배열 FETCH와 <code>FOR :n</code> 배열 DML로 왕복 횟수를 줄입니다. 배열 FETCH의 1403에는 마지막 묶음이 들어 있습니다.</li>
+<li>동적 SQL에서도 값은 반드시 바인드 변수로 전달해 SQL 인젝션을 막고 실행 계획을 재사용합니다. 구조를 바꾸는 입력은 허용 목록으로만 받습니다.</li>
+<li>ACID는 언두(원자성), 제약과 로직(일관성), 락과 MVCC(격리성), WAL 리두 로그(지속성)로 구현됩니다.</li>
+<li>Oracle 기본 격리 수준은 READ COMMITTED이며, Lost Update는 SELECT FOR UPDATE(비관적 락), 버전 컬럼(낙관적 락), 또는 조건부 UPDATE로 막습니다.</li>
+<li>2PC는 준비-커밋 두 단계로 여러 자원의 원자성을 보장하지만 블로킹 문제가 있습니다. TP 모니터는 서비스, tpcall, tpbegin/tpcommit으로 대량 온라인 거래와 분산 트랜잭션을 관리합니다.</li>
+<li>조직을 넘는 거래는 로컬 커밋 + 보상 트랜잭션으로 처리하며, 타임아웃은 실패가 아니라 결과 불명입니다.</li>
+</ul>
+
+<h2 id="interview">CS 면접 단골 질문</h2>
+<div class="box iv"><p class="box-title" data-tag="면접">이 장에서 나오는 면접 질문</p>
+<details><summary>Q1. 트랜잭션의 ACID를 설명해 주세요.</summary><p>원자성은 트랜잭션의 작업이 모두 반영되거나 하나도 반영되지 않는 성질이고, 일관성은 트랜잭션 전후로 데이터가 무결성 규칙을 만족하는 성질입니다. 격리성은 동시에 실행되는 트랜잭션이 서로의 중간 결과에 영향을 받지 않는 성질, 지속성은 커밋된 결과가 장애 후에도 유지되는 성질입니다. 계좌이체로 예를 들면 출금과 입금이 함께 반영되고, 총액이 보존되며, 이체 중간 상태가 다른 거래에 보이지 않고, 커밋 직후 정전이 나도 결과가 남아야 합니다. <strong>꼬리 질문</strong>: 지속성은 WAL 방식으로 리두 로그를 커밋 시 디스크에 먼저 기록해 보장합니다.</p></details>
+<details><summary>Q2. 트랜잭션 격리 수준과 각 수준에서 발생하는 이상 현상을 말해 주세요.</summary><p>READ UNCOMMITTED는 커밋되지 않은 데이터를 읽는 Dirty Read까지 허용하고, READ COMMITTED는 Dirty Read는 막지만 같은 행을 다시 읽을 때 값이 바뀌는 Non-Repeatable Read를 허용합니다. REPEATABLE READ는 그것까지 막지만 새 행이 나타나는 Phantom Read가 표준상 가능하고, SERIALIZABLE은 모두 막습니다. 격리 수준이 높을수록 동시성이 떨어집니다. Oracle은 기본이 READ COMMITTED이고 MVCC로 읽기가 쓰기를 막지 않는다는 점을 덧붙이면 좋습니다.</p></details>
+<details><summary>Q3. 비관적 락과 낙관적 락의 차이와 선택 기준은?</summary><p>비관적 락은 충돌이 잦다고 가정해 읽을 때 SELECT FOR UPDATE로 미리 잠그고, 낙관적 락은 충돌이 드물다고 가정해 잠그지 않고 쓸 때 버전 컬럼을 비교해 그사이 변경이 있었으면 실패시킵니다. 잔액 차감처럼 짧고 경합이 많은 처리는 비관적 락이, 사용자가 화면을 오래 보는 정보 수정처럼 락 보유 시간이 길어지는 작업은 낙관적 락이 적합합니다. 낙관적 락은 경합이 많으면 재시도가 폭증한다는 단점이 있습니다.</p></details>
+<details><summary>Q4. DB 데드락은 어떻게 발생하고 어떻게 처리되나요?</summary><p>두 트랜잭션이 서로 상대가 잠근 행을 기다리면 발생합니다. 예를 들어 A→B 이체와 B→A 이체가 동시에 각자 첫 행을 잠근 경우입니다. Oracle은 이를 자동으로 탐지해 한쪽 문장을 ORA-00060으로 실패시키고, 애플리케이션은 롤백 후 재시도해야 합니다. 예방은 여러 행을 잠글 때 계좌번호 오름차순처럼 일정한 순서를 지키는 것이고, 트랜잭션을 짧게 유지하는 것도 중요합니다.</p></details>
+<details><summary>Q5. 2단계 커밋(2PC)이란 무엇이고 단점은?</summary><p>여러 자원 관리자에 걸친 분산 트랜잭션의 원자성을 보장하는 프로토콜입니다. 1단계에서 조정자가 모든 참여자에게 준비를 요청하고, 참여자는 커밋할 수 있는 상태를 로그에 기록한 뒤 YES를 답합니다. 모두 YES면 2단계에서 커밋을, 하나라도 NO면 롤백을 지시합니다. 단점은 준비를 마친 참여자가 결정을 받을 때까지 락을 쥐고 기다려야 해 조정자 장애 시 블로킹되는 문제와, 왕복이 늘어나는 성능 비용입니다. 그래서 조직 간 거래는 보상 트랜잭션(사가 패턴)을 많이 씁니다.</p></details>
+<details><summary>Q6. SQL 인젝션이란 무엇이고 어떻게 막나요?</summary><p>사용자 입력이 SQL 문자열에 그대로 연결되어 SQL의 구조를 바꾸는 공격입니다. 예를 들어 이름 입력에 <code>' OR '1'='1</code>을 넣으면 조건이 항상 참이 되어 전체 데이터가 조회됩니다. 바인드 변수(Prepared Statement)를 쓰면 SQL 파싱이 끝난 뒤 값이 데이터로만 전달되므로 구조를 바꿀 수 없습니다. 테이블명이나 정렬 컬럼처럼 바인드할 수 없는 부분은 허용 목록으로 검증합니다. 바인드 변수는 실행 계획 재사용으로 성능에도 유리합니다.</p></details>
+<details><summary>Q7. DB의 NULL을 C 프로그램에서 어떻게 다루나요?</summary><p>C 변수에는 "값 없음"을 표현할 방법이 없으므로, Pro*C에서는 short형 지시자 변수를 호스트 변수와 짝지어 씁니다. 조회 시 지시자가 -1이면 NULL이고 호스트 변수의 내용은 의미가 없으며, 양수면 값이 잘린 것입니다. 입력 시 지시자를 -1로 두면 NULL이 저장됩니다. 지시자 없이 NULL을 FETCH하면 ORA-01405 오류가 나므로, NULL 허용 컬럼에는 지시자를 붙이거나 NVL로 기본값을 줍니다.</p></details>
+<details><summary>Q8. 대량 데이터 배치의 성능을 높이는 방법은?</summary><p>가장 큰 비용은 DB와의 네트워크 왕복이므로 배열 FETCH와 배열 INSERT/UPDATE로 왕복 횟수를 줄입니다. 또 건마다 커밋하면 리두 로그 동기화 대기가 커지므로 적당한 단위로 묶어 커밋하되, 재시작 지점을 함께 기록해 실패 시 이어서 처리할 수 있게 합니다. SQL 자체는 인덱스와 실행 계획을 점검하고, 가능하면 C 루프 대신 집합 연산 SQL 한 문장으로 처리합니다. 필요하면 키 범위로 나눠 여러 프로세스가 병렬 처리합니다.</p></details>
+<details><summary>Q9. TP 모니터는 왜 필요한가요?</summary><p>대량의 짧은 온라인 거래를 효율적으로 처리하기 위해서입니다. 서버 프로세스와 DB 연결을 미리 만들어 풀로 관리하고, 요청을 서비스 이름으로 라우팅해 부하를 분산하며, 프로세스 장애 시 재기동하고, 처리 시간 제한을 관리합니다. 또 XA 기반으로 여러 자원에 걸친 전역 트랜잭션의 경계(tpbegin, tpcommit)를 관리해 2단계 커밋을 수행합니다. 클라이언트마다 DB 연결을 맺는 2계층 구조보다 자원 사용이 훨씬 효율적입니다.</p></details>
+<details><summary>Q10. 타임아웃이 발생한 이체 거래는 어떻게 처리해야 하나요?</summary><p>타임아웃은 실패가 아니라 결과를 모르는 상태이므로, 바로 실패 처리하거나 재시도하면 이중 처리가 생길 수 있습니다. 거래마다 고유한 거래 추적 ID를 부여하고, 타임아웃 시 그 ID로 결과 조회 거래를 수행해 처리 여부를 확정한 뒤 후속 처리를 합니다. 서버 쪽에서는 같은 ID의 중복 요청을 유일 제약 등으로 막아 멱등성을 보장하고, 호출 계층의 타임아웃은 바깥쪽이 안쪽보다 길도록 정렬합니다.</p></details>
+</div>
+
+<h2 id="exercises">연습문제</h2>
+
+<div class="ex"><p class="ex-title">연습문제 29-1 <span class="lv">난이도 ★☆☆</span></p>
+<p>CUST_NM이 VARCHAR2(40 BYTE)인 컬럼을 <code>char</code> 호스트 변수로 받으려 합니다. 배열 크기는 최소 얼마여야 하며, 왜 그런지 설명하십시오.</p>
+<details><summary>정답과 해설 보기</summary>
+<p><strong>41바이트</strong>입니다. 기본 설정에서 char 배열 호스트 변수는 널 종료 문자열로 채워지므로 최대 40바이트 값과 널 문자 1바이트가 필요합니다. 컬럼이 40 CHAR 단위라면 문자셋에 따라 한 글자가 최대 3~4바이트이므로 훨씬 크게 잡아야 합니다. 작게 잡으면 값이 잘리며, 지시자가 있으면 양수(원래 길이)로 잘림이 보고됩니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 29-2 <span class="lv">난이도 ★☆☆</span></p>
+<p>다음 각 상황에서 <code>sqlca.sqlcode</code>(MODE=ORACLE)는 무엇입니까? (1) 존재하지 않는 계좌번호로 SELECT INTO (2) 조건에 맞는 행이 없는 UPDATE (3) 기본 키 중복 INSERT (4) 2행이 반환되는 SELECT INTO</p>
+<details><summary>정답과 해설 보기</summary>
+<p>(1) <strong>1403</strong>(NO DATA FOUND). (2) <strong>0</strong>입니다. UPDATE는 0행이어도 오류가 아니며 <code>sqlerrd[2]</code>가 0입니다. 그래서 행 수 검증이 필요합니다. (3) <strong>-1</strong>(ORA-00001 unique constraint violated). (4) <strong>-1422</strong>(ORA-01422 exact fetch returns more than requested number of rows). 여러 행이 가능한 조회는 커서를 써야 합니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 29-3 <span class="lv">난이도 ★★☆</span> 버그 찾기</p>
+<p>다음 코드에서 고객명이 이상하게 출력되거나 프로그램이 이상 동작할 수 있는 이유를 찾으십시오.</p>
+<figure class="code"><figcaption>문제 코드</figcaption><pre><code class="language-c">EXEC SQL BEGIN DECLARE SECTION;
+    VARCHAR h_nm[40];
+    char    h_acct[15];
+EXEC SQL END DECLARE SECTION;
+
+EXEC SQL SELECT CUST_NM INTO :h_nm FROM ACCT_MST WHERE ACCT_NO = :h_acct;
+h_nm.arr[h_nm.len] = '\0';
+printf("%s\n", h_nm.arr);</code></pre></figure>
+<details><summary>정답과 해설 보기</summary>
+<p>고객명이 정확히 40바이트이면 <code>h_nm.len</code>이 40이고, <code>h_nm.arr[40]</code>은 배열 범위를 벗어난 쓰기(미정의 동작)입니다. 바로 뒤의 <code>h_acct</code> 첫 바이트 같은 다른 변수를 덮어쓸 수 있습니다. 또 SELECT의 sqlcode를 검사하지 않아, 계좌가 없으면(1403) 이전 값이나 쓰레기 len으로 출력합니다. 해결: 배열을 <code>VARCHAR h_nm[41]</code>로 한 칸 크게 잡거나, 별도의 C 버퍼에 len만큼 복사 후 종료하거나, <code>printf("%.*s\n", h_nm.len, h_nm.arr)</code>로 출력하고, sqlcode를 먼저 검사합니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 29-4 <span class="lv">난이도 ★★☆</span></p>
+<p>배열 크기 500으로 1,234행을 배열 FETCH합니다. 각 FETCH 직후의 <code>sqlca.sqlcode</code>와 <code>sqlca.sqlerrd[2]</code> 값을 순서대로 쓰고, 처리 행 수를 구하는 식을 쓰십시오.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>1회차: sqlcode 0, sqlerrd[2] 500. 2회차: sqlcode 0, sqlerrd[2] 1000. 3회차: sqlcode <strong>1403</strong>, sqlerrd[2] <strong>1234</strong>. sqlerrd[2]는 커서 OPEN 이후의 누적 행 수이므로, 이번 회차 행 수 = 현재 sqlerrd[2] - 이전 누적(500, 500, 234)입니다. 3회차에 1403이 왔다고 처리 전에 루프를 빠져나가면 마지막 234행이 누락됩니다. 만약 행이 정확히 1,000개였다면 3회차는 0행 + 1403이 됩니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 29-5 <span class="lv">난이도 ★★☆</span> 보안</p>
+<p>다음 코드의 보안 문제를 설명하고, 동적 SQL Method 2(PREPARE/EXECUTE USING)로 고치십시오.</p>
+<figure class="code"><figcaption>문제 코드</figcaption><pre><code class="language-c">sprintf(sqlbuf, "UPDATE ACCT_MST SET STAT_CD = '02' WHERE ACCT_NO = '%s'", input_acct);
+EXEC SQL EXECUTE IMMEDIATE :sqlbuf;</code></pre></figure>
+<details><summary>정답과 해설 보기</summary>
+<p>입력값이 SQL 문자열에 그대로 들어가 SQL 인젝션이 가능합니다. 예를 들어 <code>x' OR '1'='1</code>을 입력하면 <strong>모든 계좌가 정지</strong>됩니다. 또 <code>sprintf</code>는 버퍼 길이 검사가 없어 오버플로 위험도 있습니다. 값은 바인드 변수로 넘깁니다.</p>
+<figure class="code good"><figcaption>정답 코드</figcaption><pre><code class="language-c">snprintf(sqlbuf, sizeof sqlbuf,
+         "UPDATE ACCT_MST SET STAT_CD = '02' WHERE ACCT_NO = :v1");
+snprintf(h_acct, sizeof h_acct, "%s", input_acct);
+EXEC SQL PREPARE s_stop FROM :sqlbuf;
+EXEC SQL EXECUTE s_stop USING :h_acct;
+if (sqlca.sqlcode != 0 || sqlca.sqlerrd[2] != 1) {
+    EXEC SQL ROLLBACK WORK;            /* 정확히 1계좌만 바뀌어야 한다 */
+}</code></pre></figure>
+<p>사실 이 SQL은 구조가 고정이므로 동적 SQL이 필요 없습니다. 정적 SQL <code>EXEC SQL UPDATE ... WHERE ACCT_NO = :h_acct;</code>가 가장 좋은 답입니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 29-6 <span class="lv">난이도 ★★☆</span></p>
+<p>READ COMMITTED에서 다음 두 트랜잭션이 동시에 실행됩니다. 잔액 초기값은 10만 원입니다. 최종 잔액으로 가능한 값을 모두 쓰고, 정답이 항상 나오게 고치십시오.</p>
+<figure class="code"><figcaption>두 트랜잭션 (각각 같은 코드)</figcaption><pre><code class="language-c">EXEC SQL SELECT BAL INTO :b FROM ACCT_MST WHERE ACCT_NO = :a;
+b = b - 30000;
+EXEC SQL UPDATE ACCT_MST SET BAL = :b WHERE ACCT_NO = :a;
+EXEC SQL COMMIT WORK;</code></pre></figure>
+<details><summary>정답과 해설 보기</summary>
+<p>두 트랜잭션이 차례로 실행되면 <strong>40,000원</strong>(정답), 둘 다 10만 원을 읽은 뒤 각각 70,000을 쓰면 <strong>70,000원</strong>(Lost Update)입니다. 일반 SELECT는 락을 걸지 않기 때문입니다. 고치는 방법은 셋입니다. (1) <code>SELECT ... FOR UPDATE</code>로 읽기 시점에 잠금, (2) <code>UPDATE ACCT_MST SET BAL = BAL - 30000 WHERE ACCT_NO = :a AND BAL &gt;= 30000</code>으로 DB 안에서 원자적으로 계산하고 처리 행 수 확인, (3) 버전 컬럼으로 낙관적 락. 잔액 차감에는 (2)나 (1)이 일반적입니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 29-7 <span class="lv">난이도 ★★☆</span></p>
+<p>다음 중 2단계 커밋의 1단계(준비)에서 YES를 답한 참여자(RM)가 할 수 <strong>없는</strong> 것은? (1) 변경 내용을 로그에 기록 (2) 조정자의 결정 전 독자적으로 롤백 (3) 결정을 기다리며 락 유지 (4) 장애 후 재기동 시 조정자에게 결과 문의</p>
+<details><summary>정답과 해설 보기</summary>
+<p><strong>정답 (2)</strong>. YES를 답하는 것은 "조정자가 커밋하라면 반드시 커밋하겠다"는 약속이므로, 이후에는 독자적으로 롤백할 권리가 없습니다. 그래서 결정을 받을 때까지 락을 쥐고 기다리며(3), 장애가 나도 재기동 후 in-doubt 상태로 조정자에게 결과를 물어 마무리합니다(4). 이것이 2PC의 블로킹 문제의 원인입니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 29-8 <span class="lv">난이도 ★★★</span> 버그 찾기</p>
+<p>Tuxedo 스타일 서비스에서 다음 코드의 문제 두 가지를 찾으십시오.</p>
+<figure class="code"><figcaption>문제 코드</figcaption><pre><code class="language-c">void WITHDRAW(TPSVCINFO *rqst)
+{
+    int rc = do_withdraw(rqst-&gt;data);
+    EXEC SQL COMMIT WORK;                       /* (가) */
+    tpreturn(rc == 0 ? TPSUCCESS : TPFAIL, rc, rqst-&gt;data, 0L, 0);
+    log_result(rc);                             /* (나) */
+}</code></pre></figure>
+<details><summary>정답과 해설 보기</summary>
+<p>(가) 이 서비스가 호출자의 전역 트랜잭션(<code>tpbegin</code>) 안에서 호출된다면, 서비스가 임의로 커밋하는 것은 트랜잭션 경계 원칙 위반입니다(XA 환경에서는 오류가 나거나, 설정에 따라 전체 원자성이 깨짐). 게다가 rc가 실패여도 커밋합니다. 서비스는 성공/실패만 보고하고 커밋은 호출자의 <code>tpcommit</code>에 맡깁니다. (나) <code>tpreturn</code>은 호출한 함수로 돌아오지 않으므로 <code>log_result</code>는 절대 실행되지 않습니다. 로그는 tpreturn 전에 남겨야 합니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 29-9 <span class="lv">난이도 ★★★</span> 금융 응용</p>
+<p>일마감 대사 배치를 설계하십시오. 원장(ACCT_MST)의 당일 잔액과 "전일 잔액 + 당일 입금 합계 - 당일 출금 합계"가 일치하지 않는 계좌를 찾는 SQL과, 이를 C에서 처리하는 구조(커서, 배열 FETCH, 결과 파일 출력)를 쓰십시오. 전일 잔액은 ACCT_BAL_HIST(ACCT_NO, BASE_DT, BAL) 테이블에 있다고 가정합니다.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>계좌마다 C에서 계산하기보다 SQL 한 문장으로 집계해 불일치만 가져오는 것이 효율적입니다.</p>
+<figure class="code good"><figcaption>대사 SQL과 C 구조</figcaption><pre><code class="language-c">EXEC SQL DECLARE c_recon CURSOR FOR
+  SELECT M.ACCT_NO, H.BAL AS PREV_BAL, NVL(T.IN_AMT,0), NVL(T.OUT_AMT,0), M.BAL
+    FROM ACCT_MST M
+    JOIN ACCT_BAL_HIST H ON H.ACCT_NO = M.ACCT_NO AND H.BASE_DT = :h_prev_dt
+    LEFT JOIN (SELECT ACCT_NO,
+                      SUM(CASE WHEN TX_TP = '10' THEN TX_AMT END) IN_AMT,
+                      SUM(CASE WHEN TX_TP = '20' THEN TX_AMT END) OUT_AMT
+                 FROM TX_HIST WHERE TX_DT = :h_dt GROUP BY ACCT_NO) T
+           ON T.ACCT_NO = M.ACCT_NO
+   WHERE H.BAL + NVL(T.IN_AMT,0) - NVL(T.OUT_AMT,0) &lt;&gt; M.BAL;
+
+/* C 구조:
+   OPEN → 배열 FETCH(500) 루프 → 이번 회차 n행을 결과 파일에 fprintf
+   → 1403이면 남은 n행 처리 후 종료 → CLOSE
+   → 불일치 건수가 0이 아니면 종료 코드 1로 끝내 운영 스케줄러가 경보 발송 */</code></pre></figure>
+<p>주의점: 신규 개설 계좌는 전일 잔액 이력이 없으므로 LEFT JOIN과 NVL(H.BAL, 0) 처리가 필요하고, 마감 시점에 온라인 거래를 막거나 기준 시각 스냅샷을 쓰지 않으면 처리 중인 거래 때문에 거짓 불일치가 나옵니다(Oracle은 커서 OPEN 시점 기준의 읽기 일관성을 제공하므로 한 쿼리 안에서는 일관됩니다).</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 29-10 <span class="lv">난이도 ★★★</span> 금융 응용</p>
+<p>타행이체에서 "출금 커밋 → 대외 입금 요청 → 응답 대기" 중 다음 세 경우의 처리를 각각 설명하십시오. (1) 정상 응답 (2) 거절 응답(수취 계좌 없음) (3) 30초 무응답</p>
+<details><summary>정답과 해설 보기</summary>
+<p>(1) 거래 상태를 "완료"로 갱신하고 고객에게 성공 응답합니다. (2) 상대가 명확히 거절했으므로 <strong>보상 트랜잭션</strong>으로 출금 취소(입금) 거래를 원거래 GUID를 참조해 기록하고 커밋한 뒤, 고객에게 실패 사유를 응답합니다. 보상은 멱등하게(같은 원거래에 대해 한 번만) 처리합니다. (3) 무응답은 <strong>결과 불명</strong>입니다. 즉시 보상하면 상대가 실제로 입금했을 경우 이중 지급이 됩니다. 거래를 "미결" 상태로 기록하고 고객에게 "처리 결과 확인 중"으로 안내한 뒤, 결과 조회 전문으로 확정합니다. 그래도 불명이면 마감 후 대외기관과의 대사 파일로 최종 확정하고, 그 결과에 따라 완료 또는 보상합니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 29-11 <span class="lv">난이도 ★★☆</span></p>
+<p>야간 이자 배치가 50만 계좌 처리 중 30만 번째에서 비정상 종료되었습니다. 이 배치를 "처음부터 다시 실행해도 안전한(멱등한)" 구조로 바꾸는 방법 두 가지를 쓰십시오.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>(1) <strong>재시작 지점 기록</strong>: 1만 건마다 커밋할 때 "마지막으로 처리한 계좌번호"를 재시작 테이블에 같은 트랜잭션으로 기록합니다. 재실행 시 그 계좌번호 다음부터 커서를 엽니다(<code>WHERE ACCT_NO &gt; :last ORDER BY ACCT_NO</code>). 커밋과 기록이 원자적이므로 경계에서 누락이나 중복이 없습니다. (2) <strong>처리 여부 키</strong>: 이자 지급 내역에 (계좌번호, 이자 기준일)의 유일 제약을 두고, 내역 INSERT와 잔액 UPDATE를 같은 트랜잭션에서 하되 INSERT가 ORA-00001이면 이미 처리된 계좌로 보고 UPDATE 없이 건너뜁니다. 실무에서는 둘을 함께 써서 성능(재시작 지점)과 안전(유일 제약)을 모두 확보합니다.</p>
+</details></div>
+
+</main>
+<aside class="rail" aria-label="이 페이지 목차"></aside>
+</div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-c.min.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>

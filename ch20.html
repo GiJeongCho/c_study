@@ -1,0 +1,1685 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ch20 비트 연산과 데이터 표현 · C언어 금융 IT 마스터</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+KR:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-ch="ch20">
+<header class="topbar">
+  <button class="menu-btn" type="button" aria-expanded="false" aria-controls="sidebar">목차</button>
+  <a class="brand" href="index.html"><b>C</b>금융 IT 마스터</a>
+  <span class="where"></span>
+  <span class="progress"></span>
+</header>
+<div class="layout">
+<nav id="sidebar" class="sidebar" aria-label="과정 목차"></nav>
+<div class="page">
+<main class="content">
+
+<header class="ch-head">
+  <p class="eyebrow">PART 2 · 금융 IT 베테랑 트랙 · CHAPTER</p>
+  <div class="bignum">20</div>
+  <h1>비트 연산과 데이터 표현</h1>
+  <p class="lede">잔액이 갑자기 음수가 되거나, 출금 한도 검사를 통과하면 안 되는 거래가 통과하는 사고의 상당수는 "정수가 메모리 안에서 실제로 어떻게 생겼는가"를 몰라서 생깁니다. 이 장에서는 비트 수준까지 내려가서 정수의 진짜 모습을 보고, 계좌 상태·권한처럼 금융 시스템 곳곳에 쓰이는 비트 플래그를 안전하게 설계하는 법을 익힙니다.</p>
+  <div class="goals"><p class="goals-title">이 장에서 배울 것</p><ul>
+    <li>2진수·16진수 변환과 2의 보수가 음수를 표현하는 원리를 그림으로 이해합니다.</li>
+    <li>부호 확장, 축소 변환, 정수 승격, 일반 산술 변환이 언제 어떻게 일어나는지 설명할 수 있습니다.</li>
+    <li>signed 오버플로가 왜 미정의 동작(UB)이고 unsigned는 왜 순환(wrap)하는지, 그 결과 어떤 사고가 나는지 압니다.</li>
+    <li><code>stdint.h</code> 고정폭 타입과 <code>inttypes.h</code> 출력 매크로를 실무 수준으로 사용합니다.</li>
+    <li>덧셈·뺄셈·곱셈 오버플로를 연산 <strong>전에</strong> 검사하는 함수와 <code>__builtin_add_overflow</code>를 작성합니다.</li>
+    <li>비트 연산자 6가지, 마스크, 세트/해제/토글/검사 매크로를 자유롭게 씁니다.</li>
+    <li>계좌 상태(정지·압류·휴면·한도) 플래그와 사용자 권한 비트를 설계하고, 시프트 UB와 비트필드 이식성 문제를 피합니다.</li>
+    <li>패리티, XOR 체크섬, 카드번호 검증(Luhn)으로 데이터 무결성 검사의 기초를 다집니다.</li>
+  </ul></div>
+</header>
+
+<h2 id="s20-1"><span class="num">20-1</span>정수의 내부 표현: 2의 보수와 오버플로</h2>
+
+<p>PART 1에서 우리는 <code>int</code>는 4바이트, <code>long long</code>은 8바이트라고 배웠습니다. 그런데 4바이트 안에 <code>-1</code>은 정확히 어떤 비트 모양으로 들어 있을까요? <code>2147483647 + 1</code>은 왜 <code>-2147483648</code>이 "될 수도" 있고, 왜 "아무 일이나 일어날 수도" 있다고 할까요? 이 절은 이런 질문에 하나하나 답하면서, 금융 프로그램에서 금액을 다룰 때 반드시 알아야 할 정수의 내부 표현을 정리합니다.</p>
+
+<h3 id="s20-1-1">2진수와 16진수: 비트로 수를 쓰는 방법</h3>
+
+<p>컴퓨터의 메모리는 결국 전기가 "있다(1)/없다(0)"인 스위치의 나열입니다. 이 스위치 하나를 <strong>비트(bit)</strong>, 8개를 묶은 것을 <strong>바이트(byte)</strong>라고 합니다. 10진수에서 각 자리가 1, 10, 100, 1000…의 무게(자리값)를 가지듯, 2진수에서는 각 자리가 1, 2, 4, 8, 16…의 무게를 가집니다.</p>
+
+<p>예를 들어 8비트 2진수 <code>10110101</code>을 10진수로 바꾸려면, 1이 켜진 자리의 무게만 더하면 됩니다. 128 + 32 + 16 + 4 + 1 = 181입니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 680 210" width="680" role="img" aria-label="8비트 2진수 10110101의 자리값과 10진수 181 변환">
+  <text x="20" y="34" class="small mute">자리값</text>
+  <text x="105" y="34" text-anchor="middle" class="mono small">2⁷=128</text>
+  <text x="180" y="34" text-anchor="middle" class="mono small">2⁶=64</text>
+  <text x="255" y="34" text-anchor="middle" class="mono small">2⁵=32</text>
+  <text x="330" y="34" text-anchor="middle" class="mono small">2⁴=16</text>
+  <text x="405" y="34" text-anchor="middle" class="mono small">2³=8</text>
+  <text x="480" y="34" text-anchor="middle" class="mono small">2²=4</text>
+  <text x="555" y="34" text-anchor="middle" class="mono small">2¹=2</text>
+  <text x="630" y="34" text-anchor="middle" class="mono small">2⁰=1</text>
+  <rect class="hl" x="72" y="48" width="66" height="48" rx="4"/>
+  <rect class="box" x="147" y="48" width="66" height="48" rx="4"/>
+  <rect class="hl" x="222" y="48" width="66" height="48" rx="4"/>
+  <rect class="hl" x="297" y="48" width="66" height="48" rx="4"/>
+  <rect class="box" x="372" y="48" width="66" height="48" rx="4"/>
+  <rect class="hl" x="447" y="48" width="66" height="48" rx="4"/>
+  <rect class="box" x="522" y="48" width="66" height="48" rx="4"/>
+  <rect class="hl" x="597" y="48" width="66" height="48" rx="4"/>
+  <text x="105" y="79" text-anchor="middle" class="mono bold">1</text>
+  <text x="180" y="79" text-anchor="middle" class="mono">0</text>
+  <text x="255" y="79" text-anchor="middle" class="mono bold">1</text>
+  <text x="330" y="79" text-anchor="middle" class="mono bold">1</text>
+  <text x="405" y="79" text-anchor="middle" class="mono">0</text>
+  <text x="480" y="79" text-anchor="middle" class="mono bold">1</text>
+  <text x="555" y="79" text-anchor="middle" class="mono">0</text>
+  <text x="630" y="79" text-anchor="middle" class="mono bold">1</text>
+  <text x="20" y="128" class="small mute">더하기</text>
+  <text x="105" y="128" text-anchor="middle" class="mono small acc">128</text>
+  <text x="255" y="128" text-anchor="middle" class="mono small acc">32</text>
+  <text x="330" y="128" text-anchor="middle" class="mono small acc">16</text>
+  <text x="480" y="128" text-anchor="middle" class="mono small acc">4</text>
+  <text x="630" y="128" text-anchor="middle" class="mono small acc">1</text>
+  <path class="line" d="M72 146 H 663"/>
+  <text x="367" y="176" text-anchor="middle" class="bold">128 + 32 + 16 + 4 + 1 = 181 (10진수) = 0xB5 (16진수)</text>
+  <text x="217" y="200" text-anchor="middle" class="small mute mono">상위 니블 1011 = B</text>
+  <text x="517" y="200" text-anchor="middle" class="small mute mono">하위 니블 0101 = 5</text>
+</svg>
+<figcaption>그림 20-1 8비트 2진수 10110101의 자리값 — 1이 켜진 자리의 무게를 더하면 181</figcaption>
+</figure>
+
+<p>2진수는 길어서 사람이 읽기 어렵습니다. 그래서 4비트(니블, nibble)씩 묶어 한 글자로 쓰는 <strong>16진수</strong>를 씁니다. 4비트는 0~15를 표현하므로 0~9 다음에 A(10)~F(15)를 씁니다. <code>10110101</code>을 앞 4비트 <code>1011</code>(=11=B)와 뒤 4비트 <code>0101</code>(=5)로 나누면 <code>0xB5</code>입니다. 16진수 한 글자 = 정확히 4비트이기 때문에, 16진수는 "비트를 사람이 읽기 좋게 압축한 표기"라고 생각하면 됩니다.</p>
+
+<div class="tbl"><table>
+<thead><tr><th>10진</th><th>2진(4비트)</th><th>16진</th><th>10진</th><th>2진(4비트)</th><th>16진</th></tr></thead>
+<tbody>
+<tr><td>0</td><td><code>0000</code></td><td>0</td><td>8</td><td><code>1000</code></td><td>8</td></tr>
+<tr><td>1</td><td><code>0001</code></td><td>1</td><td>9</td><td><code>1001</code></td><td>9</td></tr>
+<tr><td>2</td><td><code>0010</code></td><td>2</td><td>10</td><td><code>1010</code></td><td>A</td></tr>
+<tr><td>3</td><td><code>0011</code></td><td>3</td><td>11</td><td><code>1011</code></td><td>B</td></tr>
+<tr><td>4</td><td><code>0100</code></td><td>4</td><td>12</td><td><code>1100</code></td><td>C</td></tr>
+<tr><td>5</td><td><code>0101</code></td><td>5</td><td>13</td><td><code>1101</code></td><td>D</td></tr>
+<tr><td>6</td><td><code>0110</code></td><td>6</td><td>14</td><td><code>1110</code></td><td>E</td></tr>
+<tr><td>7</td><td><code>0111</code></td><td>7</td><td>15</td><td><code>1111</code></td><td>F</td></tr>
+</tbody></table></div>
+
+<p>C에서 16진수 상수는 <code>0x</code>로, 8진수는 <code>0</code>으로 시작합니다. C23부터는 <code>0b10110101</code> 같은 2진 상수가 표준이 되었고, gcc/clang은 그 이전부터 확장으로 지원했습니다. 출력할 때는 <code>%x</code>(소문자), <code>%X</code>(대문자), <code>%o</code>(8진)를 쓰며, 2진 출력 서식은 C23의 <code>%b</code> 이전에는 없으므로 직접 함수를 만들어 씁니다.</p>
+
+<figure class="code"><figcaption>ex20-1.c — 정수를 2진수 문자열로 출력하는 유틸리티</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stdint.h&gt;
+
+/* v의 하위 bits개 비트를 MSB부터 출력한다. 4비트마다 공백으로 구분 */
+static void print_bits(uint64_t v, int bits)
+{
+    for (int i = bits - 1; i &gt;= 0; i--) {
+        putchar(((v &gt;&gt; i) &amp; 1u) ? '1' : '0');  /* i번째 비트만 떼어 본다 */
+        if (i % 4 == 0 &amp;&amp; i != 0)
+            putchar(' ');                         /* 니블 구분 */
+    }
+    putchar('\n');
+}
+
+int main(void)
+{
+    unsigned int x = 181;
+    printf("10진 %u = 16진 0x%X = 8진 0%o\n", x, x, x);
+    printf("2진: ");
+    print_bits(x, 8);
+
+    int32_t m = -5;                     /* 음수는 어떻게 생겼을까? */
+    printf("-5 (32비트): ");
+    print_bits((uint32_t)m, 32);        /* 비트 모양 그대로 보기 위해 unsigned로 변환 */
+    printf("-5 = 0x%08X\n", (uint32_t)m);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>10진 181 = 16진 0xB5 = 8진 0265
+2진: 1011 0101
+-5 (32비트): 1111 1111 1111 1111 1111 1111 1111 1011
+-5 = 0xFFFFFFFB</pre></figure>
+
+<p>마지막 두 줄을 보면 <code>-5</code>는 앞쪽이 온통 1로 채워져 있습니다. 이것이 바로 다음에 배울 <strong>2의 보수</strong> 표현입니다. 참고로 <code>print_bits</code>에서 <code>(uint32_t)m</code>처럼 unsigned로 바꾼 이유는, 음수를 오른쪽으로 시프트하는 동작이 구현 정의(implementation-defined)이기 때문입니다. unsigned로 바꾸면 비트 모양은 그대로 두고 "부호 없는 수"로 다루므로 시프트 결과가 표준으로 보장됩니다.</p>
+
+<div class="box tip"><p class="box-title" data-tag="잠깐">16진수 암산 요령</p>
+<p>실무에서는 덤프(dump)를 보며 16진수를 읽을 일이 매우 많습니다. 전문 수신 로그, 코어 덤프, 네트워크 패킷이 전부 16진수입니다. 다음 몇 가지만 외워 두면 편합니다.</p>
+<ul>
+<li><code>0xFF</code> = 255 (1바이트 최대), <code>0xFFFF</code> = 65535, <code>0x7FFFFFFF</code> = 2147483647 (<code>INT_MAX</code>)</li>
+<li><code>0x80000000</code> = 2147483648 (32비트에서 최상위 비트만 1, int로 보면 <code>INT_MIN</code>)</li>
+<li><code>0x10</code> = 16, <code>0x100</code> = 256, <code>0x400</code> = 1024, <code>0x1000</code> = 4096 (메모리 페이지 크기)</li>
+<li>ASCII: <code>'0'</code> = <code>0x30</code>, <code>'A'</code> = <code>0x41</code>, <code>'a'</code> = <code>0x61</code>, 공백 = <code>0x20</code></li>
+</ul>
+</div>
+
+<h3 id="s20-1-2">음수를 표현하는 세 가지 방법과 2의 보수</h3>
+
+<p>비트로 음수를 표현하는 방법은 역사적으로 세 가지가 있었습니다.</p>
+
+<ol class="steps">
+<li><strong>부호-크기(sign-magnitude)</strong>: 최상위 비트(MSB)를 부호로 쓰고 나머지를 크기로 씁니다. 8비트에서 +5 = <code>00000101</code>, -5 = <code>10000101</code>. 사람에게는 직관적이지만 +0(<code>00000000</code>)과 -0(<code>10000000</code>)이 둘 다 존재하고, 덧셈 회로가 부호를 따로 처리해야 해서 복잡합니다.</li>
+<li><strong>1의 보수(ones' complement)</strong>: 음수는 양수의 모든 비트를 뒤집습니다. -5 = <code>11111010</code>. 여전히 +0과 -0(<code>11111111</code>)이 둘 다 있고, 덧셈 시 끝자리 올림(end-around carry)을 다시 더해야 합니다.</li>
+<li><strong>2의 보수(two's complement)</strong>: 음수는 "모든 비트를 뒤집고 1을 더한" 값입니다. -5 = <code>11111010</code> + 1 = <code>11111011</code>. 0이 하나뿐이고, 덧셈 회로 하나로 양수·음수 덧셈과 뺄셈을 모두 처리할 수 있습니다.</li>
+</ol>
+
+<p>현대의 모든 범용 CPU는 2의 보수를 씁니다. C 표준은 C17까지 세 방식을 모두 허용했지만, <strong>C23부터 2의 보수만 허용</strong>하도록 바뀌었습니다. 실무에서는 "정수는 2의 보수"라고 가정해도 되지만, 그렇다고 오버플로가 정의되는 것은 아니라는 점(뒤에서 설명)을 꼭 기억해야 합니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 680 250" width="680" role="img" aria-label="4비트 2의 보수에서 비트 패턴과 unsigned, signed 해석 비교">
+  <text x="14" y="40" class="small mute">비트</text>
+  <text x="14" y="88" class="small mute">unsigned</text>
+  <text x="14" y="128" class="small mute">signed</text>
+  <g class="mono small">
+  <rect class="box" x="80" y="20" width="36" height="34"/><text x="98" y="42" text-anchor="middle">0000</text>
+  <rect class="box" x="116" y="20" width="36" height="34"/><text x="134" y="42" text-anchor="middle">0001</text>
+  <rect class="box" x="152" y="20" width="36" height="34"/><text x="170" y="42" text-anchor="middle">0010</text>
+  <rect class="box" x="188" y="20" width="36" height="34"/><text x="206" y="42" text-anchor="middle">0011</text>
+  <rect class="box" x="224" y="20" width="36" height="34"/><text x="242" y="42" text-anchor="middle">0100</text>
+  <rect class="box" x="260" y="20" width="36" height="34"/><text x="278" y="42" text-anchor="middle">0101</text>
+  <rect class="box" x="296" y="20" width="36" height="34"/><text x="314" y="42" text-anchor="middle">0110</text>
+  <rect class="hl2" x="332" y="20" width="36" height="34"/><text x="350" y="42" text-anchor="middle">0111</text>
+  <rect class="bad" x="368" y="20" width="36" height="34"/><text x="386" y="42" text-anchor="middle">1000</text>
+  <rect class="hl" x="404" y="20" width="36" height="34"/><text x="422" y="42" text-anchor="middle">1001</text>
+  <rect class="hl" x="440" y="20" width="36" height="34"/><text x="458" y="42" text-anchor="middle">1010</text>
+  <rect class="hl" x="476" y="20" width="36" height="34"/><text x="494" y="42" text-anchor="middle">1011</text>
+  <rect class="hl" x="512" y="20" width="36" height="34"/><text x="530" y="42" text-anchor="middle">1100</text>
+  <rect class="hl" x="548" y="20" width="36" height="34"/><text x="566" y="42" text-anchor="middle">1101</text>
+  <rect class="hl" x="584" y="20" width="36" height="34"/><text x="602" y="42" text-anchor="middle">1110</text>
+  <rect class="hl" x="620" y="20" width="36" height="34"/><text x="638" y="42" text-anchor="middle">1111</text>
+  <text x="98" y="88" text-anchor="middle">0</text><text x="134" y="88" text-anchor="middle">1</text>
+  <text x="170" y="88" text-anchor="middle">2</text><text x="206" y="88" text-anchor="middle">3</text>
+  <text x="242" y="88" text-anchor="middle">4</text><text x="278" y="88" text-anchor="middle">5</text>
+  <text x="314" y="88" text-anchor="middle">6</text><text x="350" y="88" text-anchor="middle">7</text>
+  <text x="386" y="88" text-anchor="middle">8</text><text x="422" y="88" text-anchor="middle">9</text>
+  <text x="458" y="88" text-anchor="middle">10</text><text x="494" y="88" text-anchor="middle">11</text>
+  <text x="530" y="88" text-anchor="middle">12</text><text x="566" y="88" text-anchor="middle">13</text>
+  <text x="602" y="88" text-anchor="middle">14</text><text x="638" y="88" text-anchor="middle">15</text>
+  <text x="98" y="128" text-anchor="middle">0</text><text x="134" y="128" text-anchor="middle">1</text>
+  <text x="170" y="128" text-anchor="middle">2</text><text x="206" y="128" text-anchor="middle">3</text>
+  <text x="242" y="128" text-anchor="middle">4</text><text x="278" y="128" text-anchor="middle">5</text>
+  <text x="314" y="128" text-anchor="middle">6</text><text x="350" y="128" text-anchor="middle" class="acc">7</text>
+  <text x="386" y="128" text-anchor="middle" class="warn-t">-8</text><text x="422" y="128" text-anchor="middle">-7</text>
+  <text x="458" y="128" text-anchor="middle">-6</text><text x="494" y="128" text-anchor="middle">-5</text>
+  <text x="530" y="128" text-anchor="middle">-4</text><text x="566" y="128" text-anchor="middle">-3</text>
+  <text x="602" y="128" text-anchor="middle">-2</text><text x="638" y="128" text-anchor="middle">-1</text>
+  </g>
+  <path class="arrow" d="M350 150 C 350 185, 386 185, 386 152"/>
+  <text x="368" y="205" text-anchor="middle" class="small warn-t">7 + 1 → 비트로는 1000 (signed로 읽으면 -8)</text>
+  <path class="arrow-m" d="M638 150 C 638 230, 98 230, 98 152"/>
+  <text x="368" y="243" text-anchor="middle" class="small mute">1111 + 1 → 0000 (unsigned 15 + 1 = 0, 순환)</text>
+</svg>
+<figcaption>그림 20-2 4비트 2의 보수 — 같은 비트 패턴도 unsigned/signed 해석에 따라 값이 다르다. 최상위 비트가 1이면 signed에서는 음수</figcaption>
+</figure>
+
+<p>그림 20-2는 4비트만으로 2의 보수를 보여 줍니다. 핵심은 세 가지입니다.</p>
+<ul>
+<li>최상위 비트(MSB)가 0이면 unsigned와 signed 해석이 같습니다.</li>
+<li>MSB가 1이면 signed에서는 <strong>"unsigned 값 − 2<sup>N</sup>"</strong>입니다. 4비트에서 <code>1011</code>은 unsigned로 11이고, signed로는 11 − 16 = −5입니다. 다른 말로 MSB의 무게를 <strong>−2<sup>N−1</sup></strong>로 보는 것입니다: <code>1011</code> = −8 + 0 + 2 + 1 = −5.</li>
+<li>N비트 signed 범위는 −2<sup>N−1</sup> ~ 2<sup>N−1</sup>−1로 <strong>비대칭</strong>입니다. 4비트는 −8~7, 8비트는 −128~127, 32비트는 −2147483648~2147483647입니다. 음수가 하나 더 많은 이유는 0이 "양수 쪽" 패턴(MSB=0)을 하나 차지하기 때문입니다.</li>
+</ul>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 "뒤집고 1 더하기"가 음수일까?</p>
+<p>N비트 레지스터는 2<sup>N</sup>에 도달하면 다시 0으로 돌아가는 "모듈러 2<sup>N</sup>" 세계입니다. 자동차의 주행거리계가 999999 다음에 000000이 되는 것과 같습니다. 이 세계에서 −x란 "x를 더하면 0이 되는 수"이므로 −x ≡ 2<sup>N</sup> − x입니다.</p>
+<p>그런데 2<sup>N</sup> − x = (2<sup>N</sup> − 1 − x) + 1이고, 2<sup>N</sup> − 1은 "모든 비트가 1"이므로 거기서 x를 빼는 것은 x의 각 비트를 뒤집는 것과 같습니다(빌림이 전혀 생기지 않음). 따라서 −x = <code>~x + 1</code>입니다.</p>
+<p>이 방식의 위대함은 CPU가 덧셈기 하나만 있으면 된다는 점입니다. <code>a − b</code>는 <code>a + (~b + 1)</code>로 계산되고, signed든 unsigned든 같은 회로가 같은 비트 결과를 냅니다. 차이는 결과를 <strong>어떻게 해석하느냐</strong>(그리고 어떤 플래그—캐리 vs 오버플로—를 보느냐)뿐입니다.</p>
+</div>
+
+<figure class="code"><figcaption>ex20-2.c — ~x + 1 이 -x 임을 확인</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stdint.h&gt;
+
+int main(void)
+{
+    int8_t vals[] = { 5, 1, 127, 0, -128 };
+    for (size_t i = 0; i &lt; sizeof vals / sizeof vals[0]; i++) {
+        int8_t x = vals[i];
+        int8_t neg = (int8_t)(~x + 1);       /* ~x는 int로 승격되어 계산된 뒤 다시 8비트로 */
+        printf("x=%4d  비트=0x%02X  ~x+1=%4d  비트=0x%02X\n",
+               x, (uint8_t)x, neg, (uint8_t)neg);
+    }
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과 (gcc, x86-64)</figcaption><pre>x=   5  비트=0x05  ~x+1=  -5  비트=0xFB
+x=   1  비트=0x01  ~x+1=  -1  비트=0xFF
+x= 127  비트=0x7F  ~x+1=-127  비트=0x81
+x=   0  비트=0x00  ~x+1=   0  비트=0x00
+x=-128  비트=0x80  ~x+1=-128  비트=0x80</pre></figure>
+
+<p>마지막 줄이 흥미롭습니다. −128의 부호를 뒤집으면 +128이어야 하지만 8비트 signed에는 +128이 없어서 다시 −128이 됩니다. 이것이 "최솟값의 절댓값은 표현할 수 없다"는 2의 보수의 함정입니다. 그래서 <code>abs(INT_MIN)</code>과 <code>-INT_MIN</code>은 C에서 <strong>미정의 동작</strong>입니다. (위 예제에서는 <code>~x + 1</code>이 int로 승격되어 +128로 계산된 뒤 <code>int8_t</code>로 축소되었으므로 UB는 아니고 구현 정의 변환이며, gcc는 하위 8비트를 그대로 취해 −128이 됩니다.)</p>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 — 음수 금액의 절댓값</p>
+<p>"환불 금액은 음수로 저장되어 있으니 <code>llabs(amount)</code>로 양수를 만들자"는 코드는 거의 항상 잘 동작합니다. 하지만 <code>amount</code>가 <code>LLONG_MIN</code>이라면(초기화 안 된 메모리, 잘못된 전문 파싱, 센티널 값 등) UB입니다. 실무에서는 절댓값을 구하기 전에 <code>if (amount == LLONG_MIN) return ERR_RANGE;</code>처럼 경계를 먼저 막습니다. 금액이 정상 범위(예: ±1경 원 이내)인지 검사하는 <strong>도메인 범위 검사</strong>를 함께 두면 이런 경계 값은 자연스럽게 걸러집니다.</p>
+</div>
+
+<div class="ex"><p class="ex-title">예제 20-1 <span class="lv">난이도 ★☆☆</span></p>
+<p>8비트 2의 보수에서 <code>11100110</code>은 몇일까요? 또 −42를 8비트 2의 보수로 쓰면 어떤 비트 패턴이고, 16진수로는 무엇일까요?</p>
+<details><summary>정답과 해설 보기</summary>
+<p>(1) MSB가 1이므로 음수입니다. 방법 ①: unsigned로 읽으면 128+64+32+4+2 = 230이고, 230 − 256 = <strong>−26</strong>. 방법 ②: MSB 무게를 −128로 보면 −128+64+32+4+2 = −26. 방법 ③: 뒤집고 1 더하면 <code>00011001</code> + 1 = <code>00011010</code> = 26이므로 원래 수는 −26.</p>
+<p>(2) 42 = 32+8+2 = <code>00101010</code>. 뒤집으면 <code>11010101</code>, 1을 더하면 <code>11010110</code>, 16진수로 <code>0xD6</code>입니다. 확인: 0xD6 = 214, 214 − 256 = −42.</p>
+</details></div>
+
+<h3 id="s20-1-3">부호 확장과 축소 변환</h3>
+
+<p>작은 타입의 정수를 큰 타입으로 옮길 때, 늘어난 상위 비트를 무엇으로 채울까요? 규칙은 간단합니다.</p>
+<ul>
+<li><strong>원래 타입이 unsigned</strong>이면 상위 비트를 0으로 채웁니다. 이를 <strong>제로 확장(zero extension)</strong>이라 합니다.</li>
+<li><strong>원래 타입이 signed</strong>이면 상위 비트를 원래 부호 비트(MSB)로 채웁니다. 이를 <strong>부호 확장(sign extension)</strong>이라 합니다.</li>
+</ul>
+<p>부호 확장을 하는 이유는 값을 보존하기 위해서입니다. 8비트 −5(<code>0xFB</code>)를 32비트로 옮길 때 상위를 0으로 채우면 <code>0x000000FB</code> = 251이 되어 값이 바뀌지만, 1로 채우면 <code>0xFFFFFFFB</code> = −5로 값이 그대로입니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 680 230" width="680" role="img" aria-label="부호 확장과 제로 확장 비교">
+  <text x="20" y="32" class="small bold">int8_t -5</text>
+  <rect class="hl2" x="560" y="16" width="100" height="30" rx="3"/>
+  <text x="610" y="36" text-anchor="middle" class="mono">1111 1011</text>
+  <text x="20" y="96" class="small bold">int32_t로 (부호 확장)</text>
+  <rect class="hl" x="200" y="80" width="360" height="30" rx="3"/>
+  <text x="380" y="100" text-anchor="middle" class="mono">1111 1111 1111 1111 1111 1111</text>
+  <rect class="hl2" x="560" y="80" width="100" height="30" rx="3"/>
+  <text x="610" y="100" text-anchor="middle" class="mono">1111 1011</text>
+  <path class="arrow" d="M572 46 C 520 60, 420 62, 380 78"/>
+  <text x="470" y="64" text-anchor="middle" class="small acc">MSB(1)를 복사</text>
+  <text x="380" y="128" text-anchor="middle" class="small mono acc">= 0xFFFFFFFB = -5 (값 보존)</text>
+  <text x="20" y="176" class="small bold">uint8_t 251을 uint32_t로</text>
+  <text x="20" y="194" class="small mute">(제로 확장)</text>
+  <rect class="box" x="200" y="160" width="360" height="30" rx="3"/>
+  <text x="380" y="180" text-anchor="middle" class="mono">0000 0000 0000 0000 0000 0000</text>
+  <rect class="hl2" x="560" y="160" width="100" height="30" rx="3"/>
+  <text x="610" y="180" text-anchor="middle" class="mono">1111 1011</text>
+  <text x="380" y="214" text-anchor="middle" class="small mono mute">= 0x000000FB = 251 (값 보존)</text>
+</svg>
+<figcaption>그림 20-3 같은 비트 1111 1011이라도 원래 타입이 signed면 부호 확장, unsigned면 제로 확장된다</figcaption>
+</figure>
+
+<p>반대로 큰 타입을 작은 타입에 넣는 <strong>축소 변환(narrowing)</strong>은 어떨까요? 표준 규칙은 다음과 같습니다.</p>
+<div class="tbl"><table>
+<thead><tr><th>변환 대상</th><th>값이 범위 안</th><th>값이 범위 밖</th></tr></thead>
+<tbody>
+<tr><td>unsigned 타입</td><td>값 그대로</td><td><strong>정의됨</strong>: 2<sup>N</sup>으로 나눈 나머지(하위 N비트만 남김)</td></tr>
+<tr><td>signed 타입</td><td>값 그대로</td><td><strong>구현 정의</strong>(또는 구현 정의 시그널). gcc/clang은 하위 N비트를 그대로 취함</td></tr>
+</tbody></table></div>
+
+<figure class="code"><figcaption>ex20-3.c — 확장과 축소에서 일어나는 일</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stdint.h&gt;
+
+int main(void)
+{
+    int8_t   s8 = -5;
+    uint8_t  u8 = 0xFB;                 /* 같은 비트 패턴, 해석만 다름 */
+
+    int32_t  a = s8;                    /* 부호 확장 */
+    int32_t  b = u8;                    /* 제로 확장 */
+    printf("a=%d (0x%08X)  b=%d (0x%08X)\n", a, (uint32_t)a, b, (uint32_t)b);
+
+    int32_t  big = 300;                 /* 0x0000012C */
+    uint8_t  t1 = (uint8_t)big;         /* 정의됨: 300 mod 256 = 44 */
+    int8_t   t2 = (int8_t)200;          /* 구현 정의: gcc는 200-256 = -56 */
+    printf("t1=%u  t2=%d\n", t1, t2);
+
+    /* 금액을 실수로 int에 담는 축소: 30억 원 */
+    long long amount = 3000000000LL;
+    int truncated = (int)amount;        /* 구현 정의: 범위 밖 */
+    printf("amount=%lld  (int)amount=%d\n", amount, truncated);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과 (gcc, x86-64)</figcaption><pre>a=-5 (0xFFFFFFFB)  b=251 (0x000000FB)
+t1=44  t2=-56
+amount=3000000000  (int)amount=-1294967296</pre></figure>
+
+<p>마지막 줄을 보십시오. 30억 원이 int로 들어가는 순간 −12억 9천여만 원이 되었습니다. 3000000000 − 4294967296 = −1294967296입니다. 컴파일러는 <code>-Wconversion</code> 옵션을 주지 않으면 이 축소를 경고조차 하지 않습니다.</p>
+
+<div class="box fin"><p class="box-title" data-tag="금융 실무">은행 시스템에서는 — "21억의 벽" 사고</p>
+<p>어느 금융회사의 법인 자금이체 모듈은 오래전 개인 고객 위주로 설계되어, 금액 필드를 <code>int</code>로 받아 처리하는 중간 함수가 하나 남아 있었습니다. 원장(ledger)과 전문은 모두 13~15자리 금액을 지원했지만, 수수료 계산용 보조 함수의 매개변수 하나만 <code>int</code>였습니다. 수년간 문제가 없다가, 한 법인 고객이 처음으로 25억 원을 이체하자 수수료 함수가 음수 금액을 받아 "수수료 0원"을 계산했고, 동일 패턴의 거래 수십 건이 수수료 없이 처리된 뒤에야 일마감 대사(reconciliation)에서 발견되었습니다.</p>
+<p>교훈은 세 가지입니다. ① 금액은 <strong>모든 경로에서</strong> <code>int64_t</code>(또는 <code>long long</code>)로 통일한다. ② <code>-Wconversion -Wsign-conversion</code>을 켜고 경고를 0으로 유지한다. ③ 테스트 데이터에 <strong>경계 값</strong>(2<sup>31</sup>−1, 2<sup>31</sup>, 2<sup>32</sup>, 음수, 0)을 반드시 포함한다. 한국 원화는 단위가 커서 32비트의 한계(약 21억 원)에 생각보다 쉽게 닿습니다.</p>
+</div>
+
+<div class="box fix"><p class="box-title" data-tag="해결">이렇게 해결합니다 — 축소 변환은 검사 후 명시적으로</p>
+<figure class="code good"><figcaption>narrow.c — 범위를 확인하고 축소하는 함수</figcaption>
+<pre><code class="language-c">#include &lt;stdint.h&gt;
+#include &lt;stdbool.h&gt;
+
+/* int64_t -&gt; int32_t 안전 축소. 범위 밖이면 false */
+bool i64_to_i32(int64_t v, int32_t *out)
+{
+    if (v &lt; INT32_MIN || v &gt; INT32_MAX)
+        return false;               /* 호출자가 오류 처리 */
+    *out = (int32_t)v;              /* 이제 값 보존이 보장됨 */
+    return true;
+}</code></pre></figure>
+<p>그리고 빌드 옵션에 <code>-Wall -Wextra -Wconversion -Wsign-conversion</code>을 추가하면, 암묵적 축소가 일어나는 모든 지점이 경고로 드러납니다. 레거시 코드에서는 경고가 수천 개 나올 수 있으므로, 금액·수량·인덱스 관련 모듈부터 단계적으로 정리하는 것이 현실적입니다.</p>
+</div>
+
+<h3 id="s20-1-4">오버플로: signed는 미정의 동작, unsigned는 순환</h3>
+
+<p>이제 이 장의 가장 중요한 주제입니다. 정수 연산 결과가 타입의 범위를 넘어서면 어떻게 될까요? C 표준은 두 경우를 완전히 다르게 다룹니다.</p>
+
+<div class="tbl"><table>
+<thead><tr><th>구분</th><th>표준의 규정</th><th>의미</th></tr></thead>
+<tbody>
+<tr><td><code>unsigned</code> 연산</td><td>결과는 2<sup>N</sup>으로 나눈 나머지(C11 6.2.5p9: "결코 오버플로하지 않는다")</td><td><code>UINT_MAX + 1 == 0</code>, <code>0u - 1 == UINT_MAX</code>가 <strong>보장</strong>됨</td></tr>
+<tr><td><code>signed</code> 연산</td><td>결과가 표현 범위를 넘으면 <strong>미정의 동작(UB)</strong>(C11 6.5p5)</td><td>무슨 일이든 일어날 수 있음. 컴파일러는 "일어나지 않는다"고 가정하고 최적화</td></tr>
+</tbody></table></div>
+
+<figure class="diagram">
+<svg viewBox="0 0 680 220" width="680" role="img" aria-label="unsigned 순환과 signed 오버플로 비교">
+  <text x="20" y="30" class="bold">unsigned int: 시계처럼 순환 (정의됨)</text>
+  <rect class="hl" x="20" y="44" width="180" height="40" rx="4"/>
+  <text x="110" y="62" text-anchor="middle" class="mono small">0xFFFFFFFF</text>
+  <text x="110" y="77" text-anchor="middle" class="small">4294967295</text>
+  <path class="arrow" d="M200 64 H 290"/>
+  <text x="245" y="56" text-anchor="middle" class="mono small acc">+1</text>
+  <rect class="hl" x="290" y="44" width="180" height="40" rx="4"/>
+  <text x="380" y="62" text-anchor="middle" class="mono small">0x00000000</text>
+  <text x="380" y="77" text-anchor="middle" class="small">0</text>
+  <text x="490" y="68" class="small acc">항상 0 (보장)</text>
+  <text x="20" y="130" class="bold">int: 범위를 넘으면 UB</text>
+  <rect class="hl2" x="20" y="144" width="180" height="40" rx="4"/>
+  <text x="110" y="162" text-anchor="middle" class="mono small">0x7FFFFFFF</text>
+  <text x="110" y="177" text-anchor="middle" class="small">INT_MAX</text>
+  <path class="arrow" d="M200 164 H 290"/>
+  <text x="245" y="156" text-anchor="middle" class="mono small warn-t">+1</text>
+  <rect class="bad" x="290" y="144" width="180" height="40" rx="4"/>
+  <text x="380" y="162" text-anchor="middle" class="small bold">미정의 동작</text>
+  <text x="380" y="177" text-anchor="middle" class="small">-2147483648일 수도, 아닐 수도</text>
+  <text x="490" y="160" class="small warn-t">컴파일러가 "없는 일"로 가정</text>
+  <text x="490" y="178" class="small warn-t">→ 검사 코드 삭제 가능</text>
+</svg>
+<figcaption>그림 20-4 unsigned는 정의된 순환, signed는 미정의 동작 — "음수로 넘어간다"는 기대조차 보장되지 않는다</figcaption>
+</figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 signed 오버플로는 UB로 남겨 두었을까?</p>
+<p>역사적 이유와 성능상 이유가 있습니다. C가 만들어질 당시에는 1의 보수·부호-크기 기계가 있었고, 오버플로 시 하드웨어 트랩을 일으키는 기계도 있었습니다. 표준이 특정 결과를 강제하면 그런 기계에서 C를 효율적으로 구현할 수 없었습니다.</p>
+<p>오늘날 더 중요한 이유는 <strong>최적화</strong>입니다. "signed 오버플로는 일어나지 않는다"고 가정하면 컴파일러는 다음과 같은 변형을 할 수 있습니다.</p>
+<ul>
+<li><code>x + 1 &gt; x</code> → 항상 참(1)으로 치환</li>
+<li><code>(x * 2) / 2</code> → <code>x</code>로 치환</li>
+<li><code>for (int i = 0; i &lt;= n; i++)</code> 반복 횟수가 정확히 n+1회라고 가정하고 루프를 벡터화. 64비트 기계에서 <code>int i</code>를 64비트 레지스터로 확장해 인덱스 계산을 단순화</li>
+</ul>
+<p>이 가정이 틀리는 순간(실제로 오버플로가 일어나는 순간) 프로그램은 "작성한 소스 코드와 다른" 동작을 합니다. 특히 오버플로를 <strong>사후에</strong> 검사하는 코드가 통째로 사라지는 것이 실무에서 가장 위험합니다.</p>
+</div>
+
+<figure class="code bad"><figcaption>잘못된 예 — 사후 검사는 최적화로 사라질 수 있다</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;limits.h&gt;
+
+/* 의도: a + b가 오버플로하면 -1 반환 */
+int add_amount(int a, int b)
+{
+    int sum = a + b;               /* 이미 여기서 UB가 일어날 수 있음 */
+    if (b &gt; 0 &amp;&amp; sum &lt; a)          /* 컴파일러: "b&gt;0이면 a+b&gt;a는 수학적으로 참" */
+        return -1;                 /* → 이 분기는 죽은 코드로 판단되어 제거될 수 있다 */
+    return sum;
+}
+
+int main(void)
+{
+    printf("%d\n", add_amount(INT_MAX, 1));
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과 — 최적화 수준에 따라 달라짐 (gcc x86-64에서 흔히 관찰되는 예)</figcaption><pre>$ gcc -O0 ovf.c &amp;&amp; ./a.out
+-1
+$ gcc -O2 ovf.c &amp;&amp; ./a.out
+-2147483648</pre></figure>
+
+<p>같은 소스인데 최적화 옵션만 바꿨더니 결과가 달라졌습니다. <code>-O0</code>에서는 하드웨어가 실제로 순환시킨 값을 비교해서 검사가 "우연히" 동작했지만, <code>-O2</code>에서는 컴파일러가 <code>sum &lt; a</code>를 <code>b &lt; 0</code>으로 바꾸거나 분기 자체를 지워 검사가 무력화되었습니다. 이것이 UB의 무서움입니다. 디버그 빌드에서는 테스트를 통과하고, 운영 빌드에서만 사고가 납니다.</p>
+
+<div class="box fix"><p class="box-title" data-tag="해결">이렇게 해결합니다 — 연산 "전에" 검사한다</p>
+<p>오버플로 검사의 원칙은 단 하나입니다. <strong>UB가 일어날 연산을 실행하기 전에</strong>, 범위 안에서만 계산되는 식으로 조건을 확인합니다.</p>
+<figure class="code good"><figcaption>고친 코드</figcaption>
+<pre><code class="language-c">int add_amount(int a, int b)
+{
+    if ((b &gt; 0 &amp;&amp; a &gt; INT_MAX - b) ||   /* INT_MAX - b는 b&gt;0이면 절대 오버플로 안 함 */
+        (b &lt; 0 &amp;&amp; a &lt; INT_MIN - b))     /* INT_MIN - b는 b&lt;0이면 절대 오버플로 안 함 */
+        return -1;                      /* 실제로는 별도 오류 코드 채널을 쓰는 게 좋다 */
+    return a + b;                       /* 이제 안전 */
+}</code></pre></figure>
+<p>보조 수단으로 gcc/clang의 <code>-fsanitize=signed-integer-overflow</code>(UBSan)를 테스트 빌드에 켜 두면, 오버플로가 일어나는 순간 파일명과 줄 번호를 출력해 줍니다. <code>-ftrapv</code>는 오버플로 시 프로그램을 중단시키고, <code>-fwrapv</code>는 signed 오버플로를 "순환"으로 정의해 버립니다. 단 <code>-fwrapv</code>는 UB를 없애 줄 뿐 <strong>틀린 금액</strong>을 막아 주지는 않으므로 근본 해결책이 아닙니다.</p>
+</div>
+
+<p>unsigned는 순환이 보장되니 안전할까요? 아닙니다. 순환은 "정의된 동작"일 뿐 "올바른 금액"이 아닙니다. 금융에서 더 흔한 사고는 오히려 unsigned 쪽에서 납니다.</p>
+
+<figure class="code bad"><figcaption>잘못된 예 — unsigned 잔액의 언더플로</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+typedef unsigned int won_t;     /* "잔액은 음수가 없으니 unsigned"라는 잘못된 직관 */
+
+int withdraw(won_t *balance, won_t amount)
+{
+    if (*balance - amount &gt;= 0) {     /* unsigned는 항상 &gt;= 0 → 조건이 항상 참! */
+        *balance -= amount;
+        return 0;
+    }
+    return -1;
+}
+
+int main(void)
+{
+    won_t bal = 1000;
+    int rc = withdraw(&amp;bal, 2000);
+    printf("rc=%d, 잔액=%u\n", rc, bal);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>rc=0, 잔액=4294966296</pre></figure>
+
+<p>1,000원 있는 계좌에서 2,000원을 출금했는데 성공했고, 잔액이 약 43억 원이 되었습니다. <code>1000u - 2000u</code>는 2<sup>32</sup> − 1000 = 4294966296으로 정의된 순환을 했고, unsigned 값은 정의상 0 이상이므로 <code>&gt;= 0</code> 검사는 늘 참입니다. gcc는 <code>-Wextra</code>를 주면 "comparison of unsigned expression in '&gt;= 0' is always true" 경고를 냅니다.</p>
+
+<div class="box fix"><p class="box-title" data-tag="해결">이렇게 해결합니다 — 비교는 뺄셈 없이, 금액은 signed 64비트로</p>
+<figure class="code good"><figcaption>고친 코드</figcaption>
+<pre><code class="language-c">#include &lt;stdint.h&gt;
+
+typedef int64_t won_t;          /* 금액은 부호 있는 64비트: 음수 차액·취소 금액도 표현 가능 */
+
+int withdraw(won_t *balance, won_t amount)
+{
+    if (amount &lt;= 0)            /* 입력 검증: 출금액은 양수여야 함 */
+        return -2;
+    if (*balance &lt; amount)      /* 뺄셈 없이 비교 → 오버플로·순환 불가 */
+        return -1;              /* 잔액 부족 */
+    *balance -= amount;
+    return 0;
+}</code></pre></figure>
+<p>금액에 unsigned를 쓰지 않는 이유는 "음수가 아닌 값"이라는 제약을 타입이 보장해 주지 않기 때문입니다. unsigned는 음수를 막는 것이 아니라 음수를 <strong>거대한 양수로 위장</strong>시킵니다. 차액·취소·환불·조정 금액처럼 금융에는 음수가 자연스럽게 등장하므로, 금액은 signed 64비트로 두고 비즈니스 규칙(잔액 ≥ 0)은 코드로 검사합니다.</p>
+</div>
+
+<div class="ex"><p class="ex-title">예제 20-2 <span class="lv">난이도 ★★☆</span></p>
+<p>다음 코드에서 UB가 있는 줄과 없는 줄을 구분하고, 결과가 보장되는 줄은 값을 쓰십시오. (<code>int</code> 32비트)</p>
+<pre><code class="language-c">unsigned int u = 0;  u = u - 1;          /* (a) */
+int i = INT_MAX;     i = i + 1;          /* (b) */
+unsigned short s = 65535; s = s + 1;     /* (c) */
+int j = INT_MIN;     j = -j;             /* (d) */
+unsigned int v = 3;  v = v * 0x80000000u;/* (e) */</code></pre>
+<details><summary>정답과 해설 보기</summary>
+<p>(a) 정의됨. <code>u</code>는 4294967295(<code>UINT_MAX</code>).</p>
+<p>(b) <strong>UB</strong>. int 범위를 넘는 signed 덧셈.</p>
+<p>(c) 정의됨, 그리고 UB도 아닙니다. <code>s + 1</code>에서 <code>s</code>는 int로 <strong>승격</strong>되어 65535 + 1 = 65536이 int로 계산됩니다(int 범위 안이므로 문제없음). 그 결과를 unsigned short에 대입할 때 65536 mod 65536 = 0이 됩니다. 결과 <code>s == 0</code>.</p>
+<p>(d) <strong>UB</strong>. −INT_MIN = 2147483648은 int로 표현 불가.</p>
+<p>(e) 정의됨. 3 × 2<sup>31</sup> = 6442450944, mod 2<sup>32</sup> = 2147483648(<code>0x80000000</code>).</p>
+</details></div>
+
+<h3 id="s20-1-5">정수 승격과 signed/unsigned 비교의 함정</h3>
+
+<p>C는 연산을 하기 전에 피연산자의 타입을 자동으로 맞춥니다. 이 규칙을 모르면 "분명 -1이 1보다 작은데 왜 거짓이지?" 같은 상황을 만나게 됩니다. 규칙은 두 단계입니다.</p>
+
+<ol class="steps">
+<li><strong>정수 승격(integer promotion)</strong>: <code>char</code>, <code>short</code>, <code>_Bool</code>, 비트필드처럼 <code>int</code>보다 작은 타입은 연산에 쓰이기 전에 <code>int</code>로 바뀝니다(int로 모든 값을 표현할 수 있으면 int, 아니면 unsigned int). 그래서 <code>uint8_t + uint8_t</code>의 결과 타입은 <code>int</code>입니다.</li>
+<li><strong>일반 산술 변환(usual arithmetic conversions)</strong>: 승격 후에도 두 피연산자의 타입이 다르면 하나로 맞춥니다. 핵심 규칙은 "<strong>순위(rank)가 같으면 unsigned가 이긴다</strong>"입니다. <code>int</code>와 <code>unsigned int</code>가 만나면 int 쪽이 unsigned int로 변환됩니다. 순위가 다르면 더 큰 쪽으로 가되, signed 쪽이 더 크고 unsigned의 모든 값을 담을 수 있으면 signed로, 아니면 그 signed 타입의 unsigned 버전으로 갑니다.</li>
+</ol>
+
+<figure class="diagram">
+<svg viewBox="0 0 680 250" width="680" role="img" aria-label="정수 승격과 일반 산술 변환 흐름">
+  <rect class="box" x="20" y="20" width="180" height="44" rx="6"/>
+  <text x="110" y="47" text-anchor="middle" class="mono small">char / short / uint8_t</text>
+  <path class="arrow" d="M200 42 H 260"/>
+  <rect class="hl" x="260" y="20" width="140" height="44" rx="6"/>
+  <text x="330" y="47" text-anchor="middle" class="mono bold">int</text>
+  <text x="430" y="40" class="small">① 정수 승격</text>
+  <text x="430" y="58" class="small mute">작은 타입은 무조건 int로</text>
+  <rect class="box" x="20" y="110" width="110" height="44" rx="6"/>
+  <text x="75" y="137" text-anchor="middle" class="mono">int -1</text>
+  <text x="152" y="137" text-anchor="middle" class="bold">&lt;</text>
+  <rect class="box" x="175" y="110" width="140" height="44" rx="6"/>
+  <text x="245" y="137" text-anchor="middle" class="mono">unsigned 1u</text>
+  <path class="arrow" d="M245 154 V 180"/>
+  <path class="arrow" d="M75 154 V 180"/>
+  <rect class="bad" x="20" y="180" width="295" height="44" rx="6"/>
+  <text x="167" y="200" text-anchor="middle" class="mono small">4294967295u &lt; 1u</text>
+  <text x="167" y="216" text-anchor="middle" class="small">→ 거짓(0)</text>
+  <text x="340" y="130" class="small">② 일반 산술 변환</text>
+  <text x="340" y="150" class="small mute">같은 순위면 unsigned가 이긴다</text>
+  <text x="340" y="170" class="small mute">-1이 unsigned로 바뀌며 UINT_MAX가 됨</text>
+  <text x="340" y="200" class="small warn-t">gcc -Wsign-compare 가 경고해 준다</text>
+</svg>
+<figcaption>그림 20-5 정수 승격과 일반 산술 변환 — int와 unsigned int를 비교하면 int가 unsigned로 바뀐다</figcaption>
+</figure>
+
+<figure class="code"><figcaption>ex20-4.c — 승격과 변환 실험</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stdint.h&gt;
+
+int main(void)
+{
+    int a = -1;
+    unsigned int b = 1;
+    printf("(1) -1 &lt; 1u        : %d\n", a &lt; b);        /* int → unsigned 변환 */
+    printf("(2) -1L &lt; 1u       : %d\n", -1L &lt; 1u);     /* LP64: long이 더 커서 long으로 */
+    printf("(3) -1 &lt; sizeof(int): %d\n", -1 &lt; sizeof(int)); /* size_t는 unsigned long */
+
+    uint8_t x = 200, y = 100;
+    printf("(4) x + y = %d, sizeof(x + y) = %zu\n", x + y, sizeof(x + y));
+    uint8_t z = x + y;                                  /* 300 → 대입 시 축소 */
+    printf("(5) z = %d\n", z);
+
+    char c = (char)0xE8;                                /* EUC-KR 한글의 첫 바이트 범위 */
+    printf("(6) (char)0xE8 = %d\n", c);                 /* char의 부호는 구현 정의 */
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과 (gcc, x86-64 리눅스)</figcaption><pre>(1) -1 &lt; 1u        : 0
+(2) -1L &lt; 1u       : 1
+(3) -1 &lt; sizeof(int): 0
+(4) x + y = 300, sizeof(x + y) = 4
+(5) z = 44
+(6) (char)0xE8 = -24</pre></figure>
+
+<p>한 줄씩 원인을 짚어 보겠습니다.</p>
+<ul>
+<li>(1) int와 unsigned int는 순위가 같으므로 −1이 unsigned로 변환되어 4294967295가 되고, <code>4294967295 &lt; 1</code>은 거짓입니다.</li>
+<li>(2) 64비트 리눅스(LP64)에서 long은 8바이트라서 unsigned int(4바이트)의 모든 값을 담을 수 있습니다. 그래서 1u가 long으로 변환되고 −1 &lt; 1은 참입니다. <strong>그런데 64비트 윈도우(LLP64)에서는 long이 4바이트</strong>라서 long이 unsigned int의 모든 값을 담지 못하므로 둘 다 unsigned long으로 변환되고, 결과는 0이 됩니다. 같은 코드가 플랫폼마다 다른 결과를 내는 대표적 사례입니다.</li>
+<li>(3) <code>sizeof</code>의 결과 타입 <code>size_t</code>는 unsigned long이므로 −1이 18446744073709551615로 변환됩니다.</li>
+<li>(4) <code>uint8_t</code> 두 개를 더해도 결과는 int 300입니다. 8비트로 계산되지 않습니다.</li>
+<li>(5) int 300을 uint8_t에 대입할 때 축소(300 mod 256 = 44)가 일어납니다.</li>
+<li>(6) x86의 gcc에서 <code>char</code>는 signed라서 −24, ARM 리눅스의 gcc에서는 unsigned라서 232가 출력됩니다. 한글 EUC-KR/CP949 바이트(0x80 이상)를 <code>char</code>로 다루다가 <code>if (c &gt;= 0x80)</code> 같은 검사가 항상 거짓이 되는 버그가 실무에서 자주 나옵니다. 바이트 데이터는 <code>unsigned char</code>나 <code>uint8_t</code>로 다루십시오.</li>
+</ul>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 — 역방향 루프와 size_t</p>
+<figure class="code bad"><figcaption>잘못된 예 — 무한 루프</figcaption>
+<pre><code class="language-c">/* 최근 거래부터 거꾸로 출력하려는 의도 */
+for (size_t i = n - 1; i &gt;= 0; i--)     /* size_t는 항상 &gt;= 0 → 끝나지 않음 */
+    print_tx(&amp;txs[i]);                   /* i가 0에서 1 감소하면 SIZE_MAX → 범위 밖 접근 */</code></pre></figure>
+<p>또한 <code>n</code>이 0이면 <code>n - 1</code> 자체가 SIZE_MAX가 됩니다. 관용적으로 다음처럼 씁니다.</p>
+<figure class="code good"><figcaption>고친 코드</figcaption>
+<pre><code class="language-c">for (size_t i = n; i-- &gt; 0; )           /* 비교 후 감소: n-1 ... 0 까지, n==0이면 0회 */
+    print_tx(&amp;txs[i]);</code></pre></figure>
+</div>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 — 작은 unsigned끼리의 곱셈이 UB가 되는 경우</p>
+<p><code>uint16_t a = 65535, b = 65535; uint32_t r = a * b;</code>는 안전해 보입니다. 하지만 <code>a</code>와 <code>b</code>는 <strong>signed int로 승격</strong>된 뒤 곱해지고, 65535 × 65535 = 4294836225는 INT_MAX를 넘으므로 <strong>signed 오버플로 UB</strong>입니다. 해결책은 곱하기 전에 한쪽을 명시적으로 넓은 unsigned로 바꾸는 것입니다: <code>uint32_t r = (uint32_t)a * b;</code></p>
+</div>
+
+<div class="ex"><p class="ex-title">예제 20-3 <span class="lv">난이도 ★★☆</span></p>
+<p>아래 함수는 "남은 한도(limit − used)가 요청 금액 이상이면 승인"하려는 코드입니다. 어떤 입력에서 잘못 판단할까요? 고친 코드를 작성하십시오.</p>
+<pre><code class="language-c">int approve(unsigned int limit, unsigned int used, int request)
+{
+    return (limit - used) &gt;= request;
+}</code></pre>
+<details><summary>정답과 해설 보기</summary>
+<p>문제는 두 가지입니다. ① <code>used &gt; limit</code>(이미 한도 초과 상태, 예: 한도 감액 직후)이면 <code>limit - used</code>가 순환해 거대한 값이 되어 거의 무조건 승인됩니다. ② <code>request</code>가 int인데 unsigned와 비교되므로, 음수 요청(예: −5000)이 4294962296으로 바뀌어 비교됩니다. 음수 요청이라는 비정상 입력이 "검증"되지 않고 우연한 비교 결과에 맡겨집니다.</p>
+<figure class="code good"><figcaption>정답 코드</figcaption>
+<pre><code class="language-c">#include &lt;stdint.h&gt;
+#include &lt;stdbool.h&gt;
+
+bool approve(int64_t limit, int64_t used, int64_t request)
+{
+    if (request &lt;= 0 || limit &lt; 0 || used &lt; 0)
+        return false;                     /* 입력 검증 */
+    if (used &gt;= limit)
+        return false;                     /* 이미 한도 소진 */
+    return request &lt;= limit - used;       /* limit&gt;used&gt;=0 이므로 뺄셈 안전 */
+}</code></pre></figure>
+</details></div>
+
+<h3 id="s20-1-6">stdint.h 고정폭 타입과 inttypes.h</h3>
+
+<p><code>int</code>의 크기는 표준상 "최소 16비트"이고 <code>long</code>은 "최소 32비트"일 뿐입니다. 실제로 64비트 리눅스에서는 long이 8바이트, 64비트 윈도우에서는 4바이트입니다. 금액이나 전문 필드처럼 <strong>크기가 정확해야 하는 데이터</strong>에는 C99의 <code>&lt;stdint.h&gt;</code> 고정폭 타입을 씁니다.</p>
+
+<div class="tbl"><table>
+<thead><tr><th>타입</th><th>의미</th><th>금융 시스템에서의 용도 예</th></tr></thead>
+<tbody>
+<tr><td><code>int8_t</code> ~ <code>int64_t</code></td><td>정확히 N비트, 패딩 없는 2의 보수 signed(구현이 그런 타입을 가지면 반드시 제공)</td><td><code>int64_t</code>: 원 단위 금액, 잔액, 수량</td></tr>
+<tr><td><code>uint8_t</code> ~ <code>uint64_t</code></td><td>정확히 N비트 unsigned</td><td>바이트 버퍼, 플래그, 해시 값, 체크섬</td></tr>
+<tr><td><code>int_least32_t</code></td><td>최소 32비트인 가장 작은 타입</td><td>메모리를 아껴야 하는 대량 배열</td></tr>
+<tr><td><code>int_fast32_t</code></td><td>최소 32비트 중 가장 빠른 타입</td><td>루프 카운터 (x86-64 glibc에서는 8바이트)</td></tr>
+<tr><td><code>intptr_t</code>/<code>uintptr_t</code></td><td>포인터를 담을 수 있는 정수</td><td>주소 정렬 계산</td></tr>
+<tr><td><code>intmax_t</code></td><td>가장 큰 signed 정수</td><td>범용 변환 함수 (<code>strtoimax</code>)</td></tr>
+<tr><td><code>size_t</code>(stddef.h)</td><td><code>sizeof</code>의 결과 타입, unsigned</td><td>버퍼 길이, 배열 인덱스</td></tr>
+</tbody></table></div>
+
+<p>고정폭 타입을 <code>printf</code>로 출력할 때 <code>%ld</code>와 <code>%lld</code> 중 무엇을 써야 할지는 플랫폼마다 다릅니다(리눅스 64비트에서 <code>int64_t</code>는 <code>long</code>, 윈도우에서는 <code>long long</code>). 이식성 있는 코드는 <code>&lt;inttypes.h&gt;</code>의 매크로를 씁니다.</p>
+
+<figure class="code"><figcaption>ex20-5.c — 고정폭 타입 출력과 상수</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stdint.h&gt;
+#include &lt;inttypes.h&gt;
+
+int main(void)
+{
+    int64_t  balance = INT64_C(1234567890123);   /* 상수 접미사를 이식성 있게 */
+    uint32_t flags   = UINT32_C(0x0000000D);
+    printf("잔액: %" PRId64 "원\n", balance);       /* 문자열 리터럴 연결 */
+    printf("플래그: 0x%08" PRIX32 "\n", flags);
+    printf("INT64_MAX = %" PRId64 "\n", INT64_MAX);
+
+    int64_t in;
+    if (sscanf("987654321098", "%" SCNd64, &amp;in) == 1)   /* 입력은 SCN 계열 */
+        printf("읽은 값: %" PRId64 "\n", in);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>잔액: 1234567890123원
+플래그: 0x0000000D
+INT64_MAX = 9223372036854775807
+읽은 값: 987654321098</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 <code>"%" PRId64</code> 같은 이상한 모양일까?</p>
+<p><code>PRId64</code>는 문자열 리터럴로 정의된 매크로입니다. 리눅스 x86-64 glibc에서는 <code>"ld"</code>, 윈도우에서는 <code>"lld"</code>(또는 구형 MSVC에서 <code>"I64d"</code>)입니다. C에서 나란히 놓인 문자열 리터럴은 컴파일 시 하나로 합쳐지므로 <code>"잔액: %" PRId64 "원\n"</code>은 <code>"잔액: %ld원\n"</code>이 됩니다. 서식 문자열과 실제 인자 타입이 맞지 않으면 UB이므로, 이 매크로는 이식성과 안정성을 동시에 지켜 줍니다.</p>
+</div>
+
+<div class="box tip"><p class="box-title" data-tag="잠깐">long long vs int64_t, 무엇을 써야 할까?</p>
+<p>C99 이후 <code>long long</code>은 최소 64비트가 보장되고, 사실상 모든 플랫폼에서 정확히 64비트입니다. 이 과정의 PART 1에서 금액을 <code>long long</code>으로 쓴 것도 그 때문입니다. 실무 코딩 표준은 대개 "금액 타입을 <code>typedef int64_t amount_t;</code>처럼 별칭으로 정의하고 모든 모듈이 그 별칭만 쓰게" 합니다. 나중에 128비트나 십진 고정소수점 타입으로 바꿔야 할 때 한 곳만 고치면 되기 때문입니다.</p>
+</div>
+
+<h3 id="s20-1-7">오버플로 사전 검사 함수와 __builtin_add_overflow</h3>
+
+<p>이제 실무에서 그대로 쓸 수 있는 오버플로 검사 함수를 만들어 보겠습니다. 원칙은 앞에서 말한 대로 "연산 전에, 오버플로하지 않는 식으로" 검사하는 것입니다. 덧셈·뺄셈은 비교적 쉽고, 곱셈은 부호 조합 4가지를 나눠야 합니다(CERT C 규칙 INT32-C의 방식).</p>
+
+<figure class="code"><figcaption>safe_int.c — 64비트 금액 연산 검사 함수와 시험 코드</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stdint.h&gt;
+#include &lt;stdbool.h&gt;
+#include &lt;inttypes.h&gt;
+
+/* 모든 함수: 성공 시 true와 *r에 결과, 오버플로 시 false(*r은 건드리지 않음) */
+
+static bool add_i64(int64_t a, int64_t b, int64_t *r)
+{
+    if ((b &gt; 0 &amp;&amp; a &gt; INT64_MAX - b) ||
+        (b &lt; 0 &amp;&amp; a &lt; INT64_MIN - b))
+        return false;
+    *r = a + b;
+    return true;
+}
+
+static bool sub_i64(int64_t a, int64_t b, int64_t *r)
+{
+    if ((b &lt; 0 &amp;&amp; a &gt; INT64_MAX + b) ||     /* a - b = a + |b| 가 최대 초과? */
+        (b &gt; 0 &amp;&amp; a &lt; INT64_MIN + b))       /* a - b 가 최소 미만?          */
+        return false;
+    *r = a - b;
+    return true;
+}
+
+static bool mul_i64(int64_t a, int64_t b, int64_t *r)
+{
+    if (a &gt; 0) {
+        if (b &gt; 0) { if (a &gt; INT64_MAX / b) return false; }   /* +,+ */
+        else       { if (b &lt; INT64_MIN / a) return false; }   /* +,- */
+    } else {
+        if (b &gt; 0) { if (a &lt; INT64_MIN / b) return false; }   /* -,+ */
+        else       { if (a != 0 &amp;&amp; b &lt; INT64_MAX / a) return false; } /* -,- */
+    }
+    *r = a * b;
+    return true;
+}
+
+int main(void)
+{
+    /* 1) 일마감: 계좌 잔액 총합 */
+    int64_t balances[] = {
+        INT64_C(9000000000000000000),
+        INT64_C(200000000000000000),
+        INT64_C(100000000000000000)
+    };
+    int64_t total = 0;
+    for (size_t i = 0; i &lt; sizeof balances / sizeof balances[0]; i++) {
+        if (!add_i64(total, balances[i], &amp;total)) {
+            printf("[오류] %zu번째 계좌 합산 중 오버플로 감지, 누적=%" PRId64 "\n",
+                   i + 1, total);
+            break;
+        }
+        printf("누적 %zu건: %" PRId64 "\n", i + 1, total);
+    }
+
+    /* 2) 금액 x 배율 */
+    int64_t out;
+    int64_t trillion = INT64_C(1000000000000);         /* 1조 원 */
+    printf("1조 x 1,000,000   : %s\n", mul_i64(trillion, 1000000, &amp;out) ? "OK" : "OVERFLOW");
+    printf("1조 x 10,000,000  : %s\n", mul_i64(trillion, 10000000, &amp;out) ? "OK" : "OVERFLOW");
+    printf("MIN x -1          : %s\n", mul_i64(INT64_MIN, -1, &amp;out) ? "OK" : "OVERFLOW");
+    printf("0 - MIN           : %s\n", sub_i64(0, INT64_MIN, &amp;out) ? "OK" : "OVERFLOW");
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>누적 1건: 9000000000000000000
+누적 2건: 9200000000000000000
+[오류] 3번째 계좌 합산 중 오버플로 감지, 누적=9200000000000000000
+1조 x 1,000,000   : OK
+1조 x 10,000,000  : OVERFLOW
+MIN x -1          : OVERFLOW
+0 - MIN           : OVERFLOW</pre></figure>
+
+<p>곱셈 검사에서 <code>(-,-)</code> 경우를 살펴보면, <code>a &lt; 0</code>, <code>b &lt;= 0</code>일 때 결과는 0 이상이므로 <code>a * b &gt; INT64_MAX</code>인지 봐야 합니다. 양변을 음수 <code>a</code>로 나누면 부등호가 뒤집혀 <code>b &lt; INT64_MAX / a</code>가 됩니다. <code>MIN x -1</code>은 이 경로에서 <code>INT64_MAX / INT64_MIN</code>이 0(정수 나눗셈은 0쪽으로 절사)이므로 <code>-1 &lt; 0</code>이 참이 되어 오버플로로 판정됩니다. 이렇게 경계를 하나하나 증명하며 코드를 짜는 습관이 금융 개발자의 기본기입니다.</p>
+
+<div class="box tip"><p class="box-title" data-tag="잠깐">컴파일러 내장 함수와 C23 표준</p>
+<p>gcc 5 이상과 clang은 <code>__builtin_add_overflow(a, b, &amp;r)</code>, <code>__builtin_sub_overflow</code>, <code>__builtin_mul_overflow</code>를 제공합니다. 무한 정밀도로 계산한 수학적 결과를 <code>r</code>의 타입에 넣고, 들어가지 않으면 <code>true</code>를 반환합니다(반환값 의미가 위 함수와 반대인 점에 주의). CPU의 오버플로 플래그를 직접 이용하므로 손으로 짠 검사보다 빠르고, 타입이 섞여도 정확합니다. C23에는 이것이 <code>&lt;stdckdint.h&gt;</code>의 <code>ckd_add</code>, <code>ckd_sub</code>, <code>ckd_mul</code>로 표준화되었습니다. MSVC에는 이 내장 함수가 없으므로, 이식성이 필요하면 위의 수동 검사 버전을 폴백으로 두고 매크로로 분기합니다.</p>
+</div>
+
+<figure class="code"><figcaption>ex20-6.c — 내장 함수로 이자 계산 보호</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stdint.h&gt;
+#include &lt;inttypes.h&gt;
+
+#if defined(__GNUC__) || defined(__clang__)
+#  define CKD_MUL(r, a, b) __builtin_mul_overflow((a), (b), (r))
+#else
+#  error "이 컴파일러에서는 safe_int.c의 수동 검사 버전을 사용하십시오"
+#endif
+
+/* 원금(원) x 연이율(백만분율, ppm) / 1,000,000 → 연 이자(원, 절사) */
+int calc_yearly_interest(int64_t principal, int64_t rate_ppm, int64_t *interest)
+{
+    int64_t prod;
+    if (CKD_MUL(&amp;prod, principal, rate_ppm))
+        return -1;                        /* 중간 곱셈 오버플로 */
+    *interest = prod / 1000000;
+    return 0;
+}
+
+int main(void)
+{
+    int64_t it;
+    /* 3.5% = 0.035 = 35000 ppm */
+    if (calc_yearly_interest(INT64_C(100000000), 35000, &amp;it) == 0)
+        printf("1억 원, 3.5%%: 이자 %" PRId64 "원\n", it);
+    if (calc_yearly_interest(INT64_C(500000000000000), 35000, &amp;it) != 0)
+        printf("500조 원, 3.5%%: 중간 곱셈 오버플로 - 128비트 또는 분할 계산 필요\n");
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>1억 원, 3.5%: 이자 3500000원
+500조 원, 3.5%: 중간 곱셈 오버플로 - 128비트 또는 분할 계산 필요</pre></figure>
+
+<p>500조 × 35000 = 1.75 × 10<sup>19</sup>은 <code>INT64_MAX</code>(약 9.22 × 10<sup>18</sup>)를 넘습니다. 최종 이자(17.5조 원)는 int64에 충분히 들어가는데도 <strong>중간 결과</strong>가 넘친 것입니다. 금리 계산은 "곱한 뒤 나누기" 구조라 중간 값이 커지기 쉽습니다. 21장에서 이를 해결하는 기법(<code>__int128</code>, 몫·나머지 분할)을 자세히 다룹니다.</p>
+
+<div class="box fin"><p class="box-title" data-tag="금융 실무">은행 시스템에서는 — 합계 검증은 마지막 방어선</p>
+<p>일마감 배치는 수백만 개 계좌의 잔액·거래액을 합산해 총계정원장과 대사합니다. 한 증권사의 정산 배치는 "체결 수량 × 단가"를 <code>int</code>로 계산하는 부분이 있었는데, 특정 종목의 거래량이 폭증한 날 중간 곱셈이 넘쳐 음수가 되었습니다. 다행히 "원장 합계 = 거래 합계 + 전일 잔액" 검증 단계에서 불일치가 잡혀 배치가 중단되었고, 코드를 고쳐 재처리로 마무리되었습니다.</p>
+<p>실무 원칙: ① 모든 누적·곱셈에 오버플로 검사 함수 사용, ② 오버플로 발생 시 "조용히 계속"하지 말고 <strong>배치를 실패시키고 알람</strong>, ③ 결과에 대한 <strong>독립적 교차 검증</strong>(건수 합계, 차변·대변 합계 일치)을 둔다. 오버플로 검사는 1차 방어선, 대사는 마지막 방어선입니다.</p>
+</div>
+
+<div class="ex"><p class="ex-title">예제 20-4 <span class="lv">난이도 ★★★</span></p>
+<p>음수가 될 수 없는 수량(주식 수 등)을 <code>uint64_t</code>로 다룰 때 쓸 덧셈·곱셈 검사 함수 <code>bool add_u64(uint64_t a, uint64_t b, uint64_t *r)</code>, <code>bool mul_u64(uint64_t a, uint64_t b, uint64_t *r)</code>를 작성하십시오.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>unsigned는 오버플로가 UB가 아니라 순환이므로 "계산 후 검사"도 가능하지만, 의도가 분명하도록 사전 검사를 권합니다. 덧셈은 <code>a &gt; UINT64_MAX - b</code>이면 넘칩니다(<code>UINT64_MAX - b</code>는 항상 안전). 사후 검사 버전은 <code>a + b &lt; a</code>로 판단할 수 있는데, 이는 unsigned에서만 유효합니다. 곱셈은 <code>b != 0 &amp;&amp; a &gt; UINT64_MAX / b</code>이면 넘칩니다.</p>
+<figure class="code good"><figcaption>정답 코드</figcaption>
+<pre><code class="language-c">#include &lt;stdint.h&gt;
+#include &lt;stdbool.h&gt;
+
+bool add_u64(uint64_t a, uint64_t b, uint64_t *r)
+{
+    if (a &gt; UINT64_MAX - b) return false;
+    *r = a + b;
+    return true;
+}
+
+bool mul_u64(uint64_t a, uint64_t b, uint64_t *r)
+{
+    if (b != 0 &amp;&amp; a &gt; UINT64_MAX / b) return false;   /* b==0이면 0으로 나누기 방지 */
+    *r = a * b;
+    return true;
+}</code></pre></figure>
+</details></div>
+
+<h2 id="s20-2"><span class="num">20-2</span>비트 연산과 플래그 설계</h2>
+
+<p>정수의 내부 모양을 알았으니, 이제 그 비트 하나하나를 직접 다뤄 보겠습니다. 계좌 하나에는 "거래정지인가?", "압류되었는가?", "휴면인가?", "한도제한계좌인가?" 같은 예/아니오 상태가 수십 가지 붙습니다. 이것을 <code>int</code> 변수 수십 개로 두면 메모리도 낭비되고 전문·DB 컬럼으로 옮기기도 번거롭습니다. 비트 하나에 상태 하나를 대응시키면 32비트 정수 하나로 32가지 상태를 담고, 여러 상태를 한 번의 연산으로 검사할 수 있습니다.</p>
+
+<h3 id="s20-2-1">비트 연산자 6가지</h3>
+
+<div class="tbl"><table>
+<thead><tr><th>연산자</th><th>이름</th><th>규칙(비트마다)</th><th>대표 용도</th></tr></thead>
+<tbody>
+<tr><td><code>&amp;</code></td><td>AND</td><td>둘 다 1이면 1</td><td>특정 비트 검사, 비트 끄기(마스크와 AND)</td></tr>
+<tr><td><code>|</code></td><td>OR</td><td>하나라도 1이면 1</td><td>특정 비트 켜기, 플래그 합치기</td></tr>
+<tr><td><code>^</code></td><td>XOR</td><td>서로 다르면 1</td><td>비트 뒤집기(토글), 체크섬, 변경점 찾기</td></tr>
+<tr><td><code>~</code></td><td>NOT(보수)</td><td>0↔1 반전(단항)</td><td>마스크 반전 (<code>&amp; ~mask</code>로 끄기)</td></tr>
+<tr><td><code>&lt;&lt;</code></td><td>왼쪽 시프트</td><td>왼쪽으로 n칸, 빈자리 0</td><td>n번째 비트 만들기(<code>1u &lt;&lt; n</code>), ×2<sup>n</sup></td></tr>
+<tr><td><code>&gt;&gt;</code></td><td>오른쪽 시프트</td><td>오른쪽으로 n칸</td><td>필드 추출, ÷2<sup>n</sup>(unsigned)</td></tr>
+</tbody></table></div>
+
+<figure class="diagram">
+<svg viewBox="0 0 640 250" width="640" role="img" aria-label="0xCA와 0x5C의 AND OR XOR 및 NOT 결과">
+  <text x="20" y="34" class="mono small mute">a = 0xCA</text>
+  <text x="200" y="34" class="mono">1 1 0 0 1 0 1 0</text>
+  <text x="20" y="62" class="mono small mute">b = 0x5C</text>
+  <text x="200" y="62" class="mono">0 1 0 1 1 1 0 0</text>
+  <path class="line" d="M190 74 H 400"/>
+  <text x="20" y="100" class="mono small">a &amp; b = 0x48</text>
+  <text x="200" y="100" class="mono acc">0 1 0 0 1 0 0 0</text>
+  <text x="420" y="100" class="small mute">둘 다 1인 자리만</text>
+  <text x="20" y="132" class="mono small">a | b = 0xDE</text>
+  <text x="200" y="132" class="mono acc">1 1 0 1 1 1 1 0</text>
+  <text x="420" y="132" class="small mute">하나라도 1인 자리</text>
+  <text x="20" y="164" class="mono small">a ^ b = 0x96</text>
+  <text x="200" y="164" class="mono acc">1 0 0 1 0 1 1 0</text>
+  <text x="420" y="164" class="small mute">서로 다른 자리</text>
+  <text x="20" y="196" class="mono small">~a (8비트)= 0x35</text>
+  <text x="200" y="196" class="mono acc">0 0 1 1 0 1 0 1</text>
+  <text x="420" y="196" class="small mute">모두 반전</text>
+  <text x="20" y="232" class="small warn-t">주의: C에서 ~a는 int로 승격 후 반전되어 0xFFFFFF35가 된다</text>
+</svg>
+<figcaption>그림 20-6 비트 연산 4가지 — 같은 자리의 비트끼리 독립적으로 계산한다</figcaption>
+</figure>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 — 논리 연산자와 비트 연산자 혼동, 우선순위</p>
+<ul>
+<li><code>&amp;&amp;</code>/<code>||</code>는 결과가 0 또는 1인 <strong>논리</strong> 연산이고 단락 평가를 합니다. <code>&amp;</code>/<code>|</code>는 <strong>비트</strong> 연산이고 양쪽을 모두 평가합니다. <code>if (flags &amp;&amp; AF_SEIZED)</code>는 "flags가 0이 아니고 AF_SEIZED가 0이 아니면" 참이라 압류가 아닌 계좌도 차단됩니다.</li>
+<li>비트 연산자는 비교 연산자보다 <strong>우선순위가 낮습니다</strong>. <code>if (flags &amp; AF_SEIZED == 0)</code>은 <code>flags &amp; (AF_SEIZED == 0)</code> = <code>flags &amp; 0</code> = 항상 0으로 해석됩니다. 반드시 <code>if ((flags &amp; AF_SEIZED) == 0)</code>처럼 괄호를 칩니다. gcc <code>-Wparentheses</code>(<code>-Wall</code>에 포함)가 경고합니다.</li>
+</ul>
+</div>
+
+<h3 id="s20-2-2">시프트 연산과 미정의 동작</h3>
+
+<p><code>x &lt;&lt; n</code>은 비트를 왼쪽으로 n칸 밀고 빈자리를 0으로 채웁니다. 수학적으로 x × 2<sup>n</sup>입니다. <code>x &gt;&gt; n</code>은 오른쪽으로 밀며, unsigned이면 빈자리를 0으로 채우는 <strong>논리 시프트</strong>, 음수 signed이면 구현 정의인데 대부분의 컴파일러는 부호 비트로 채우는 <strong>산술 시프트</strong>를 합니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 680 240" width="680" role="img" aria-label="왼쪽 시프트, 논리 오른쪽 시프트, 산술 오른쪽 시프트 비교">
+  <text x="20" y="30" class="small bold">0x0D &lt;&lt; 2</text>
+  <text x="170" y="30" class="mono">0000 1101</text>
+  <path class="arrow" d="M290 25 H 340"/>
+  <text x="350" y="30" class="mono acc">0011 0100</text>
+  <text x="480" y="30" class="small mute">= 0x34 = 52 (13 x 4)</text>
+  <text x="20" y="62" class="small mute">왼쪽으로 밀고 오른쪽 빈칸은 0</text>
+  <text x="20" y="110" class="small bold">0xF0u &gt;&gt; 2 (unsigned)</text>
+  <text x="200" y="110" class="mono">1111 0000</text>
+  <path class="arrow" d="M320 105 H 370"/>
+  <text x="380" y="110" class="mono"><tspan class="acc">00</tspan>11 1100</text>
+  <text x="500" y="110" class="small mute">논리 시프트: 0으로 채움</text>
+  <text x="20" y="160" class="small bold">(int8_t)-16 &gt;&gt; 2</text>
+  <text x="200" y="160" class="mono">1111 0000</text>
+  <path class="arrow" d="M320 155 H 370"/>
+  <text x="380" y="160" class="mono"><tspan class="warn-t">11</tspan>11 1100</text>
+  <text x="500" y="160" class="small mute">산술 시프트: 부호로 채움</text>
+  <text x="500" y="178" class="small mute">= -4 (구현 정의)</text>
+  <rect class="bad" x="20" y="196" width="640" height="34" rx="4"/>
+  <text x="340" y="218" text-anchor="middle" class="small">UB: 시프트 횟수가 음수이거나 타입 비트 수 이상 / 음수를 왼쪽 시프트 / 결과가 signed 범위 초과</text>
+</svg>
+<figcaption>그림 20-7 시프트의 세 가지 모습과 미정의 동작 조건</figcaption>
+</figure>
+
+<p>시프트에는 UB 함정이 많습니다. C11 6.5.7 기준으로 다음은 모두 미정의 동작입니다.</p>
+<ul>
+<li><strong>시프트 횟수가 음수이거나, 승격된 왼쪽 피연산자의 비트 수 이상</strong>인 경우: <code>1u &lt;&lt; 32</code>(unsigned int 32비트), <code>x &gt;&gt; -1</code>. x86 CPU는 시프트 횟수의 하위 5비트만 쓰므로 <code>1u &lt;&lt; 32</code>가 1이 되는 것을 흔히 보지만, 컴파일러가 상수로 접을 때는 0이 나오기도 합니다. 결과를 믿으면 안 됩니다.</li>
+<li><strong>음수 signed 값의 왼쪽 시프트</strong>: <code>-1 &lt;&lt; 1</code>.</li>
+<li><strong>signed 값을 왼쪽 시프트한 결과가 표현 범위를 넘는 경우</strong>: <code>1 &lt;&lt; 31</code>(int 32비트). 2<sup>31</sup>은 int로 표현할 수 없기 때문입니다. 플래그 상수를 <code>1 &lt;&lt; 31</code>로 정의한 코드가 아주 많은데, 엄밀히는 UB이므로 <code>1u &lt;&lt; 31</code> 또는 <code>UINT32_C(1) &lt;&lt; 31</code>로 씁니다.</li>
+</ul>
+
+<figure class="code"><figcaption>ex20-7.c — 안전한 비트 마스크 생성</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stdint.h&gt;
+#include &lt;inttypes.h&gt;
+
+/* n번째 비트만 1인 64비트 마스크. 범위 밖이면 0 반환 */
+static uint64_t bit64(unsigned n)
+{
+    return (n &lt; 64) ? (UINT64_C(1) &lt;&lt; n) : 0;
+}
+
+/* 하위 n비트가 모두 1인 마스크: n=0..64 모두 안전 */
+static uint64_t low_mask64(unsigned n)
+{
+    if (n == 0)  return 0;
+    if (n &gt;= 64) return UINT64_MAX;            /* (1 &lt;&lt; 64) - 1 은 UB이므로 따로 처리 */
+    return (UINT64_C(1) &lt;&lt; n) - 1;
+}
+
+int main(void)
+{
+    printf("bit64(40)      = 0x%016" PRIX64 "\n", bit64(40));
+    printf("low_mask64(12) = 0x%016" PRIX64 "\n", low_mask64(12));
+    printf("low_mask64(64) = 0x%016" PRIX64 "\n", low_mask64(64));
+    /* 필드 추출: 상위 4비트=지점구분, 하위 12비트=일련번호 */
+    uint16_t code = 0x3A7F;
+    printf("지점구분=%u, 일련번호=%u\n", (code &gt;&gt; 12) &amp; 0xFu, code &amp; 0x0FFFu);
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>bit64(40)      = 0x0000010000000000
+low_mask64(12) = 0x0000000000000FFF
+low_mask64(64) = 0xFFFFFFFFFFFFFFFF
+지점구분=3, 일련번호=2687</pre></figure>
+
+<p><code>0x3A7F</code>의 하위 12비트는 <code>0xA7F</code> = 10×256 + 7×16 + 15 = 2687입니다. "시프트로 내리고, 마스크로 자른다"는 필드 추출 패턴은 전문 헤더 파싱, 상태 코드 해석, 해시 계산에서 끝없이 등장합니다.</p>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 <code>x &gt;&gt; 1</code>과 <code>x / 2</code>는 음수에서 다를까?</p>
+<p>C99부터 정수 나눗셈은 <strong>0쪽으로 절사</strong>하도록 정해졌습니다. −7 / 2 = −3입니다. 반면 산술 오른쪽 시프트는 <strong>음의 무한대 쪽으로 내림</strong>합니다. −7(…11111001) >> 1 = …11111100 = −4입니다. 그래서 컴파일러는 signed <code>x / 2</code>를 단순 시프트 하나로 바꾸지 못하고, 음수일 때 1을 더해 보정하는 명령을 추가합니다. 금액을 2로 나누는 코드를 "빠르게 하려고" <code>&gt;&gt; 1</code>로 바꾸면 음수 금액(환불·취소)에서 1원 차이가 나는 버그가 생깁니다. 최적화는 컴파일러에 맡기고, 의도를 드러내는 연산을 쓰십시오.</p>
+</div>
+
+<h3 id="s20-2-3">마스크와 비트 조작 매크로</h3>
+
+<p><strong>마스크(mask)</strong>란 관심 있는 비트 자리만 1로 표시한 정수입니다. 가면(mask)처럼 원하는 부분만 드러내거나 가린다는 뜻입니다. 네 가지 기본 조작은 다음과 같습니다.</p>
+
+<div class="tbl"><table>
+<thead><tr><th>조작</th><th>식</th><th>원리</th></tr></thead>
+<tbody>
+<tr><td>세트(켜기)</td><td><code>f |= m</code></td><td>x | 1 = 1, x | 0 = x → 마스크 자리만 1로</td></tr>
+<tr><td>해제(끄기)</td><td><code>f &amp;= ~m</code></td><td>x &amp; 0 = 0, x &amp; 1 = x → 마스크 자리만 0으로</td></tr>
+<tr><td>토글(뒤집기)</td><td><code>f ^= m</code></td><td>x ^ 1 = ~x, x ^ 0 = x → 마스크 자리만 반전</td></tr>
+<tr><td>검사(하나라도)</td><td><code>(f &amp; m) != 0</code></td><td>마스크 자리 중 1이 하나라도 있으면 참</td></tr>
+<tr><td>검사(모두)</td><td><code>(f &amp; m) == m</code></td><td>마스크 자리가 전부 1이면 참</td></tr>
+</tbody></table></div>
+
+<figure class="code"><figcaption>bitops.h — 실무형 비트 조작 매크로</figcaption>
+<pre><code class="language-c">#ifndef BITOPS_H
+#define BITOPS_H
+#include &lt;stdint.h&gt;
+
+/* 인자를 괄호로 감싸 우선순위 문제를 막는다. 각 인자는 한 번만 평가되도록 작성 */
+#define BIT_SET(f, m)    ((f) |=  (m))
+#define BIT_CLR(f, m)    ((f) &amp;= ~(m))
+#define BIT_TGL(f, m)    ((f) ^=  (m))
+#define BIT_ANY(f, m)    (((f) &amp; (m)) != 0)      /* m 중 하나라도 켜짐 */
+#define BIT_ALL(f, m)    (((f) &amp; (m)) == (m))    /* m 이 모두 켜짐 */
+#define BIT_NONE(f, m)   (((f) &amp; (m)) == 0)      /* m 이 모두 꺼짐 */
+
+/* 필드 읽기/쓰기: shift 위치에서 width 비트 (32비트 플래그용, width는 1~31) */
+#define FIELD_MASK32(shift, width) (((UINT32_C(1) &lt;&lt; (width)) - 1) &lt;&lt; (shift))
+#define FIELD_GET32(f, shift, width) (((f) &gt;&gt; (shift)) &amp; ((UINT32_C(1) &lt;&lt; (width)) - 1))
+#define FIELD_SET32(f, shift, width, v) \
+    ((f) = ((f) &amp; ~FIELD_MASK32(shift, width)) | \
+           (((uint32_t)(v) &lt;&lt; (shift)) &amp; FIELD_MASK32(shift, width)))
+
+#endif</code></pre></figure>
+
+<div class="box warn"><p class="box-title" data-tag="주의">자주 하는 실수 — ~ 의 폭과 마스크 타입</p>
+<p><code>uint64_t f; f &amp;= ~0x10;</code>은 괜찮습니다. <code>0x10</code>은 int이고 <code>~0x10</code>은 int −17(…11101111)이며, uint64_t로 변환될 때 부호 확장되어 상위 비트도 1이기 때문입니다. 그러나 <code>f &amp;= ~0x10u;</code>는 <strong>버그</strong>입니다. <code>~0x10u</code>는 unsigned int <code>0xFFFFFFEF</code>이고 64비트로 <strong>제로 확장</strong>되어 <code>0x00000000FFFFFFEF</code>가 되므로, <code>f</code>의 상위 32비트가 전부 지워집니다. 마스크 상수는 대상 변수와 <strong>같은 폭</strong>으로 정의하는 것이 원칙입니다(<code>UINT64_C(0x10)</code>).</p>
+</div>
+
+<h3 id="s20-2-4">계좌 상태 플래그 설계</h3>
+
+<p>이제 실전입니다. 계좌 원장 레코드에 32비트 상태 플래그를 두고, 출금 가능 여부를 판정하는 모듈을 만들어 보겠습니다. 먼저 비트 배치를 설계합니다. 실무에서는 이 배치표가 <strong>설계 문서와 DB 컬럼 정의서에 그대로 들어가는 계약</strong>이므로, 한 번 정한 비트 번호는 절대 재사용하거나 바꾸지 않습니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 220" width="700" role="img" aria-label="32비트 계좌 상태 플래그 비트 배치도">
+  <text x="350" y="22" text-anchor="middle" class="small bold">uint32_t acct_flags (하위 8비트 확대)</text>
+  <rect class="dash" x="20" y="40" width="180" height="50" rx="3"/>
+  <text x="110" y="62" text-anchor="middle" class="small mute">bit 31 ~ 8</text>
+  <text x="110" y="80" text-anchor="middle" class="small mute">예약(향후 확장)</text>
+  <rect class="box" x="200" y="40" width="60" height="50"/>
+  <text x="230" y="70" text-anchor="middle" class="mono small">7</text>
+  <rect class="box" x="260" y="40" width="60" height="50"/>
+  <text x="290" y="70" text-anchor="middle" class="mono small">6</text>
+  <rect class="hl2" x="320" y="40" width="60" height="50"/>
+  <text x="350" y="70" text-anchor="middle" class="mono small">5</text>
+  <rect class="bad" x="380" y="40" width="60" height="50"/>
+  <text x="410" y="70" text-anchor="middle" class="mono small">4</text>
+  <rect class="hl" x="440" y="40" width="60" height="50"/>
+  <text x="470" y="70" text-anchor="middle" class="mono small">3</text>
+  <rect class="hl2" x="500" y="40" width="60" height="50"/>
+  <text x="530" y="70" text-anchor="middle" class="mono small">2</text>
+  <rect class="bad" x="560" y="40" width="60" height="50"/>
+  <text x="590" y="70" text-anchor="middle" class="mono small">1</text>
+  <rect class="bad" x="620" y="40" width="60" height="50"/>
+  <text x="650" y="70" text-anchor="middle" class="mono small">0</text>
+  <text x="230" y="112" text-anchor="middle" class="small mute">예약</text>
+  <text x="290" y="112" text-anchor="middle" class="small mute">예약</text>
+  <text x="350" y="112" text-anchor="middle" class="small">분실</text>
+  <text x="410" y="112" text-anchor="middle" class="small">지급정지</text>
+  <text x="470" y="112" text-anchor="middle" class="small">한도제한</text>
+  <text x="530" y="112" text-anchor="middle" class="small">휴면</text>
+  <text x="590" y="112" text-anchor="middle" class="small">압류</text>
+  <text x="650" y="112" text-anchor="middle" class="small">거래정지</text>
+  <text x="350" y="130" text-anchor="middle" class="mono small mute">0x20</text>
+  <text x="410" y="130" text-anchor="middle" class="mono small mute">0x10</text>
+  <text x="470" y="130" text-anchor="middle" class="mono small mute">0x08</text>
+  <text x="530" y="130" text-anchor="middle" class="mono small mute">0x04</text>
+  <text x="590" y="130" text-anchor="middle" class="mono small mute">0x02</text>
+  <text x="650" y="130" text-anchor="middle" class="mono small mute">0x01</text>
+  <path class="accent-line" d="M320 150 H 440"/>
+  <path class="accent-line" d="M500 150 H 680"/>
+  <text x="500" y="176" text-anchor="middle" class="small acc">AF_DENY_WITHDRAW = 0x37 (출금 차단 비트 묶음)</text>
+  <text x="470" y="200" text-anchor="middle" class="small mute">한도제한(0x08)은 차단이 아니라 "추가 검사" 대상</text>
+</svg>
+<figcaption>그림 20-8 계좌 상태 플래그 비트 배치 — 출금 차단 마스크 하나로 다섯 가지 상태를 한 번에 검사</figcaption>
+</figure>
+
+<figure class="code"><figcaption>acct_flags.c — 계좌 상태 플래그와 출금 가능 판정</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stdint.h&gt;
+#include &lt;inttypes.h&gt;
+
+typedef uint32_t acct_flags_t;
+
+/* 비트 번호는 DB/전문과 공유되는 계약. 절대 재배치하지 않는다 */
+#define AF_SUSPENDED    UINT32_C(0x00000001)  /* bit0 거래정지      */
+#define AF_SEIZED       UINT32_C(0x00000002)  /* bit1 압류          */
+#define AF_DORMANT      UINT32_C(0x00000004)  /* bit2 휴면          */
+#define AF_LIMITED      UINT32_C(0x00000008)  /* bit3 한도제한계좌  */
+#define AF_NO_WITHDRAW  UINT32_C(0x00000010)  /* bit4 지급정지      */
+#define AF_LOSS_REPORT  UINT32_C(0x00000020)  /* bit5 분실신고      */
+
+#define AF_DENY_WITHDRAW (AF_SUSPENDED | AF_SEIZED | AF_DORMANT | \
+                          AF_NO_WITHDRAW | AF_LOSS_REPORT)
+
+#define FLAG_SET(f, m)  ((f) |=  (m))
+#define FLAG_CLR(f, m)  ((f) &amp;= ~(m))
+#define FLAG_TGL(f, m)  ((f) ^=  (m))
+#define FLAG_ANY(f, m)  (((f) &amp; (m)) != 0)
+#define FLAG_ALL(f, m)  (((f) &amp; (m)) == (m))
+
+#define LIMITED_DAILY_MAX INT64_C(1000000)    /* 한도제한계좌 1일 출금 한도 100만 원 */
+
+static const struct { acct_flags_t bit; const char *name; } FLAG_NAMES[] = {
+    { AF_SUSPENDED, "거래정지" }, { AF_SEIZED, "압류" },     { AF_DORMANT, "휴면" },
+    { AF_LIMITED, "한도제한" },   { AF_NO_WITHDRAW, "지급정지" }, { AF_LOSS_REPORT, "분실신고" },
+};
+#define N_FLAG_NAMES (sizeof FLAG_NAMES / sizeof FLAG_NAMES[0])
+
+/* 켜진 플래그 이름을 "압류|한도제한" 형태로 buf에 만든다 */
+static const char *flags_to_str(acct_flags_t f, char *buf, size_t sz)
+{
+    size_t len = 0;
+    buf[0] = '\0';
+    for (size_t i = 0; i &lt; N_FLAG_NAMES; i++) {
+        if (f &amp; FLAG_NAMES[i].bit) {
+            int n = snprintf(buf + len, sz - len, "%s%s",
+                             len ? "|" : "", FLAG_NAMES[i].name);
+            if (n &lt; 0 || (size_t)n &gt;= sz - len)   /* 잘림: 더 쓰지 않는다 */
+                break;
+            len += (size_t)n;
+        }
+    }
+    if (len == 0)
+        snprintf(buf, sz, "정상");
+    return buf;
+}
+
+enum wd_result { WD_OK = 0, WD_DENIED_STATUS = 1, WD_LIMIT_EXCEEDED = 2, WD_BAD_AMOUNT = 3 };
+
+static enum wd_result check_withdraw(acct_flags_t f, int64_t amount,
+                                     int64_t daily_used, const char **why)
+{
+    if (amount &lt;= 0 || daily_used &lt; 0) {
+        *why = "금액 오류";
+        return WD_BAD_AMOUNT;
+    }
+    if (FLAG_ANY(f, AF_DENY_WITHDRAW)) {          /* 한 번의 AND로 5가지 상태 검사 */
+        *why = "상태 차단";
+        for (size_t i = 0; i &lt; N_FLAG_NAMES; i++)  /* 사유는 가장 낮은 비트부터 */
+            if (f &amp; FLAG_NAMES[i].bit &amp; AF_DENY_WITHDRAW) {
+                *why = FLAG_NAMES[i].name;
+                break;
+            }
+        return WD_DENIED_STATUS;
+    }
+    if (FLAG_ANY(f, AF_LIMITED) &amp;&amp; amount &gt; LIMITED_DAILY_MAX - daily_used) {
+        *why = "한도제한계좌 1일 한도 초과";      /* 뺄셈 쪽으로 옮겨 오버플로 회피 */
+        return WD_LIMIT_EXCEEDED;
+    }
+    *why = "승인";
+    return WD_OK;
+}
+
+static void try_wd(acct_flags_t f, int64_t amt, int64_t used)
+{
+    char buf[128];
+    const char *why;
+    enum wd_result r = check_withdraw(f, amt, used, &amp;why);
+    printf("상태=0x%02" PRIX32 "(%s) 출금 %" PRId64 " (당일 %" PRId64 ") -&gt; [%d] %s\n",
+           f, flags_to_str(f, buf, sizeof buf), amt, used, (int)r, why);
+}
+
+int main(void)
+{
+    acct_flags_t f = 0;
+    try_wd(f, 300000, 800000);
+
+    FLAG_SET(f, AF_LIMITED);          /* 대포통장 의심 등으로 한도제한 지정 */
+    try_wd(f, 300000, 800000);
+    try_wd(f, 200000, 800000);
+
+    FLAG_SET(f, AF_SEIZED);           /* 법원 압류 통지 접수 */
+    try_wd(f, 10000, 0);
+
+    FLAG_CLR(f, AF_SEIZED);           /* 압류 해제 */
+    FLAG_TGL(f, AF_DORMANT);          /* 휴면 전환 (토글) */
+    try_wd(f, 10000, 0);
+
+    FLAG_TGL(f, AF_DORMANT);          /* 휴면 해제 (다시 토글) */
+    try_wd(f, 10000, 0);
+
+    printf("한도제한+압류 모두? %d\n", FLAG_ALL(f, AF_LIMITED | AF_SEIZED));
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>상태=0x00(정상) 출금 300000 (당일 800000) -&gt; [0] 승인
+상태=0x08(한도제한) 출금 300000 (당일 800000) -&gt; [2] 한도제한계좌 1일 한도 초과
+상태=0x08(한도제한) 출금 200000 (당일 800000) -&gt; [0] 승인
+상태=0x0A(압류|한도제한) 출금 10000 (당일 0) -&gt; [1] 압류
+상태=0x0C(휴면|한도제한) 출금 10000 (당일 0) -&gt; [1] 휴면
+상태=0x08(한도제한) 출금 10000 (당일 0) -&gt; [0] 승인
+한도제한+압류 모두? 0</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 토글은 상태 관리에 위험할까?</p>
+<p>예제에서는 설명을 위해 휴면 전환에 <code>FLAG_TGL</code>을 썼지만, 실무에서 상태 변경에 토글을 쓰는 것은 위험합니다. 같은 "휴면 전환" 요청이 네트워크 재전송 등으로 <strong>두 번</strong> 처리되면, 토글은 휴면 → 정상으로 되돌려 버립니다. 반면 <code>FLAG_SET</code>은 몇 번을 실행해도 결과가 같습니다. 이런 성질을 <strong>멱등성(idempotency)</strong>이라고 하며, 재처리·재전송이 일상인 금융 시스템에서는 상태 변경 연산을 멱등하게 설계하는 것이 원칙입니다. 토글은 "화면 체크박스 반전"처럼 의도가 명확히 반전일 때만 씁니다.</p>
+</div>
+
+<div class="box fin"><p class="box-title" data-tag="금융 실무">은행 시스템에서는 — 비트 재사용 사고</p>
+<p>어느 금융기관의 고객 상태 플래그에서 bit 6은 원래 "이전 시스템의 특수 계좌" 표시였는데, 해당 기능이 폐지되면서 몇 년 뒤 다른 팀이 bit 6을 "해외 거래 차단"으로 재사용했습니다. 문제는 오래된 계좌 수만 개에 옛날 의미의 bit 6이 지워지지 않은 채 남아 있었다는 것입니다. 시스템 오픈 직후 해당 고객들의 해외 결제가 일제히 거절되었고, 콜센터 민원이 폭주했습니다.</p>
+<p>교훈: ① 비트 배치는 <strong>코드 테이블(설계 문서)로 관리</strong>하고, 폐지된 비트는 "폐기(재사용 금지)"로 표시합니다. ② 새 비트를 도입할 때는 기존 데이터에서 해당 비트가 모두 0인지 <strong>사전 데이터 점검</strong>을 합니다. ③ 상태 변경은 반드시 <strong>변경 이력(이전값·이후값·변경자·사유)</strong>을 남겨 추적 가능하게 합니다.</p>
+</div>
+
+<div class="ex"><p class="ex-title">예제 20-5 <span class="lv">난이도 ★★☆</span></p>
+<p>상태 플래그 <code>f = 0x2B</code>인 계좌가 있습니다. 위 정의 기준으로 (1) 켜진 상태를 모두 쓰고, (2) 출금 판정 결과와 사유를 쓰고, (3) 지급정지와 분실신고만 한 번에 해제한 뒤의 값을 16진수로 쓰십시오.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>(1) 0x2B = 0010 1011 → bit0(거래정지), bit1(압류), bit3(한도제한), bit5(분실신고).</p>
+<p>(2) <code>0x2B &amp; 0x37 = 0x23</code> ≠ 0이므로 차단. 사유는 가장 낮은 차단 비트인 bit0 "거래정지"이며 결과 코드는 1(<code>WD_DENIED_STATUS</code>).</p>
+<p>(3) <code>f &amp;= ~(AF_NO_WITHDRAW | AF_LOSS_REPORT)</code> = <code>0x2B &amp; ~0x30</code> = <code>0x2B &amp; 0xFFFFFFCF</code> = <strong>0x0B</strong>. (지급정지 bit4는 원래 꺼져 있었으므로 해제해도 변화 없음 — 해제 연산은 멱등합니다.)</p>
+</details></div>
+
+<h3 id="s20-2-5">권한 비트와 유용한 비트 기법</h3>
+
+<p>단말 사용자(창구 직원, 책임자, 관리자)의 권한도 비트로 표현하기 좋습니다. 역할(role)은 권한 비트의 OR 조합으로 정의하고, 어떤 거래를 실행하려면 <strong>필요한 권한이 모두</strong> 있어야 합니다.</p>
+
+<figure class="code"><figcaption>perm.c — 역할 기반 권한 비트</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stdint.h&gt;
+
+typedef uint16_t perm_t;
+#define P_INQUIRY      ((perm_t)0x0001)   /* 조회          */
+#define P_TRANSFER     ((perm_t)0x0002)   /* 이체          */
+#define P_CANCEL       ((perm_t)0x0004)   /* 거래 취소     */
+#define P_APPROVE      ((perm_t)0x0008)   /* 책임자 승인   */
+#define P_LIMIT_CHANGE ((perm_t)0x0010)   /* 한도 변경     */
+#define P_ACCT_UNLOCK  ((perm_t)0x0020)   /* 정지 해제     */
+
+#define ROLE_TELLER  ((perm_t)(P_INQUIRY | P_TRANSFER))
+#define ROLE_MANAGER ((perm_t)(ROLE_TELLER | P_CANCEL | P_APPROVE | P_LIMIT_CHANGE))
+
+/* 필요한 권한이 "모두" 있어야 허용 */
+static int has_all(perm_t have, perm_t need) { return (have &amp; need) == need; }
+
+/* 1인 비트 개수 (Brian Kernighan 방식): x &amp; (x-1)은 가장 낮은 1비트를 지운다 */
+static int popcount16(perm_t x)
+{
+    int c = 0;
+    while (x) { x &amp;= (perm_t)(x - 1); c++; }
+    return c;
+}
+
+int main(void)
+{
+    perm_t need_cancel = P_CANCEL | P_APPROVE;   /* 취소는 책임자 승인까지 필요 */
+    printf("창구직원 취소 가능? %d\n", has_all(ROLE_TELLER, need_cancel));
+    printf("책임자 취소 가능?   %d\n", has_all(ROLE_MANAGER, need_cancel));
+    perm_t senior = ROLE_TELLER | P_CANCEL;      /* 취소 권한만 추가된 선임 직원 */
+    printf("선임직원 취소(ALL 검사)? %d\n", has_all(senior, need_cancel));
+    printf("선임직원 취소(ANY 검사)? %d  &lt;- 잘못된 허용\n", (senior &amp; need_cancel) != 0);
+    printf("책임자 권한 개수: %d\n", popcount16(ROLE_MANAGER));
+    printf("가장 낮은 권한 비트: 0x%04X\n", (unsigned)(ROLE_MANAGER &amp; (perm_t)-ROLE_MANAGER));
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>창구직원 취소 가능? 0
+책임자 취소 가능?   1
+선임직원 취소(ALL 검사)? 0
+선임직원 취소(ANY 검사)? 1  &lt;- 잘못된 허용
+책임자 권한 개수: 5
+가장 낮은 권한 비트: 0x0001</pre></figure>
+
+<p>선임직원은 취소 권한(0x04)은 있지만 책임자 승인 권한(0x08)이 없습니다. <code>(have &amp; need) != 0</code> 방식은 "필요한 권한 중 하나라도 있으니 허용"으로 판정해 버려, 승인 없는 취소가 가능해집니다. 권한 검사에는 반드시 <code>(have &amp; need) == need</code>를 쓰십시오.</p>
+
+<div class="tbl"><table>
+<thead><tr><th>기법</th><th>식</th><th>설명</th></tr></thead>
+<tbody>
+<tr><td>가장 낮은 1비트 지우기</td><td><code>x &amp; (x - 1)</code></td><td>x−1은 가장 낮은 1을 0으로, 그 아래 0들을 1로 바꾼다</td></tr>
+<tr><td>가장 낮은 1비트만 남기기</td><td><code>x &amp; -x</code> (unsigned)</td><td>2의 보수 −x = ~x+1 이 그 비트만 공통으로 남긴다</td></tr>
+<tr><td>2의 거듭제곱 판정</td><td><code>x &amp;&amp; !(x &amp; (x - 1))</code></td><td>1비트가 정확히 하나 → "플래그가 정확히 하나만 켜졌는가?"</td></tr>
+<tr><td>비트 개수 세기</td><td><code>__builtin_popcount(x)</code></td><td>gcc/clang 내장, C23은 <code>stdc_count_ones</code></td></tr>
+<tr><td>두 값 교환(비권장)</td><td><code>a ^= b; b ^= a; a ^= b;</code></td><td>같은 객체를 가리키면 0이 된다. 임시 변수가 더 명확하고 빠름</td></tr>
+</tbody></table></div>
+
+<div class="box fin"><p class="box-title" data-tag="금융 실무">은행 시스템에서는 — 4-eyes 원칙과 권한 분리</p>
+<p>금융권 내부통제의 기본은 "한 사람이 거래를 만들고 승인까지 하지 못하게" 하는 직무 분리(4-eyes principle)입니다. 권한 비트만으로는 부족하고, "승인자 ID ≠ 입력자 ID" 같은 규칙이 함께 검사되어야 합니다. 또한 권한 비트 정의는 보통 중앙 권한관리 시스템의 코드 테이블에서 내려받으므로, 애플리케이션이 하드코딩한 비트 값과 테이블 값이 어긋나지 않도록 기동 시 검증(self-check)하는 루틴을 두기도 합니다.</p>
+</div>
+
+<h3 id="s20-2-6">비트필드와 이식성 문제</h3>
+
+<p>C는 구조체 멤버를 비트 단위 크기로 선언하는 <strong>비트필드(bit-field)</strong>를 제공합니다. 마스크와 시프트 없이 멤버 이름으로 접근할 수 있어 편리해 보입니다.</p>
+
+<figure class="code"><figcaption>ex20-8.c — 비트필드 사용과 함정</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+struct acct_status {
+    unsigned int suspended : 1;   /* 거래정지 */
+    unsigned int seized    : 1;   /* 압류     */
+    unsigned int dormant   : 1;   /* 휴면     */
+    unsigned int grade     : 4;   /* 고객 등급 0~15 */
+    int          trap      : 1;   /* 함정: 부호 있는 1비트 */
+};
+
+int main(void)
+{
+    struct acct_status s = {0};
+    s.seized = 1;
+    s.grade  = 9;
+    s.trap   = 1;                       /* 1비트 signed에 1을 넣으면? */
+    printf("sizeof = %zu\n", sizeof s);
+    printf("seized=%u grade=%u trap=%d\n", s.seized, s.grade, s.trap);
+    s.grade = 20;                       /* 4비트에 20: 20 mod 16 = 4 */
+    printf("grade=%u\n", s.grade);
+    /* unsigned int *p = &amp;s.seized;  ← 컴파일 오류: 비트필드의 주소는 얻을 수 없다 */
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과 (gcc, x86-64)</figcaption><pre>sizeof = 4
+seized=1 grade=9 trap=-1
+grade=4</pre></figure>
+
+<p><code>trap</code>이 −1이 된 이유는, gcc에서 <code>int</code> 비트필드가 signed로 취급되고 1비트 signed 2의 보수의 표현 범위가 −1~0뿐이기 때문입니다. (plain <code>int</code> 비트필드가 signed인지 unsigned인지조차 <strong>구현 정의</strong>입니다.) 그 밖에도 비트필드에는 이식성 문제가 많습니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 680 220" width="680" role="img" aria-label="비트필드 배치가 컴파일러와 엔디안에 따라 달라지는 모습">
+  <text x="20" y="28" class="small bold">같은 선언: suspended:1, seized:1, dormant:1, grade:4</text>
+  <text x="20" y="66" class="small">컴파일러 A</text>
+  <text x="20" y="82" class="small mute">(LSB부터 배치)</text>
+  <rect class="dash" x="150" y="50" width="200" height="36"/>
+  <text x="250" y="73" text-anchor="middle" class="small mute">미사용 25비트 …</text>
+  <rect class="hl2" x="350" y="50" width="160" height="36"/>
+  <text x="430" y="73" text-anchor="middle" class="small">grade(4)</text>
+  <rect class="box" x="510" y="50" width="50" height="36"/>
+  <text x="535" y="73" text-anchor="middle" class="small">dor</text>
+  <rect class="box" x="560" y="50" width="50" height="36"/>
+  <text x="585" y="73" text-anchor="middle" class="small">sei</text>
+  <rect class="hl" x="610" y="50" width="50" height="36"/>
+  <text x="635" y="73" text-anchor="middle" class="small">sus</text>
+  <text x="635" y="104" text-anchor="middle" class="mono small mute">bit0</text>
+  <text x="20" y="146" class="small">컴파일러 B</text>
+  <text x="20" y="162" class="small mute">(MSB부터 배치)</text>
+  <rect class="hl" x="150" y="130" width="50" height="36"/>
+  <text x="175" y="153" text-anchor="middle" class="small">sus</text>
+  <rect class="box" x="200" y="130" width="50" height="36"/>
+  <text x="225" y="153" text-anchor="middle" class="small">sei</text>
+  <rect class="box" x="250" y="130" width="50" height="36"/>
+  <text x="275" y="153" text-anchor="middle" class="small">dor</text>
+  <rect class="hl2" x="300" y="130" width="160" height="36"/>
+  <text x="380" y="153" text-anchor="middle" class="small">grade(4)</text>
+  <rect class="dash" x="460" y="130" width="200" height="36"/>
+  <text x="560" y="153" text-anchor="middle" class="small mute">미사용 25비트 …</text>
+  <text x="175" y="184" text-anchor="middle" class="mono small mute">bit31</text>
+  <text x="340" y="210" text-anchor="middle" class="small warn-t">이 구조체를 그대로 전문/파일로 보내면 받는 쪽이 다른 비트를 읽는다</text>
+</svg>
+<figcaption>그림 20-9 비트필드의 배치 순서는 구현 정의 — 같은 소스도 플랫폼마다 메모리 모양이 다르다</figcaption>
+</figure>
+
+<div class="tbl"><table>
+<thead><tr><th>항목</th><th>표준의 태도</th><th>실무 영향</th></tr></thead>
+<tbody>
+<tr><td>저장 단위 안에서 배치 순서(LSB/MSB부터)</td><td>구현 정의</td><td>엔디안이 다른 기계(빅엔디안 유닉스 서버, 메인프레임) 사이에 그대로 전송 불가</td></tr>
+<tr><td>저장 단위 경계를 걸치는 필드</td><td>구현 정의</td><td>패딩 위치가 달라짐</td></tr>
+<tr><td>plain <code>int</code> 비트필드의 부호</td><td>구현 정의</td><td>1비트 필드에 1을 넣으면 −1이 될 수 있음</td></tr>
+<tr><td><code>_Bool</code>, <code>int</code>, <code>unsigned</code> 이외 타입</td><td>구현 정의로 허용</td><td><code>uint8_t x:3</code> 같은 선언이 컴파일러마다 크기가 다름</td></tr>
+<tr><td>비트필드 주소 <code>&amp;s.f</code></td><td>금지(제약 위반)</td><td><code>scanf</code>, <code>memcpy</code> 대상으로 쓸 수 없음</td></tr>
+<tr><td>멀티스레드 동시 쓰기</td><td>인접 비트필드는 같은 메모리 위치로 취급</td><td>서로 다른 필드라도 동시 수정 시 데이터 경쟁</td></tr>
+</tbody></table></div>
+
+<div class="box fix"><p class="box-title" data-tag="해결">이렇게 해결합니다 — 외부 교환 데이터에는 비트필드 대신 명시적 마스크</p>
+<p>비트필드는 <strong>한 프로그램 내부에서만 쓰는 메모리 절약용</strong>으로 한정하고, 전문·파일·DB·공유메모리처럼 다른 프로그램이나 다른 기계와 주고받는 데이터에는 고정폭 unsigned 정수 + 명시적 마스크·시프트(앞의 <code>FIELD_GET32</code>/<code>FIELD_SET32</code>)를 씁니다. 그러면 비트 위치가 소스 코드에 숫자로 못 박혀 플랫폼과 무관해집니다. 또 바이트 순서는 24장에서 배울 엔디안 변환 함수로 따로 맞춥니다.</p>
+</div>
+
+<h3 id="s20-2-7">패리티와 체크섬 입문</h3>
+
+<p>비트 연산의 또 다른 큰 쓰임새는 <strong>데이터 무결성 검사</strong>입니다. 통신 회선이나 저장 매체에서 비트가 뒤집히거나, 사람이 숫자를 잘못 입력하는 오류를 찾아내기 위해 원본 데이터로부터 짧은 검사 값을 계산해 함께 보냅니다.</p>
+
+<ul>
+<li><strong>패리티 비트</strong>: 1의 개수가 짝수(짝수 패리티)가 되도록 1비트를 덧붙입니다. 비트 하나가 뒤집히면 개수의 홀짝이 바뀌어 검출됩니다. 두 비트가 동시에 뒤집히면 검출하지 못합니다.</li>
+<li><strong>XOR 체크섬(LRC, 종단 중복 검사)</strong>: 모든 바이트를 XOR한 1바이트. 일부 레거시 단말·직렬 통신 프로토콜에서 씁니다. 구현이 간단하지만, 같은 바이트가 두 번 바뀌거나 바이트 순서가 바뀌면 검출하지 못합니다.</li>
+<li><strong>합계 체크섬</strong>: 바이트를 더한 값의 하위 8/16비트. 역시 순서 바뀜을 못 잡습니다.</li>
+<li><strong>CRC(순환 중복 검사)</strong>: 다항식 나눗셈 기반. 연속 오류(burst)에 강해 네트워크(이더넷 CRC-32), 압축 파일, 저장장치에서 표준으로 씁니다.</li>
+<li><strong>검증번호(check digit)</strong>: 카드번호의 마지막 자리(Luhn 알고리즘), 계좌번호·사업자번호·주민등록번호의 검증 자리처럼, 사람이 한 자리를 잘못 입력하거나 인접한 두 자리를 바꿔 쓰는 실수를 잡기 위한 장치입니다.</li>
+</ul>
+
+<div class="box warn"><p class="box-title" data-tag="주의">체크섬은 보안 장치가 아니다</p>
+<p>패리티·체크섬·CRC는 <strong>우연한 오류</strong>를 찾는 장치입니다. 악의적인 공격자는 데이터를 바꾼 뒤 체크섬을 다시 계산해 붙이면 그만입니다. 위·변조 방지에는 HMAC, 전자서명 같은 암호학적 기법(22장)을 써야 합니다.</p>
+</div>
+
+<figure class="diagram">
+<svg viewBox="0 0 680 230" width="680" role="img" aria-label="Luhn 알고리즘으로 79927398713 검증">
+  <text x="20" y="26" class="small bold">Luhn 검증: 79927398713 (오른쪽부터 짝수 번째 자리를 2배)</text>
+  <g class="mono">
+  <text x="30" y="64" class="small mute">숫자</text>
+  <text x="120" y="64" text-anchor="middle">7</text><text x="170" y="64" text-anchor="middle" class="acc">9</text>
+  <text x="220" y="64" text-anchor="middle">9</text><text x="270" y="64" text-anchor="middle" class="acc">2</text>
+  <text x="320" y="64" text-anchor="middle">7</text><text x="370" y="64" text-anchor="middle" class="acc">3</text>
+  <text x="420" y="64" text-anchor="middle">9</text><text x="470" y="64" text-anchor="middle" class="acc">8</text>
+  <text x="520" y="64" text-anchor="middle">7</text><text x="570" y="64" text-anchor="middle" class="acc">1</text>
+  <text x="620" y="64" text-anchor="middle" class="warn-t">3</text>
+  <text x="30" y="104" class="small mute">2배</text>
+  <text x="170" y="104" text-anchor="middle" class="small">18</text>
+  <text x="270" y="104" text-anchor="middle" class="small">4</text>
+  <text x="370" y="104" text-anchor="middle" class="small">6</text>
+  <text x="470" y="104" text-anchor="middle" class="small">16</text>
+  <text x="570" y="104" text-anchor="middle" class="small">2</text>
+  <text x="30" y="144" class="small mute">9 초과면 -9</text>
+  <text x="120" y="144" text-anchor="middle">7</text><text x="170" y="144" text-anchor="middle" class="acc">9</text>
+  <text x="220" y="144" text-anchor="middle">9</text><text x="270" y="144" text-anchor="middle" class="acc">4</text>
+  <text x="320" y="144" text-anchor="middle">7</text><text x="370" y="144" text-anchor="middle" class="acc">6</text>
+  <text x="420" y="144" text-anchor="middle">9</text><text x="470" y="144" text-anchor="middle" class="acc">7</text>
+  <text x="520" y="144" text-anchor="middle">7</text><text x="570" y="144" text-anchor="middle" class="acc">2</text>
+  <text x="620" y="144" text-anchor="middle">3</text>
+  </g>
+  <path class="line" d="M100 160 H 640"/>
+  <text x="370" y="190" text-anchor="middle" class="bold">합계 = 70 → 70 mod 10 = 0 → 유효</text>
+  <text x="370" y="216" text-anchor="middle" class="small mute">마지막 자리 3이 검증번호. 한 자리만 틀려도 합계 끝자리가 0이 아니게 된다</text>
+</svg>
+<figcaption>그림 20-10 Luhn 알고리즘 — 카드번호 검증번호의 계산 과정</figcaption>
+</figure>
+
+<figure class="code"><figcaption>checksum.c — 패리티, LRC, 합계 체크섬, Luhn</figcaption>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stdint.h&gt;
+#include &lt;string.h&gt;
+#include &lt;stdbool.h&gt;
+
+/* 바이트의 1비트 개수가 홀수면 1 (XOR 접기: 절반씩 겹쳐 XOR) */
+static unsigned parity8(uint8_t x)
+{
+    x ^= x &gt;&gt; 4;
+    x ^= x &gt;&gt; 2;
+    x ^= x &gt;&gt; 1;
+    return x &amp; 1u;
+}
+
+/* 종단 중복 검사: 모든 바이트 XOR */
+static uint8_t lrc(const uint8_t *p, size_t n)
+{
+    uint8_t c = 0;
+    for (size_t i = 0; i &lt; n; i++) c ^= p[i];
+    return c;
+}
+
+/* 단순 합계 체크섬 (하위 8비트) */
+static uint8_t sum8(const uint8_t *p, size_t n)
+{
+    unsigned s = 0;                       /* 누적은 넓은 타입에서 */
+    for (size_t i = 0; i &lt; n; i++) s += p[i];
+    return (uint8_t)(s &amp; 0xFFu);
+}
+
+/* Luhn 검증: 숫자 문자열만 허용, 아니면 false */
+static bool luhn_valid(const char *s)
+{
+    size_t n = strlen(s);
+    if (n &lt; 2) return false;
+    int sum = 0;
+    for (size_t k = 0; k &lt; n; k++) {
+        char ch = s[n - 1 - k];           /* 오른쪽부터 */
+        if (ch &lt; '0' || ch &gt; '9') return false;
+        int d = ch - '0';
+        if (k % 2 == 1) {                 /* 오른쪽에서 짝수 번째(1부터 세면) */
+            d *= 2;
+            if (d &gt; 9) d -= 9;
+        }
+        sum += d;
+    }
+    return sum % 10 == 0;
+}
+
+int main(void)
+{
+    printf("parity8(0xB5) = %u\n", parity8(0xB5));       /* 1011 0101: 1이 5개 */
+    const char *msg = "TRX0001";
+    printf("LRC(\"%s\") = 0x%02X, SUM8 = 0x%02X\n", msg,
+           lrc((const uint8_t *)msg, strlen(msg)),
+           sum8((const uint8_t *)msg, strlen(msg)));
+    const char *msg2 = "0123456789";
+    printf("LRC(\"%s\") = 0x%02X\n", msg2, lrc((const uint8_t *)msg2, strlen(msg2)));
+
+    const char *cards[] = { "79927398713", "79927398710", "4111111111111111", "4111-1111" };
+    for (size_t i = 0; i &lt; 4; i++)
+        printf("Luhn(%s) = %s\n", cards[i], luhn_valid(cards[i]) ? "유효" : "무효");
+    return 0;
+}</code></pre></figure>
+<figure class="code out"><figcaption>실행 결과</figcaption><pre>parity8(0xB5) = 1
+LRC("TRX0001") = 0x5F, SUM8 = 0xBF
+LRC("0123456789") = 0x01
+Luhn(79927398713) = 유효
+Luhn(79927398710) = 무효
+Luhn(4111111111111111) = 유효
+Luhn(4111-1111) = 무효</pre></figure>
+
+<div class="box why"><p class="box-title" data-tag="WHY">왜 XOR 접기로 패리티가 구해질까?</p>
+<p>XOR은 "1의 개수가 홀수면 1"인 연산입니다. 8비트를 한 번에 XOR하는 대신, 상위 4비트와 하위 4비트를 겹쳐 XOR하면 하위 4비트에 "각 쌍의 홀짝"이 남습니다. 이를 다시 2비트, 1비트로 반복하면 최하위 비트에 전체 8비트의 홀짝이 모입니다. 루프 없이 3번의 연산으로 끝나므로 빠릅니다. 같은 원리로 32비트는 5번(16, 8, 4, 2, 1)이면 됩니다. gcc에는 <code>__builtin_parity</code>도 있습니다.</p>
+</div>
+
+<div class="box fin"><p class="box-title" data-tag="금융 실무">은행 시스템에서는 — 검증번호는 입력 단계의 첫 필터</p>
+<p>카드 결제 승인 요청이 들어오면, 승인 서버는 DB를 조회하기 <strong>전에</strong> 카드번호 길이·숫자 여부·BIN(발급사 식별 앞자리)·Luhn 검증을 먼저 수행해 명백히 잘못된 번호를 걸러 냅니다. 이렇게 하면 오타 입력에 대한 불필요한 DB 조회와 대외기관 전송을 줄이고, 무작위 번호를 대입하는 공격 트래픽도 앞단에서 상당 부분 차단할 수 있습니다. 계좌번호도 기관마다 자체 검증번호 규칙을 두는 경우가 많아, 이체 화면에서 "존재하지 않는 계좌" 조회 전에 형식 오류를 먼저 알려 줍니다. 단, 검증번호를 통과했다고 실제 존재하는 번호라는 뜻은 아니라는 점을 기억하십시오.</p>
+</div>
+
+<div class="ex"><p class="ex-title">예제 20-6 <span class="lv">난이도 ★★☆</span></p>
+<p>Luhn 검증번호를 <strong>생성</strong>하는 함수 <code>int luhn_check_digit(const char *body)</code>를 작성하십시오. 검증번호를 뺀 앞부분 숫자열을 받아, 붙여야 할 마지막 한 자리(0~9)를 반환합니다. <code>"7992739871"</code>을 넣으면 3이 나와야 합니다.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>검증번호가 붙으면 body의 각 자리는 오른쪽에서 한 칸씩 밀립니다. 따라서 body의 <strong>가장 오른쪽 자리부터</strong> 2배를 적용합니다(검증 함수에서의 k가 1, 3, 5…인 자리). 합계를 S라 하면 검증번호 c는 (S + c) mod 10 = 0을 만족해야 하므로 c = (10 − S mod 10) mod 10입니다. "7992739871"의 S = 67(그림 20-10의 합계 70에서 검증번호 3을 뺀 값)이므로 c = (10 − 7) mod 10 = 3입니다.</p>
+<figure class="code good"><figcaption>정답 코드</figcaption>
+<pre><code class="language-c">#include &lt;string.h&gt;
+
+int luhn_check_digit(const char *body)
+{
+    size_t n = strlen(body);
+    int sum = 0;
+    for (size_t k = 0; k &lt; n; k++) {
+        char ch = body[n - 1 - k];
+        if (ch &lt; '0' || ch &gt; '9') return -1;  /* 형식 오류 */
+        int d = ch - '0';
+        if (k % 2 == 0) {                     /* body 기준 오른쪽 첫 자리부터 2배 */
+            d *= 2;
+            if (d &gt; 9) d -= 9;
+        }
+        sum += d;
+    }
+    return (10 - sum % 10) % 10;
+}</code></pre></figure>
+</details></div>
+
+<h2 id="summary">핵심 정리</h2>
+<ul class="summary-list">
+<li>16진수 한 자리는 정확히 4비트입니다. 덤프·전문 로그를 읽는 기본 도구이며, <code>0x7FFFFFFF</code>(INT_MAX), <code>0x80000000</code>, <code>0xFF</code> 같은 값은 외워 둡니다.</li>
+<li>2의 보수에서 −x = <code>~x + 1</code>이고, MSB의 무게는 −2<sup>N−1</sup>입니다. 범위는 비대칭(−2<sup>N−1</sup> ~ 2<sup>N−1</sup>−1)이라 <code>-INT_MIN</code>, <code>abs(INT_MIN)</code>은 UB입니다. C23부터 2의 보수가 표준으로 강제됩니다.</li>
+<li>작은 signed 타입을 넓힐 때는 부호 확장, unsigned는 제로 확장이 일어납니다. 좁힐 때 unsigned는 mod 2<sup>N</sup>(정의됨), signed는 구현 정의입니다. 축소는 범위 검사 후 명시적 캐스트로 합니다.</li>
+<li><strong>signed 오버플로는 미정의 동작</strong>입니다. 컴파일러는 그것이 일어나지 않는다고 가정하고 최적화하므로 "사후 검사"가 사라질 수 있습니다. 반드시 연산 <strong>전에</strong> 검사하거나 <code>__builtin_*_overflow</code>/<code>ckd_*</code>를 씁니다.</li>
+<li>unsigned는 순환이 정의되어 있을 뿐 금액으로서는 틀린 값입니다. 금액은 <code>int64_t</code>로 두고, 잔액 비교는 뺄셈 없이 <code>balance &lt; amount</code>처럼 합니다.</li>
+<li>int보다 작은 타입은 연산 전에 int로 <strong>승격</strong>되고, 같은 순위의 signed/unsigned가 만나면 unsigned로 변환됩니다(<code>-1 &lt; 1u</code>는 거짓). <code>-Wall -Wextra -Wconversion -Wsign-conversion</code>을 켭니다.</li>
+<li>크기가 중요한 데이터는 <code>&lt;stdint.h&gt;</code> 고정폭 타입, 출력은 <code>&lt;inttypes.h&gt;</code>의 <code>PRId64</code> 등을 씁니다. 바이트 데이터는 <code>unsigned char</code>/<code>uint8_t</code>로 다룹니다.</li>
+<li>비트 조작 4종: 세트 <code>|=</code>, 해제 <code>&amp;= ~</code>, 토글 <code>^=</code>, 검사 <code>&amp;</code>. 비트 연산자는 비교 연산자보다 우선순위가 낮으므로 괄호를 칩니다. 권한은 <code>(have &amp; need) == need</code>로 검사합니다.</li>
+<li>시프트 횟수가 음수이거나 폭 이상이면 UB, 음수의 왼쪽 시프트와 <code>1 &lt;&lt; 31</code>도 UB입니다. 마스크 상수는 대상과 같은 폭의 unsigned로 정의합니다(<code>UINT32_C(1) &lt;&lt; n</code>).</li>
+<li>상태 플래그의 비트 번호는 DB·전문과 공유되는 계약이므로 재사용하지 않고, 상태 변경은 멱등한 세트/해제로 하며 이력을 남깁니다.</li>
+<li>비트필드의 배치·부호·경계 처리는 구현 정의라서 외부와 교환하는 데이터에는 쓰지 않습니다. 명시적 마스크·시프트로 대신합니다.</li>
+<li>패리티·LRC·합계·CRC·검증번호(Luhn)는 <strong>우연한 오류</strong> 검출용이고, 위·변조 방지에는 암호학적 기법이 필요합니다.</li>
+</ul>
+
+<h2 id="interview">CS 면접 단골 질문</h2>
+<div class="box iv"><p class="box-title" data-tag="면접">이 장에서 나오는 면접 질문</p>
+<details><summary>Q1. 컴퓨터는 왜 음수를 2의 보수로 표현합니까?</summary>
+<p>2의 보수는 0의 표현이 하나뿐이고, 덧셈 회로 하나로 양수·음수의 덧셈과 뺄셈을 모두 처리할 수 있기 때문입니다. N비트 레지스터는 모듈러 2<sup>N</sup> 산술을 하므로 −x를 2<sup>N</sup>−x로 두면 x + (−x) = 2<sup>N</sup> ≡ 0이 자연스럽게 성립하고, 이는 비트 반전 후 1을 더하는 것과 같습니다. 그래서 뺄셈 <code>a − b</code>를 <code>a + ~b + 1</code>로 계산할 수 있어 하드웨어가 단순해집니다.</p>
+<p><strong>꼬리 질문 대비:</strong> "8비트 signed 범위가 왜 −128~127로 비대칭인가?" → 0이 MSB=0인 패턴 하나를 차지하므로 양수 쪽이 하나 적습니다. 그래서 최솟값의 부호를 바꾸면 표현할 수 없습니다.</p>
+</details>
+<details><summary>Q2. signed 정수 오버플로와 unsigned 정수 오버플로의 차이를 설명해 주십시오.</summary>
+<p>C 표준에서 unsigned 연산은 결과가 2<sup>N</sup>으로 나눈 나머지로 정의되어 있어 순환이 보장됩니다. 반면 signed 연산의 결과가 표현 범위를 벗어나면 미정의 동작입니다. 컴파일러는 signed 오버플로가 없다고 가정하고 <code>x + 1 &gt; x</code>를 항상 참으로 바꾸는 등 최적화하므로, 오버플로 후에 검사하는 코드가 제거될 수 있습니다. 따라서 연산 전에 <code>a &gt; INT_MAX − b</code> 같은 식으로 검사해야 합니다.</p>
+<p><strong>꼬리 질문 대비:</strong> "-fwrapv를 쓰면 해결되나?" → UB는 없어지지만 값이 틀린 것은 그대로라서, 금액 계산에서는 여전히 검사가 필요합니다. 테스트에는 UBSan(<code>-fsanitize=undefined</code>)을 씁니다.</p>
+</details>
+<details><summary>Q3. <code>-1 &lt; 1u</code>의 결과는 무엇이고 왜 그렇습니까?</summary>
+<p>결과는 0(거짓)입니다. int와 unsigned int는 순위가 같으므로 일반 산술 변환에 의해 int −1이 unsigned로 변환되어 UINT_MAX(4294967295)가 됩니다. 그래서 4294967295 &lt; 1을 비교하게 됩니다. 비슷하게 <code>sizeof</code> 결과(size_t)와 음수를 비교하는 코드, 역방향 <code>size_t</code> 루프에서 버그가 자주 납니다.</p>
+<p><strong>꼬리 질문 대비:</strong> "-1L &lt; 1u는?" → 64비트 리눅스(LP64)에서는 long이 unsigned int를 모두 표현할 수 있어 참, 64비트 윈도우(LLP64)에서는 long이 32비트라 둘 다 unsigned long으로 변환되어 거짓입니다.</p>
+</details>
+<details><summary>Q4. 비트 연산으로 n번째 비트를 켜고, 끄고, 뒤집고, 검사하는 방법과 2의 거듭제곱 판정법을 말해 보십시오.</summary>
+<p>켜기는 <code>x |= 1u &lt;&lt; n</code>, 끄기는 <code>x &amp;= ~(1u &lt;&lt; n)</code>, 뒤집기는 <code>x ^= 1u &lt;&lt; n</code>, 검사는 <code>(x &gt;&gt; n) &amp; 1u</code> 또는 <code>(x &amp; (1u &lt;&lt; n)) != 0</code>입니다. 2의 거듭제곱은 1비트가 하나뿐이므로 <code>x != 0 &amp;&amp; (x &amp; (x − 1)) == 0</code>으로 판정합니다. <code>x &amp; (x−1)</code>은 가장 낮은 1비트를 지우는 연산이기 때문입니다.</p>
+<p><strong>꼬리 질문 대비:</strong> "1을 그냥 <code>1 &lt;&lt; n</code>으로 쓰면?" → int에서 n이 31이면 UB, 64비트 변수에서 n ≥ 32면 UB이므로 대상 타입과 같은 폭의 unsigned 상수를 써야 합니다.</p>
+</details>
+<details><summary>Q5. 산술 시프트와 논리 시프트의 차이는? <code>x &gt;&gt; 1</code>과 <code>x / 2</code>는 같습니까?</summary>
+<p>논리 시프트는 빈자리를 0으로, 산술 시프트는 부호 비트로 채웁니다. C에서 unsigned의 오른쪽 시프트는 논리 시프트이고, 음수 signed의 오른쪽 시프트는 구현 정의인데 대부분 산술 시프트입니다. 양수에서는 <code>x &gt;&gt; 1</code>과 <code>x / 2</code>가 같지만, 음수에서는 나눗셈이 0쪽으로 절사(−7/2 = −3)하고 산술 시프트는 내림(−7&gt;&gt;1 = −4)이라 다릅니다.</p>
+<p><strong>꼬리 질문 대비:</strong> "그럼 컴파일러는 /2를 어떻게 최적화하나?" → 음수일 때 1을 더해 보정한 뒤 시프트하는 명령열로 바꿉니다. 개발자가 직접 바꿀 필요가 없습니다.</p>
+</details>
+<details><summary>Q6. 금액(잔액)을 unsigned 타입으로 저장하면 안 되는 이유는 무엇입니까?</summary>
+<p>unsigned는 음수를 막아 주는 것이 아니라, 음수가 될 연산 결과를 거대한 양수로 바꿔 버립니다. 예를 들어 잔액 1000에서 2000을 빼면 약 43억이 되고, <code>balance − amount &gt;= 0</code> 같은 검사는 항상 참이 되어 잔액 검사가 무력화됩니다. 또 금융에는 취소·환불·차액처럼 음수가 자연스러운 값이 많고, signed와 섞이면 비교 함정이 생깁니다. 그래서 금액은 <code>int64_t</code>로 두고 "잔액 ≥ 0"은 비즈니스 규칙으로 검사합니다.</p>
+<p><strong>꼬리 질문 대비:</strong> "그럼 unsigned는 언제 쓰나?" → 비트 플래그, 해시 값, 바이트 버퍼, 체크섬처럼 순환이나 비트 연산 자체가 의미인 데이터에 씁니다.</p>
+</details>
+<details><summary>Q7. 비트필드의 장단점은 무엇이고, 통신 전문 구조체에 써도 됩니까?</summary>
+<p>장점은 메모리를 아끼고 멤버 이름으로 비트에 접근할 수 있다는 점입니다. 단점은 저장 단위 안의 배치 순서, plain int 비트필드의 부호, 경계 걸침 처리가 모두 구현 정의라서 컴파일러·엔디안에 따라 메모리 모양이 다르고, 주소를 얻을 수 없으며, 인접 필드 동시 수정 시 데이터 경쟁이 생긴다는 점입니다. 그래서 전문처럼 외부와 교환하는 데이터에는 쓰지 않고, 고정폭 정수와 명시적 마스크·시프트를 씁니다.</p>
+</details>
+<details><summary>Q8. 정수 오버플로를 어떻게 검출합니까? 곱셈은 어떻게 검사합니까?</summary>
+<p>덧셈은 <code>b &gt; 0 &amp;&amp; a &gt; MAX − b</code> 또는 <code>b &lt; 0 &amp;&amp; a &lt; MIN − b</code>를 먼저 검사합니다. 곱셈은 부호 조합 네 가지로 나눠 <code>a &gt; MAX / b</code> 같은 나눗셈 기반 비교를 합니다. gcc/clang에서는 <code>__builtin_mul_overflow</code>가 하드웨어 오버플로 플래그를 써서 더 빠르고 정확하며, C23에서는 <code>&lt;stdckdint.h&gt;</code>의 <code>ckd_mul</code>로 표준화되었습니다.</p>
+<p><strong>꼬리 질문 대비:</strong> "곱한 뒤 나눠서 원래 값이 나오는지 보면 안 되나?" → signed에서는 곱셈 자체가 이미 UB라 검사가 의미 없습니다. unsigned에서는 가능하지만 0 나눗셈을 따로 처리해야 합니다.</p>
+</details>
+<details><summary>Q9. 체크섬, CRC, 암호학적 해시의 차이는 무엇입니까?</summary>
+<p>체크섬(합계, XOR)은 계산이 가장 간단하지만 바이트 순서 바뀜 같은 오류를 놓칩니다. CRC는 다항식 나눗셈 기반으로 연속 비트 오류 검출 능력이 뛰어나 통신·저장장치에 쓰입니다. 둘 다 <strong>우연한 오류</strong>만 잡으며, 공격자가 데이터를 바꾸고 값을 재계산하면 막지 못합니다. SHA-256 같은 암호학적 해시는 충돌을 찾기 어렵게 설계되었고, 키를 섞은 HMAC이나 전자서명을 써야 위·변조를 막을 수 있습니다.</p>
+</details>
+<details><summary>Q10. <code>char</code>는 signed입니까, unsigned입니까?</summary>
+<p>구현 정의입니다. x86의 gcc·MSVC에서는 보통 signed, ARM 리눅스의 gcc에서는 unsigned입니다. 그래서 0x80 이상인 한글 바이트를 <code>char</code>로 다루면 플랫폼에 따라 음수가 되어 비교나 배열 인덱스에서 버그가 납니다. 바이트 데이터는 <code>unsigned char</code>/<code>uint8_t</code>를 쓰고, <code>isdigit</code> 등에 넘길 때는 <code>(unsigned char)</code>로 캐스트해야 합니다(음수를 넘기면 UB).</p>
+</details>
+</div>
+
+<h2 id="exercises">연습문제</h2>
+
+<div class="ex"><p class="ex-title">연습문제 20-1 <span class="lv">난이도 ★☆☆</span> 출력 예측</p>
+<p>x86-64 gcc에서 다음 코드의 출력은?</p>
+<pre><code class="language-c">printf("%d %d %d\n", (signed char)0x9C, (unsigned char)-1, (signed char)0x7F + 1);</code></pre>
+<details><summary>정답과 해설 보기</summary>
+<p><strong><code>-100 255 128</code></strong></p>
+<p>① 0x9C = 156은 signed char 범위 밖이므로 구현 정의 변환이며, gcc는 156 − 256 = −100. ② −1을 unsigned char로 바꾸면 −1 + 256 = 255(정의됨). ③ <code>(signed char)0x7F</code>는 127이고, <code>+ 1</code>을 할 때 int로 승격되므로 128이 됩니다. 8비트에서 넘칠 것 같지만 연산은 int에서 일어나므로 오버플로가 아닙니다. <code>%d</code>로 출력할 때도 승격된 int가 전달됩니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 20-2 <span class="lv">난이도 ★☆☆</span> 출력 예측</p>
+<pre><code class="language-c">unsigned int x = 5;
+int y = -10;
+printf("%s\n", (x + y &gt; 0) ? "양수" : "0 이하");
+printf("%d\n", -7 / 2);
+printf("%d\n", -7 &gt;&gt; 1);</code></pre>
+<details><summary>정답과 해설 보기</summary>
+<p><strong><code>양수</code>, <code>-3</code>, <code>-4</code></strong> (마지막은 gcc 기준, 구현 정의)</p>
+<p><code>x + y</code>에서 y가 unsigned로 변환되어 5 + 4294967286 = 4294967291(mod 2<sup>32</sup>)이 되고, 이는 0보다 크므로 "양수"입니다. 수학적으로는 −5인데도 말이지요. 나눗셈은 0쪽 절사로 −3, 산술 시프트는 내림으로 −4입니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 20-3 <span class="lv">난이도 ★☆☆</span> 빈칸 채우기</p>
+<p>32비트 플래그 <code>f</code>에서 n번째 비트(0~31)가 켜져 있으면 1, 아니면 0을 돌려주는 함수를 완성하십시오. n이 범위 밖이면 0을 돌려줍니다.</p>
+<pre><code class="language-c">int bit_test(uint32_t f, unsigned n)
+{
+    if (______) return 0;
+    return (int)(______);
+}</code></pre>
+<details><summary>정답과 해설 보기</summary>
+<p>첫 빈칸은 <code>n &gt;= 32</code>, 둘째 빈칸은 <code>(f &gt;&gt; n) &amp; 1u</code>입니다. 범위 검사를 먼저 하는 이유는 32 이상의 시프트가 UB이기 때문입니다. <code>f &amp; (1u &lt;&lt; n)</code>을 그대로 반환하면 0/1이 아니라 해당 비트의 값(예: 0x80000000)이 나오고, 이를 int로 바꾸면 구현 정의 변환이 일어나므로 시프트 후 <code>&amp; 1u</code>가 깔끔합니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 20-4 <span class="lv">난이도 ★★☆</span> 버그 찾기</p>
+<p>다음 코드는 압류되지 않은 계좌만 출금을 허용하려는 의도입니다. 버그를 모두 찾고 고치십시오.</p>
+<pre><code class="language-c">#define AF_SEIZED 0x02
+if (acct-&gt;flags &amp; AF_SEIZED == 0 &amp;&amp; acct-&gt;flags &amp;&amp; AF_LIMITED == 0)
+    do_withdraw(acct, amount);</code></pre>
+<details><summary>정답과 해설 보기</summary>
+<p>① <code>==</code>가 <code>&amp;</code>보다 우선순위가 높아 <code>flags &amp; (AF_SEIZED == 0)</code> = <code>flags &amp; 0</code> = 0이 되어 출금이 <strong>절대</strong> 일어나지 않습니다. ② <code>acct-&gt;flags &amp;&amp; AF_LIMITED == 0</code>은 논리 AND이며 역시 우선순위 문제로 <code>flags &amp;&amp; (AF_LIMITED == 0)</code>이 됩니다. ③ 한도제한계좌는 "금지"가 아니라 "추가 한도 검사" 대상이라는 업무 규칙도 반영되지 않았습니다.</p>
+<figure class="code good"><figcaption>고친 코드</figcaption>
+<pre><code class="language-c">if ((acct-&gt;flags &amp; AF_DENY_WITHDRAW) == 0) {
+    if ((acct-&gt;flags &amp; AF_LIMITED) &amp;&amp; amount &gt; LIMITED_DAILY_MAX - acct-&gt;daily_used)
+        return ERR_LIMIT;
+    do_withdraw(acct, amount);
+}</code></pre></figure>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 20-5 <span class="lv">난이도 ★★☆</span> 버그 찾기</p>
+<pre><code class="language-c">uint64_t flags = 0;
+flags |= 1 &lt;&lt; 40;          /* bit40: 해외 결제 차단 */
+flags &amp;= ~0x8u;            /* bit3 해제 */</code></pre>
+<details><summary>정답과 해설 보기</summary>
+<p>① <code>1 &lt;&lt; 40</code>에서 1은 32비트 int이므로 시프트 횟수가 폭 이상이라 <strong>UB</strong>입니다. 대입 대상이 64비트여도 연산은 우변 타입에서 일어납니다. <code>UINT64_C(1) &lt;&lt; 40</code>으로 고칩니다. ② <code>~0x8u</code>는 32비트 <code>0xFFFFFFF7</code>이고 64비트로 제로 확장되어 <code>0x00000000FFFFFFF7</code>이 되므로, bit3과 함께 <strong>상위 32비트(bit40 포함)가 전부 지워집니다</strong>. <code>flags &amp;= ~UINT64_C(0x8);</code>로 고칩니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 20-6 <span class="lv">난이도 ★★☆</span> 코드 작성 — 상태 변경 이력</p>
+<p>계좌 상태 플래그가 <code>old</code>에서 <code>new</code>로 바뀌었을 때 새로 켜진 비트, 새로 꺼진 비트, 변경된 비트를 구하는 함수를 작성하고, old=0x0B, new=0x26일 때 결과를 쓰십시오.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>변경된 비트는 <code>old ^ new</code>, 켜진 비트는 "전에는 0, 지금은 1"이므로 <code>~old &amp; new</code>, 꺼진 비트는 <code>old &amp; ~new</code>입니다.</p>
+<p>old = 0000 1011, new = 0010 0110. changed = 0010 1101 = <strong>0x2D</strong>, on = 0010 0100 = <strong>0x24</strong>(휴면, 분실신고), off = 0000 1001 = <strong>0x09</strong>(거래정지, 한도제한). 확인: on | off = changed.</p>
+<figure class="code good"><figcaption>정답 코드</figcaption>
+<pre><code class="language-c">typedef struct { uint32_t on, off, changed; } flag_diff_t;
+
+flag_diff_t flag_diff(uint32_t old_f, uint32_t new_f)
+{
+    flag_diff_t d;
+    d.changed = old_f ^ new_f;
+    d.on      = ~old_f &amp; new_f;
+    d.off     = old_f &amp; ~new_f;
+    return d;      /* 감사 로그에 on/off를 플래그 이름으로 풀어 기록 */
+}</code></pre></figure>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 20-7 <span class="lv">난이도 ★★☆</span> 코드 작성 — 필드 추출과 조립</p>
+<p>16비트 응답 코드의 형식이 [상위 3비트: 채널][다음 5비트: 업무구분][하위 8비트: 결과코드]입니다. <code>0xA5C3</code>을 분해한 값을 쓰고, 채널·업무·결과를 받아 코드를 조립하는 함수를 작성하십시오.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>0xA5C3 = 1010 0101 1100 0011. 채널 = 상위 3비트 101 = <strong>5</strong>, 업무 = 다음 5비트 00101 = <strong>5</strong>, 결과 = 0xC3 = <strong>195</strong>.</p>
+<figure class="code good"><figcaption>정답 코드</figcaption>
+<pre><code class="language-c">#include &lt;stdint.h&gt;
+
+static unsigned rc_channel(uint16_t c) { return (c &gt;&gt; 13) &amp; 0x07u; }
+static unsigned rc_biz(uint16_t c)     { return (c &gt;&gt; 8)  &amp; 0x1Fu; }
+static unsigned rc_result(uint16_t c)  { return c &amp; 0xFFu; }
+
+/* 범위를 넘는 입력은 -1 */
+static int rc_make(unsigned ch, unsigned biz, unsigned res, uint16_t *out)
+{
+    if (ch &gt; 7u || biz &gt; 31u || res &gt; 255u) return -1;
+    *out = (uint16_t)((ch &lt;&lt; 13) | (biz &lt;&lt; 8) | res);
+    return 0;
+}</code></pre></figure>
+<p>조립할 때 범위 검사를 하지 않으면 큰 값이 이웃 필드를 침범합니다. 예를 들어 biz=40을 넣으면 40 &lt;&lt; 8의 상위 비트가 채널 필드로 넘어갑니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 20-8 <span class="lv">난이도 ★★☆</span> 코드 작성 — 오버플로 없는 평균</p>
+<p>0 이상인 두 금액 <code>a</code>, <code>b</code>(<code>int64_t</code>)의 평균(소수점 이하 버림)을 오버플로 없이 구하는 함수를 작성하십시오. <code>(a + b) / 2</code>는 왜 위험합니까?</p>
+<details><summary>정답과 해설 보기</summary>
+<p><code>a + b</code>가 INT64_MAX를 넘으면 signed 오버플로 UB입니다(이진 탐색의 중간값 버그로도 유명합니다). 두 값이 모두 0 이상이면 <code>a + (b - a) / 2</code>는 오버플로는 없지만, a &gt; b일 때 음수 나눗셈이 0쪽으로 절사되어 결과가 올림 쪽으로 나옵니다(예: a=8, b=7 → 8, 버림 평균은 7). 다음처럼 몫과 나머지를 나눠 계산하면 순서와 무관하게 정확합니다.</p>
+<figure class="code good"><figcaption>정답 코드</figcaption>
+<pre><code class="language-c">int64_t avg_nonneg(int64_t a, int64_t b)   /* 전제: a &gt;= 0, b &gt;= 0 */
+{
+    return a / 2 + b / 2 + (a % 2 + b % 2) / 2;
+}</code></pre></figure>
+<p>a/2, b/2는 각각 최대 INT64_MAX/2라 합이 넘지 않고, 나머지 합(0~2)/2로 둘 다 홀수인 경우 1을 보정합니다. 예: a=7, b=9 → 3 + 4 + (1+1)/2 = 8.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 20-9 <span class="lv">난이도 ★★★</span> 코드 작성 — 배열 합계 검사</p>
+<p><code>int64_t</code> 금액 배열의 합계를 구하되, 중간에 오버플로가 나면 실패를 반환하고 몇 번째 원소에서 실패했는지 알려 주는 함수 <code>int sum_checked(const int64_t *a, size_t n, int64_t *sum, size_t *fail_idx)</code>를 <code>__builtin_add_overflow</code>로 작성하십시오.</p>
+<details><summary>정답과 해설 보기</summary>
+<figure class="code good"><figcaption>정답 코드</figcaption>
+<pre><code class="language-c">#include &lt;stdint.h&gt;
+#include &lt;stddef.h&gt;
+
+int sum_checked(const int64_t *a, size_t n, int64_t *sum, size_t *fail_idx)
+{
+    int64_t s = 0;
+    for (size_t i = 0; i &lt; n; i++) {
+        if (__builtin_add_overflow(s, a[i], &amp;s)) {   /* true면 넘침 */
+            if (fail_idx) *fail_idx = i;
+            return -1;                               /* *sum은 건드리지 않음 */
+        }
+    }
+    *sum = s;
+    return 0;
+}</code></pre></figure>
+<p>내장 함수는 결과를 무한 정밀도로 계산한 뒤 <code>s</code>의 타입에 넣고, 들어가지 않으면 true를 반환합니다. 실패 시 <code>*sum</code>을 바꾸지 않는 것은 "실패하면 출력 인자를 오염시키지 않는다"는 좋은 API 습관입니다. 음수(취소 거래)가 섞여 있어도 정확하게 검사됩니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 20-10 <span class="lv">난이도 ★★☆</span> 금융 응용 — 토글의 위험</p>
+<p>압류 해제 전문 처리에서 <code>f ^= AF_SEIZED;</code>를 썼습니다. 어떤 상황에서 사고가 납니까? 올바른 코드와 추가로 필요한 처리를 쓰십시오.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>① 같은 해제 전문이 타임아웃 후 재전송되어 두 번 처리되면, 첫 번째에 해제되고 두 번째에 <strong>다시 압류</strong>됩니다. ② 이미 해제된(압류 아님) 계좌에 해제 전문이 오면 오히려 압류가 걸립니다. 상태 변경은 멱등해야 하므로 <code>f &amp;= ~AF_SEIZED;</code>를 씁니다. 추가로, 전문 일련번호로 중복 처리 여부를 검사하고, 해제 전 상태가 압류가 아니었다면 경고 로그를 남기며, 변경 이력(이전값·이후값·처리자·근거 문서 번호)을 기록합니다.</p>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 20-11 <span class="lv">난이도 ★★☆</span> 코드 작성 — 짝수 패리티 바이트</p>
+<p>7비트 ASCII 문자 <code>c</code>(0~127)를 받아, 최상위 비트(bit7)에 짝수 패리티 비트를 붙인 바이트를 돌려주는 함수를 작성하고, <code>'A'</code>(0x41)와 <code>'C'</code>(0x43)의 결과를 쓰십시오.</p>
+<details><summary>정답과 해설 보기</summary>
+<p>짝수 패리티: 전체 8비트의 1 개수가 짝수가 되도록 bit7을 정합니다. 즉 하위 7비트의 1 개수가 홀수면 bit7=1입니다. 0x41 = 100 0001 → 1이 2개(짝수) → bit7=0 → <strong>0x41</strong>. 0x43 = 100 0011 → 3개(홀수) → bit7=1 → <strong>0xC3</strong>.</p>
+<figure class="code good"><figcaption>정답 코드</figcaption>
+<pre><code class="language-c">uint8_t add_even_parity(uint8_t c)
+{
+    c &amp;= 0x7Fu;                     /* 7비트만 사용 */
+    uint8_t p = c;
+    p ^= p &gt;&gt; 4; p ^= p &gt;&gt; 2; p ^= p &gt;&gt; 1;
+    return (uint8_t)(c | ((p &amp; 1u) &lt;&lt; 7));
+}</code></pre></figure>
+</details></div>
+
+<div class="ex"><p class="ex-title">연습문제 20-12 <span class="lv">난이도 ★★★</span> 서술 — 설계 리뷰</p>
+<p>신입 개발자가 대외기관과 주고받을 전문의 상태 영역을 다음과 같이 설계했습니다. 리뷰 의견을 세 가지 이상 쓰십시오.</p>
+<pre><code class="language-c">struct tx_status {
+    int approved : 1;
+    int retry    : 3;
+    unsigned int amount : 28;   /* 거래 금액(원) */
+};
+/* send(sock, &amp;st, sizeof st, 0); 으로 그대로 전송 */</code></pre>
+<details><summary>정답과 해설 보기</summary>
+<ol>
+<li><strong>비트필드를 전문에 사용</strong>: 배치 순서·패딩이 구현 정의라서 상대 시스템(다른 컴파일러·엔디안)이 같은 비트를 읽는다는 보장이 없습니다. 전문 명세에 바이트 단위로 정의하고 명시적으로 직렬화해야 합니다.</li>
+<li><strong><code>int approved : 1</code></strong>: plain int 비트필드는 부호가 구현 정의이며, gcc에서는 1을 넣으면 −1이 됩니다. <code>approved == 1</code> 비교가 실패합니다. <code>unsigned</code>로 선언해야 합니다.</li>
+<li><strong><code>int retry : 3</code></strong>: signed라면 −4~3만 표현되어 재시도 횟수 4 이상이 음수가 됩니다.</li>
+<li><strong>금액 28비트</strong>: 최대 2<sup>28</sup>−1 = 268,435,455원(약 2.7억 원)이라 법인 거래를 담지 못합니다. 금액은 64비트 또는 전문 표준의 숫자 문자열 필드로 정의해야 합니다.</li>
+<li><strong>구조체 통째 전송</strong>: 바이트 순서(엔디안) 변환이 없고, 구조체 패딩이 포함될 수 있습니다(24장에서 다룸).</li>
+</ol>
+</details></div>
+
+</main>
+<aside class="rail" aria-label="이 페이지 목차"></aside>
+</div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-c.min.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>
