@@ -1,5 +1,11 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#2c6a5c" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#121816" media="(prefers-color-scheme: dark)">
 <title>C언어 금융 IT 마스터</title>
-<meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+KR:wght@400;600;700&display=swap">
@@ -44,17 +50,30 @@
   .toc .ss { font-size: var(--fs-0); color: var(--muted); line-height: 1.55; }
   .resume[hidden] { display: none !important; }
   @media (max-width: 860px) {
-    .hero { grid-template-columns: minmax(0, 1fr); }
+    .home { padding-block: 28px 72px; }
+    .hero { grid-template-columns: minmax(0, 1fr); gap: 24px; padding-bottom: 24px; }
+    .hero p.lede { font-size: var(--fs-2); }
     .how, .toc { grid-template-columns: minmax(0, 1fr); }
     .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .stats div:nth-child(3) { border-left: 0; }
     .stats div:nth-child(n+3) { border-top: 1px solid var(--rule); }
+    .stats b { font-size: 1.7rem; }
+    .toc a.chap { padding: 16px 4px; }
+    .part-head { margin: 36px 0 8px; }
+  }
+  @media (max-width: 480px) {
+    .stats b { font-size: 1.5rem; }
+    .stats div { padding: 10px 12px; }
+    .ledger { font-size: .72rem; padding: 12px 14px; }
   }
 </style>
+</head>
+<body data-ch="index">
 
 <header class="topbar">
   <a class="brand" href="index.html"><b>C</b>금융 IT 마스터</a>
   <span class="where">과정 소개와 전체 목차</span>
+  <span class="progress"></span>
 </header>
 
 <main class="home">
@@ -129,3 +148,5 @@
   } catch (e) {}
 })();
 </script>
+</body>
+</html>

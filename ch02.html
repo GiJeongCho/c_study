@@ -146,16 +146,16 @@ int main(void)
 <svg viewBox="0 0 700 250" width="700" role="img" aria-label="printf 서식 문자열과 인수의 대응">
   <text x="20" y="50" class="mono">printf(</text>
   <rect class="box" x="85" y="28" width="360" height="34" rx="4"/>
+  <rect class="hl" x="140" y="36" width="21" height="22" rx="3"/>
+  <rect class="hl2" x="203" y="36" width="21" height="22" rx="3"/>
   <text x="95" y="50" class="mono">"계좌 %s 잔액 %d원\n"</text>
   <text x="455" y="50" class="mono">, acct, bal);</text>
-  <rect class="hl" x="166" y="32" width="26" height="26" rx="3"/>
-  <rect class="hl2" x="262" y="32" width="26" height="26" rx="3"/>
-  <path class="arrow" d="M545 62 C 545 110, 180 90, 180 62"/>
-  <path class="arrow" d="M600 62 C 600 130, 275 110, 275 62"/>
+  <path class="arrow" d="M545 62 C 545 110, 150 95, 150 62"/>
+  <path class="arrow" d="M600 62 C 600 130, 213 110, 213 62"/>
   <text x="560" y="88" class="small acc">1번째 인수</text>
   <text x="610" y="118" class="small acc">2번째 인수</text>
   <rect class="box" x="20" y="160" width="660" height="50" rx="6"/>
-  <text x="40" y="190" class="mono">계좌 110-123-456789 잔액 15000원⏎</text>
+  <text x="40" y="190" class="mono">계좌 110-123-456789 잔액 15000원↵</text>
   <text x="350" y="235" text-anchor="middle" class="small mute">일반 글자는 그대로, %s·%d 자리는 인수 값을 문자로 바꿔 채움</text>
 </svg>
 <figcaption>그림 2-2 printf는 서식 문자열을 왼쪽부터 읽으며, 변환 지정자를 만날 때마다 다음 인수를 꺼내 문자로 바꿔 출력합니다.</figcaption>

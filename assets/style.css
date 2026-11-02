@@ -77,6 +77,11 @@
 
 *, *::before, *::after { box-sizing: border-box; }
 html { scroll-padding-top: 72px; -webkit-text-size-adjust: 100%; }
+/* 반환 기호(↵, ⏎), 화살표(→, ←, ↓) 같은 심볼이 Windows에서 이모지 폰트로
+   폴백돼 색 아이콘으로 보이는 걸 막는다. 지원 안 하는 브라우저는 무시(기능 테스트). */
+@supports (font-variant-emoji: text) {
+  body, figure.diagram svg text { font-variant-emoji: text; }
+}
 body {
   margin: 0;
   background: var(--bg);
@@ -173,9 +178,44 @@ hr { border: 0; border-top: 1px solid var(--rule); margin-block: 2.5rem; }
     position: fixed; z-index: 45; left: 0; top: calc(56px + env(safe-area-inset-top, 0px));
     width: min(320px, 88vw); height: calc(100vh - 56px - env(safe-area-inset-top, 0px));
     transform: translateX(-102%); transition: transform .2s ease; box-shadow: var(--shadow);
+    padding-top: 10px;
   }
+  .sidebar a { padding: 9px 10px; }         /* 모바일 탭 영역 확대 */
+  .sidebar .sub a { padding: 7px 10px; }
   body.nav-open .sidebar { transform: none; }
-  .page { padding-top: 24px; }
+  /* 사이드바가 열렸을 때 본문을 가리는 반투명 배경 */
+  .nav-scrim {
+    position: fixed; inset: calc(56px + env(safe-area-inset-top, 0px)) 0 0 0;
+    background: rgba(0, 0, 0, .35); z-index: 44;
+    opacity: 0; pointer-events: none; transition: opacity .2s ease;
+  }
+  body.nav-open .nav-scrim { opacity: 1; pointer-events: auto; }
+  .page { padding-top: 24px; padding-bottom: 56px; gap: 24px; }
+}
+
+/* ---------- 좁은 모바일(≤640px) 전반 ---------- */
+@media (max-width: 640px) {
+  :root { --fs-2: 1rem; --fs-3: 1.15rem; --fs-4: 1.45rem; }
+  body { line-height: 1.75; }
+  .topbar .where { display: none; }         /* 좁은 폭에서 긴 챕터명이 넘치지 않게 */
+  .ch-head { padding-bottom: 20px; margin-bottom: 28px; }
+  .ch-head .bignum { font-size: 3rem; margin: 6px 0 2px; }
+  .goals { padding: 14px 16px; }
+  .content h2 { margin: 44px 0 14px; padding-top: 14px; }
+  .content h3 { margin: 32px 0 10px; }
+  .content h2 .num { display: inline-block; margin-bottom: 4px; margin-right: 8px; }
+  .box { padding: 14px 16px 4px; }
+  .ex { padding: 14px 16px 8px; }
+  figure.diagram { padding: 12px; }
+  /* 좁은 화면에서 SVG를 축소하면 내부 14px 글자가 너무 작아진다.
+     원 크기를 유지하고 가로 스크롤(figure.diagram overflow-x: auto)로 돌린다. */
+  figure.diagram svg { max-width: none; }
+  figure.code > figcaption { padding: 6px 12px; }
+  .content pre { padding: 12px 14px; font-size: .82rem; }
+  .tbl table { font-size: var(--fs-0); }
+  .tbl th, .tbl td { padding: 7px 10px; }
+  ol.steps > li { padding-left: 38px; }
+  ol.steps > li::before { width: 26px; height: 26px; }
 }
 
 /* ---------- 챕터 머리 ---------- */

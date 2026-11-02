@@ -525,7 +525,7 @@ c1 = 89('Y'), c2 = 10
   <div class="cell hl"><span class="addr">[0]</span><span class="val">'Y' (89)</span><span class="name">c1이 가져감</span></div>
   <div class="cell hl2"><span class="addr">[1]</span><span class="val">'\n' (10)</span><span class="name">c2가 가져감</span></div>
   <div class="cell"><span class="addr">[2]</span><span class="val">(비어 있음)</span><span class="name">　</span></div>
-</div><figcaption>그림 11-5 "Y⏎" 입력 직후의 stdin 버퍼. 엔터 키는 '\n'(10)으로 버퍼에 들어갑니다</figcaption></figure>
+</div><figcaption>그림 11-5 "Y↵" 입력 직후의 stdin 버퍼. 엔터 키는 '\n'(10)으로 버퍼에 들어갑니다</figcaption></figure>
 
 <div class="box tip"><p class="box-title" data-tag="잠깐">윈도우의 엔터는 \r\n 아닌가요?</p>
 <p>윈도우에서 텍스트 파일의 줄 끝은 CR LF(<code>'\r'</code> <code>'\n'</code>) 두 바이트입니다. 하지만 C의 표준 입출력은 <strong>텍스트 모드</strong>에서 이를 자동으로 <code>'\n'</code> 하나로 바꿔 줍니다. 그래서 위 프로그램은 윈도우 콘솔에서도 c2 = 10을 출력합니다. 단, 파일을 바이너리 모드(<code>"rb"</code>)로 열거나, 윈도우에서 만든 파일을 리눅스로 옮겨 읽으면 <code>'\r'</code>이 그대로 보여, "줄 끝 공백 제거" 로직이 이를 놓치는 문제가 자주 생깁니다. 금융권에서 윈도우 단말이 만든 파일을 리눅스 배치가 읽을 때 흔히 겪는 문제입니다.</p>
@@ -562,7 +562,7 @@ int main(void)
 
 <figure class="diagram">
 <svg viewBox="0 0 700 250" width="700" role="img" aria-label="scanf가 숫자만 가져가고 줄바꿈 문자가 버퍼에 남아 getchar가 즉시 그것을 가져가는 단계별 버퍼 그림">
-  <text x="20" y="30" class="small bold">① "50000⏎" 입력 직후</text>
+  <text x="20" y="30" class="small bold">① "50000↵" 입력 직후</text>
   <rect class="hl2" x="260" y="12" width="50" height="30"/><text x="285" y="32" text-anchor="middle" class="mono small">'5'</text>
   <rect class="hl2" x="310" y="12" width="50" height="30"/><text x="335" y="32" text-anchor="middle" class="mono small">'0'</text>
   <rect class="hl2" x="360" y="12" width="50" height="30"/><text x="385" y="32" text-anchor="middle" class="mono small">'0'</text>
@@ -914,7 +914,7 @@ int parse_comma_amount(const char *s, long long *out)
 </details></div>
 
 <div class="ex"><p class="ex-title">연습문제 11-6 버퍼 상태 추적 <span class="lv">난이도 ★★☆</span></p>
-<p>사용자가 <code>12 34⏎</code>를 입력했습니다. 다음 코드 실행 후 a, b, c의 값과 버퍼에 남은 내용을 쓰세요.</p>
+<p>사용자가 <code>12 34↵</code>를 입력했습니다. 다음 코드 실행 후 a, b, c의 값과 버퍼에 남은 내용을 쓰세요.</p>
 <figure class="code"><pre><code class="language-c">int a, c; char b;
 scanf("%d", &amp;a);
 scanf("%c", &amp;b);

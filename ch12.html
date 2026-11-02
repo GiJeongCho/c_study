@@ -1237,7 +1237,7 @@ if (strcmp(code, "WD") == 0) printf("출금\n");</code></pre></figure>
 </details></div>
 
 <div class="ex"><p class="ex-title">연습문제 12-10 fgets 처리 <span class="lv">난이도 ★★☆</span></p>
-<p><code>char buf[6]; fgets(buf, sizeof buf, stdin);</code>에서 사용자가 "KOREA BANK⏎"를 입력했습니다. buf의 내용과, 다음 fgets 호출이 읽는 내용을 쓰세요.</p>
+<p><code>char buf[6]; fgets(buf, sizeof buf, stdin);</code>에서 사용자가 "KOREA BANK↵"를 입력했습니다. buf의 내용과, 다음 fgets 호출이 읽는 내용을 쓰세요.</p>
 <details><summary>정답과 해설 보기</summary>
 <p>fgets는 최대 5바이트를 읽고 '\0'을 붙이므로 buf = "KOREA"('\n' 없음). 입력 버퍼에는 " BANK\n"이 남아, 다음 fgets(같은 크기)는 " BANK"를, 그다음은 "\n"을 읽습니다. buf에 '\n'이 없다는 것으로 "줄이 잘렸다"는 것을 감지하고, 남은 입력을 버리거나 오류 처리해야 합니다.</p>
 </details></div>

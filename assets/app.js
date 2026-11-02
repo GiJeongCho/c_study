@@ -92,10 +92,29 @@ var COURSE = [
   }
 
   var btn = document.querySelector(".menu-btn");
-  if (btn) btn.addEventListener("click", function () {
-    var open = document.body.classList.toggle("nav-open");
-    btn.setAttribute("aria-expanded", open ? "true" : "false");
-  });
+  /* 모바일에서 사이드바 뒤를 덮는 반투명 배경 (바깥 탭 시 닫기) */
+  var scrim = null;
+  if (btn) {
+    scrim = document.createElement("div");
+    scrim.className = "nav-scrim";
+    scrim.setAttribute("aria-hidden", "true");
+    document.body.appendChild(scrim);
+    scrim.addEventListener("click", function () {
+      document.body.classList.remove("nav-open");
+      btn.setAttribute("aria-expanded", "false");
+    });
+    btn.addEventListener("click", function () {
+      var open = document.body.classList.toggle("nav-open");
+      btn.setAttribute("aria-expanded", open ? "true" : "false");
+    });
+    /* ESC로 닫기 */
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && document.body.classList.contains("nav-open")) {
+        document.body.classList.remove("nav-open");
+        btn.setAttribute("aria-expanded", "false");
+      }
+    });
+  }
   if (side) side.addEventListener("click", function (e) {
     if (e.target.closest("a")) document.body.classList.remove("nav-open");
   });
