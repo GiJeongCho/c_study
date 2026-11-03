@@ -104,7 +104,7 @@ http://<PC의-IP>:8000/
 | 35 | 지도학습 (회귀·분류·앙상블) | CAPM/팩터모델 = 선형회귀, **XGBoost·LightGBM**이 알파팩터 조합의 왕 |
 | 36 | 비지도학습·시계열·딥러닝 | PCA로 **숨겨진 시장 요인** 추출, GARCH로 변동성, LSTM의 한계 |
 | 37 | 모형 평가와 결과 해석 | 불균형(사기탐지) 지표 선택, **SHAP으로 "알파 소스" 분해**, 백테스트 지표 |
-| 38 | Transformer·LLM과 금융/OMS | Self-Attention, RAG, **LLM으로 로그 요약·장애 보고서 자동화** |
+| 38 | Transformer·LLM과 금융/OMS | Self-Attention, **LLM 학습 3단계(사전학습·SFT·RLHF)**, Context Window·학습 컷오프·세션 무상태, **지식 그래프 vs 벡터 RAG · GraphRAG**, PROMPT 7원칙과 기억 재주입 패턴, **LLM으로 로그 요약·장애 보고서 자동화** |
 
 ### 부록
 
@@ -156,7 +156,7 @@ http://<PC의-IP>:8000/
 - **[ch35 지도학습](ch35.html)** — XGBoost/LightGBM이 왜 알파팩터 조합에 쓰이는가, 신용평가 로지스틱 회귀의 50년 전통.
 - **[ch36 비지도·시계열·딥러닝](ch36.html)** — PCA로 숨겨진 시장 요인 분해, GARCH, 금융에 LSTM 쓸 때의 함정.
 - **[ch37 모형 평가와 해석](ch37.html)** — 불균형(사기탐지) 지표, SHAP으로 "알파 소스" 분해, 백테스트 샤프 2.5를 믿지 않는 법.
-- **[ch38 Transformer·LLM과 금융/OMS](ch38.html)** — **OMS 로그 요약·장애 보고서 초안·매뉴얼 Q&A 봇** 등 지금 당장 쓸 수 있는 LLM 패턴.
+- **[ch38 Transformer·LLM과 금융/OMS](ch38.html)** — Self-Attention과 Transformer, **LLM 학습 3단계(사전학습·SFT·RLHF)**, LLM의 "기억 못 함" 3대 원인(학습 컷오프·컨텍스트 창·세션 무상태), **지식 그래프 vs 벡터 RAG와 GraphRAG**, 프롬프트 7원칙(PROMPT 7)과 기억 재주입 패턴, **OMS 로그 요약·장애 보고서 초안·매뉴얼 Q&A 봇** 등 지금 당장 쓸 수 있는 LLM 패턴.
 
 ---
 
