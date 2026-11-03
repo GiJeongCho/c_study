@@ -54,33 +54,50 @@
 <p style="text-align:center; font-family: var(--f-mono); font-size: .95em;">Attention(Q, K, V) = softmax(QKᵀ / √d) · V</p>
 
 <figure class="diagram">
-<svg viewBox="0 0 700 240" width="700" role="img" aria-label="Self-Attention: 모든 토큰이 모든 토큰을 가중 참조">
-  <text x="350" y="22" text-anchor="middle" class="bold">Self-Attention — "이 토큰이 다른 토큰을 얼마나 참조하는가"</text>
-  <g transform="translate(60,50)">
-    <rect class="hl" x="0"   y="0" width="90" height="36" rx="4"/><text x="45"  y="23" text-anchor="middle" class="small bold">삼성전자</text>
-    <rect class="hl" x="100" y="0" width="80" height="36" rx="4"/><text x="140" y="23" text-anchor="middle" class="small bold">주가가</text>
-    <rect class="hl" x="190" y="0" width="80" height="36" rx="4"/><text x="230" y="23" text-anchor="middle" class="small bold">실적에</text>
-    <rect class="hl" x="280" y="0" width="100" height="36" rx="4"/><text x="330" y="23" text-anchor="middle" class="small bold">반응했다</text>
+<svg viewBox="0 0 760 320" width="760" role="img" aria-label="Self-Attention: Q1이 모든 Key와 유사도 측정 후 가중합">
+  <text x="380" y="22" text-anchor="middle" class="bold">Self-Attention — "이 토큰이 다른 토큰을 얼마나 참조하는가"</text>
+
+  <!-- 좌측 패널: 토큰 4개 + Q1에서 각 Key로의 참조 화살표 -->
+  <g transform="translate(20,50)">
+    <rect class="hl" x="0"   y="0" width="90" height="34" rx="4"/>
+    <text x="45"  y="22" text-anchor="middle" class="small bold">삼성전자</text>
+    <rect class="hl" x="100" y="0" width="80" height="34" rx="4"/>
+    <text x="140" y="22" text-anchor="middle" class="small bold">주가가</text>
+    <rect class="hl" x="190" y="0" width="80" height="34" rx="4"/>
+    <text x="230" y="22" text-anchor="middle" class="small bold">실적에</text>
+    <rect class="hl" x="280" y="0" width="100" height="34" rx="4"/>
+    <text x="330" y="22" text-anchor="middle" class="small bold">반응했다</text>
   </g>
-  <path class="arrow" d="M105 110 Q 70 165, 105 160"/>
-  <text x="60" y="150" class="small">Q₁</text>
-  <path class="arrow" d="M105 110 C 150 150, 200 150, 200 115"/>
-  <path class="arrow" d="M105 110 C 180 180, 290 180, 290 115"/>
-  <path class="arrow" d="M105 110 C 220 220, 390 210, 390 115"/>
-  <text x="60" y="180" class="small">"삼성전자"의 Query가 다른 모든 토큰의 Key와 유사도 측정 → softmax → Value 가중합</text>
-  <g transform="translate(430,70)">
-    <rect class="hl2" x="0" y="0"  width="130" height="20" rx="2"/>
-    <text x="135" y="15" class="small mono">0.55 "삼성전자"</text>
-    <rect class="hl2" x="0" y="25" width="90"  height="20" rx="2"/>
-    <text x="135" y="40" class="small mono">0.20 "주가가"</text>
-    <rect class="hl2" x="0" y="50" width="60"  height="20" rx="2"/>
-    <text x="135" y="65" class="small mono">0.08 "실적에"</text>
-    <rect class="hl2" x="0" y="75" width="120" height="20" rx="2"/>
-    <text x="135" y="90" class="small mono">0.17 "반응했다"</text>
-    <text x="80" y="115" text-anchor="middle" class="small bold">어텐션 가중치</text>
+
+  <!-- Q1 기원점 (삼성전자 아래) -->
+  <circle cx="65" cy="170" r="4" fill="#8a6b3b"/>
+  <text x="30" y="175" class="small bold">Q₁</text>
+
+  <!-- Q1 → 각 토큰 하단으로 올라가는 참조 화살표 -->
+  <path class="arrow" d="M65 170 C 65 130, 65 110, 65 90"/>
+  <path class="arrow" d="M65 170 C 100 140, 150 120, 160 90"/>
+  <path class="arrow" d="M65 170 C 130 160, 230 125, 250 90"/>
+  <path class="arrow" d="M65 170 C 200 180, 320 140, 350 90"/>
+
+  <!-- 좌측 설명 (두 줄로 분리, 폭 ≤ 380px) -->
+  <text x="20" y="220" class="small">"삼성전자"의 Query가 네 토큰의 Key와 내적 →</text>
+  <text x="20" y="238" class="small">softmax → Value 가중합으로 새 표현을 만든다.</text>
+
+  <!-- 우측 패널: 어텐션 가중치 바 (완전히 분리된 영역) -->
+  <g transform="translate(460,55)">
+    <text x="140" y="0" text-anchor="middle" class="small bold">어텐션 가중치 (예시 · 합=1)</text>
+    <rect class="hl2" x="0" y="15"  width="140" height="20" rx="2"/>
+    <text x="150" y="30" class="small mono">0.55  삼성전자</text>
+    <rect class="hl2" x="0" y="45"  width="51"  height="20" rx="2"/>
+    <text x="150" y="60" class="small mono">0.20  주가가</text>
+    <rect class="hl2" x="0" y="75"  width="20"  height="20" rx="2"/>
+    <text x="150" y="90" class="small mono">0.08  실적에</text>
+    <rect class="hl2" x="0" y="105" width="43"  height="20" rx="2"/>
+    <text x="150" y="120" class="small mono">0.17  반응했다</text>
+    <text x="140" y="155" text-anchor="middle" class="small">바 길이 = 가중치 비례</text>
   </g>
 </svg>
-<figcaption>그림 38-1 Self-Attention. 각 토큰의 Query가 모든 Key와 내적 → softmax → Value 가중합.</figcaption>
+<figcaption>그림 38-1 Self-Attention. 각 토큰의 Query가 모든 Key와 내적 → softmax → Value 가중합. 가중치가 큰 토큰이 결과 표현에 더 많이 반영된다.</figcaption>
 </figure>
 
 <p>이 구조의 장점:</p>
@@ -133,31 +150,73 @@
 <p>LLM 시대에도 BERT 계열은 "텍스트를 벡터로 바꾸는" 임베딩 모델로 활발히 쓰입니다. RAG 시스템에서 사용자 질문과 문서를 벡터로 매칭할 때, OpenAI <code>text-embedding-3</code>이나 BGE·E5 같은 임베딩 모델이 전부 BERT 계열입니다. 생성은 GPT가, 검색·분류는 BERT가 — 둘은 경쟁이 아니라 분업입니다.</p>
 </div>
 
-<h3 id="s38-1-4">사전학습 → 파인튜닝 → 인-컨텍스트 학습</h3>
+<h3 id="s38-1-4">LLM은 어떻게 "학습"되는가 — 사전학습 · SFT · RLHF</h3>
+
+<p>GPT, Claude, Llama 같은 오늘날의 LLM은 보통 다음 세 단계로 만들어집니다. 각 단계는 "무엇을 학습시키는가"가 완전히 다릅니다.</p>
 
 <figure class="diagram">
-<svg viewBox="0 0 700 220" width="700" role="img" aria-label="LLM 학습 3단계: 사전학습 - 파인튜닝 - 추론">
-  <rect class="hl" x="20" y="40" width="200" height="80" rx="8"/>
-  <text x="120" y="65" text-anchor="middle" class="bold">① 사전학습</text>
-  <text x="120" y="88" text-anchor="middle" class="small">인터넷 텍스트 수조 토큰</text>
-  <text x="120" y="105" text-anchor="middle" class="small">수개월·수십억 비용</text>
-  <path class="arrow" d="M220 80 H 260"/>
-  <rect class="hl2" x="260" y="40" width="190" height="80" rx="8"/>
-  <text x="355" y="65" text-anchor="middle" class="bold">② 파인튜닝</text>
-  <text x="355" y="88" text-anchor="middle" class="small">도메인 데이터 수천~수만</text>
-  <text x="355" y="105" text-anchor="middle" class="small">수시간·수십~수백만원</text>
-  <path class="arrow" d="M450 80 H 490"/>
-  <rect class="box" x="490" y="40" width="190" height="80" rx="8"/>
-  <text x="585" y="65" text-anchor="middle" class="bold">③ 추론 + ICL</text>
-  <text x="585" y="88" text-anchor="middle" class="small">프롬프트 몇 개 예시로</text>
-  <text x="585" y="105" text-anchor="middle" class="small">수초·거의 공짜</text>
-  <text x="350" y="160" text-anchor="middle" class="small">일반 사용자는 대부분 ③만. 금융권은 민감데이터 때문에 ②도 흔함.</text>
-  <text x="350" y="190" text-anchor="middle" class="small acc">LoRA·QLoRA로 파인튜닝 비용은 극적으로 낮아졌다 (수십만원대 가능)</text>
+<svg viewBox="0 0 760 320" width="760" role="img" aria-label="LLM 학습 3단계: 사전학습 - SFT - RLHF">
+  <!-- 단계 1: 사전학습 -->
+  <rect class="hl" x="20" y="40" width="220" height="150" rx="8"/>
+  <text x="130" y="62" text-anchor="middle" class="bold">① 사전학습 (Pre-training)</text>
+  <text x="130" y="85" text-anchor="middle" class="small">목표: 다음 토큰 예측</text>
+  <text x="130" y="105" text-anchor="middle" class="small">데이터: 웹·책·코드 수조 토큰</text>
+  <text x="130" y="125" text-anchor="middle" class="small">결과: 세상 지식·언어 능력</text>
+  <text x="130" y="145" text-anchor="middle" class="small">기간: 수개월, GPU 수만장</text>
+  <text x="130" y="165" text-anchor="middle" class="small acc">비용: 수백억 ~ 조 단위</text>
+  <text x="130" y="183" text-anchor="middle" class="small">출력: "Base Model"</text>
+
+  <path class="arrow" d="M240 115 H 275"/>
+
+  <!-- 단계 2: SFT -->
+  <rect class="hl2" x="275" y="40" width="210" height="150" rx="8"/>
+  <text x="380" y="62" text-anchor="middle" class="bold">② 지도 미세조정 (SFT)</text>
+  <text x="380" y="85" text-anchor="middle" class="small">목표: 지시 따르기</text>
+  <text x="380" y="105" text-anchor="middle" class="small">데이터: 질문-답변 쌍</text>
+  <text x="380" y="125" text-anchor="middle" class="small">수만 ~ 수십만 건</text>
+  <text x="380" y="145" text-anchor="middle" class="small">결과: "대답하는" 모델</text>
+  <text x="380" y="165" text-anchor="middle" class="small acc">비용: 수백만 ~ 수억</text>
+  <text x="380" y="183" text-anchor="middle" class="small">출력: "Instruct Model"</text>
+
+  <path class="arrow" d="M485 115 H 520"/>
+
+  <!-- 단계 3: RLHF -->
+  <rect class="box" x="520" y="40" width="220" height="150" rx="8"/>
+  <text x="630" y="62" text-anchor="middle" class="bold">③ RLHF / DPO</text>
+  <text x="630" y="85" text-anchor="middle" class="small">목표: 사람 선호 정렬</text>
+  <text x="630" y="105" text-anchor="middle" class="small">데이터: 답변 쌍 비교</text>
+  <text x="630" y="125" text-anchor="middle" class="small">"A가 B보다 좋다"</text>
+  <text x="630" y="145" text-anchor="middle" class="small">결과: 유용·무해·정직</text>
+  <text x="630" y="165" text-anchor="middle" class="small acc">비용: 수억 ~ 수십억</text>
+  <text x="630" y="183" text-anchor="middle" class="small">출력: ChatGPT·Claude</text>
+
+  <!-- 하단: 추론과 ICL -->
+  <rect class="box" x="20" y="220" width="720" height="80" rx="8"/>
+  <text x="380" y="243" text-anchor="middle" class="bold">④ 추론 (Inference) — 가중치는 더 이상 바뀌지 않는다</text>
+  <text x="380" y="265" text-anchor="middle" class="small">사용자는 ③까지 끝난 "frozen" 모델에 프롬프트만 보냄. 그 응답을 받을 뿐이다.</text>
+  <text x="380" y="283" text-anchor="middle" class="small acc">ICL(In-Context Learning): 프롬프트의 예시로 "임시 학습"처럼 보이지만 가중치는 그대로.</text>
 </svg>
-<figcaption>그림 38-3 LLM 활용의 세 레이어. 대부분의 금융 활용은 ②·③에서 이뤄진다.</figcaption>
+<figcaption>그림 38-3 LLM 학습의 3단계와 추론. ②·③에서 "답하는 능력"이 만들어지고, 사용자는 ④에서 프롬프트로만 소통한다.</figcaption>
 </figure>
 
-<p><b>인-컨텍스트 학습(ICL, In-Context Learning)</b>: 파라미터를 업데이트하지 않고 프롬프트에 몇 개 예시만 넣어 즉석에서 "학습"시키는 방식. Few-shot prompting이라고도 합니다.</p>
+<p><b>단계별 요점.</b></p>
+<ul>
+<li><b>① 사전학습</b>: "다음 토큰을 맞혀라"만 수조 번 반복. 이 과정에서 문법·세상지식·추론 능력이 "부수적으로" 생긴다. Base model은 질문에 답을 하기보다는 문장을 이어 쓴다.</li>
+<li><b>② SFT (Supervised Fine-Tuning)</b>: 사람이 작성한 "질문 → 좋은 답변" 쌍 수만 건으로 지도학습. 이 단계에서 비로소 모델이 "질문에 답하는" 포맷을 익힌다.</li>
+<li><b>③ RLHF (Reinforcement Learning from Human Feedback)</b>: 한 질문에 대해 모델이 생성한 두 답변을 사람이 비교(A가 B보다 낫다) → 그 선호를 보상모델(Reward Model)이 학습 → PPO·DPO로 정책(LLM)을 강화학습. ChatGPT가 "거부해야 할 때 거부하고, 공손하고, 길이가 적당"한 이유의 대부분이 여기서 나온다.</li>
+<li><b>④ 추론</b>: 사용자가 보는 세상. <b>가중치가 더 이상 바뀌지 않는다.</b> 당신이 뭘 묻든, 어떤 피드백을 주든, LLM 자신은 그걸 "기억하지 못한다". 다음 섹션의 전제가 여기서 나온다.</li>
+</ul>
+
+<div class="box tip"><p class="box-title" data-tag="용어">파인튜닝 · LoRA · DPO · RLAIF</p>
+<ul>
+<li><b>Full fine-tuning</b>: 모델의 모든 파라미터를 다시 학습. 비싸고 큰 GPU 필요.</li>
+<li><b>LoRA / QLoRA</b>: 전체가 아니라 "작은 adapter 레이어"만 학습. 몇 십만원 ~ 몇 백만원으로 가능. 금융권 사내 LLM 커스터마이징의 사실상 표준.</li>
+<li><b>DPO (Direct Preference Optimization)</b>: 보상모델 없이 선호 데이터로 바로 LLM을 학습. RLHF보다 안정적이고 간단해 최근 많이 쓰임.</li>
+<li><b>RLAIF (Constitutional AI)</b>: 사람 대신 "다른 LLM"이 피드백을 주는 방식. Anthropic Claude가 대표. 사람 레이블러 의존도를 낮춤.</li>
+</ul>
+</div>
+
+<p><b>인-컨텍스트 학습(ICL)</b>은 "학습"이라는 말이 붙지만 가중치가 바뀌지 않습니다. 프롬프트에 몇 개 예시를 보여주면 그 패턴을 따라 답할 뿐, 세션이 끝나면 흔적도 남지 않습니다. 이게 LLM의 "기억" 문제의 출발점입니다.</p>
 
 <h3 id="s38-1-5">LLM의 환각과 금융 리스크</h3>
 
@@ -170,6 +229,67 @@
 <li>과거 날짜의 뉴스를 사실인 양 생성</li>
 </ul>
 <p>그래서 금융권 LLM 배포에는 반드시 (1) 출처 명시, (2) 검증 레이어, (3) "모르면 모른다" 응답 유도, (4) 신뢰도 라벨링이 들어갑니다. 특히 투자자 대상 콘텐츠는 법적 문제까지 걸릴 수 있어 사람 검토(Human-in-the-loop)가 필수입니다.</p>
+</div>
+
+<h3 id="s38-1-6">LLM의 "기억" — 세 가지 치명적 한계</h3>
+
+<p>LLM을 실무에 쓸 때 가장 많이 하는 실수는 "모델이 기억한다"고 착각하는 것입니다. LLM은 세 가지 다른 종류의 "모름"을 가지고 있습니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 760 300" width="760" role="img" aria-label="LLM의 세 가지 기억 한계: 학습 컷오프, 컨텍스트 윈도우, 세션 무상태">
+  <text x="380" y="22" text-anchor="middle" class="bold">LLM이 "기억하지 못하는" 세 영역</text>
+
+  <!-- (A) Training Cutoff -->
+  <rect class="box" x="20" y="45" width="230" height="220" rx="10"/>
+  <text x="135" y="68" text-anchor="middle" class="bold">① Training Cutoff</text>
+  <text x="135" y="88" text-anchor="middle" class="small">가중치에 "박제된" 지식</text>
+  <text x="135" y="110" text-anchor="middle" class="small acc">학습 종료 시점 이후는 모름</text>
+  <text x="135" y="135" text-anchor="middle" class="small">예: 어제의 공시, 오늘의</text>
+  <text x="135" y="153" text-anchor="middle" class="small">주가, 지난주 임원 발언</text>
+  <text x="135" y="180" text-anchor="middle" class="small bold">해결:</text>
+  <text x="135" y="200" text-anchor="middle" class="small">· RAG로 최신 문서 주입</text>
+  <text x="135" y="218" text-anchor="middle" class="small">· 웹 검색 도구 연동</text>
+  <text x="135" y="236" text-anchor="middle" class="small">· 주기적 재학습</text>
+  <text x="135" y="256" text-anchor="middle" class="small">(사내망은 재학습 어려움)</text>
+
+  <!-- (B) Context Window -->
+  <rect class="box" x="265" y="45" width="230" height="220" rx="10"/>
+  <text x="380" y="68" text-anchor="middle" class="bold">② Context Window</text>
+  <text x="380" y="88" text-anchor="middle" class="small">한 번에 "볼 수 있는" 토큰 수</text>
+  <text x="380" y="110" text-anchor="middle" class="small acc">GPT-4o: 128K, Claude: 200K~1M</text>
+  <text x="380" y="135" text-anchor="middle" class="small">초과하면 앞부분이 잘림</text>
+  <text x="380" y="153" text-anchor="middle" class="small">(또는 "lost in the middle")</text>
+  <text x="380" y="180" text-anchor="middle" class="small bold">해결:</text>
+  <text x="380" y="200" text-anchor="middle" class="small">· 중요 정보는 앞·뒤에 배치</text>
+  <text x="380" y="218" text-anchor="middle" class="small">· 긴 문서는 요약·청크</text>
+  <text x="380" y="236" text-anchor="middle" class="small">· RAG로 "필요한 조각만"</text>
+  <text x="380" y="256" text-anchor="middle" class="small">주입 (전체 넣지 말 것)</text>
+
+  <!-- (C) Session Statelessness -->
+  <rect class="box" x="510" y="45" width="230" height="220" rx="10"/>
+  <text x="625" y="68" text-anchor="middle" class="bold">③ 세션 무상태</text>
+  <text x="625" y="88" text-anchor="middle" class="small">API 호출은 매번 독립</text>
+  <text x="625" y="110" text-anchor="middle" class="small acc">"어제 알려준 거 기억해?" X</text>
+  <text x="625" y="135" text-anchor="middle" class="small">ChatGPT UI의 "기억"도</text>
+  <text x="625" y="153" text-anchor="middle" class="small">사실은 매번 재주입하는 것</text>
+  <text x="625" y="180" text-anchor="middle" class="small bold">해결:</text>
+  <text x="625" y="200" text-anchor="middle" class="small">· 대화 히스토리를 저장·재전송</text>
+  <text x="625" y="218" text-anchor="middle" class="small">· 벡터DB에 과거 대화 임베딩</text>
+  <text x="625" y="236" text-anchor="middle" class="small">· 사용자 프로필·설정은</text>
+  <text x="625" y="256" text-anchor="middle" class="small">앱 레벨에서 관리</text>
+</svg>
+<figcaption>그림 38-4 LLM이 못 보는 세 영역. ①은 "먼 과거"조차 특정 시점에 멈춰 있고, ②는 "지금 이 호출"의 창문 크기, ③은 "지난 호출"과의 단절. 셋 다 외부 시스템(RAG/메모리/도구)으로 메꿔야 한다.</figcaption>
+</figure>
+
+<p>이 세 가지 한계는 전부 "모델 바깥"에서 해결해야 합니다. 모델을 바꾸는 게 아니라, 모델에게 뭘 보여줄지(context)와 어떻게 묻는지(prompt)를 바꾸는 겁니다.</p>
+
+<div class="box warn"><p class="box-title" data-tag="실무 함정">자주 하는 착각</p>
+<ul>
+<li>"어제 알려줬잖아요" → API는 매번 백지. 히스토리를 다시 넣지 않으면 모름.</li>
+<li>"방금 가르쳐 줬는데 왜 또 틀려?" → 가중치는 안 바뀜. 같은 세션이어도 다른 "관련 없는" 질문 사이에선 흘려버림. 중요하면 system 프롬프트로 못박아야 함.</li>
+<li>"오늘 공시 알려줘" → 학습 컷오프 이후면 당연히 모름. RAG·검색 도구 없이는 환각 발생.</li>
+<li>"PDF 100개 다 넣고 요약" → context window 넘기면 뒷부분이 잘림. 또는 중간 정보가 희석(Needle in a Haystack 성능 저하).</li>
+</ul>
 </div>
 
 <h2 id="s38-2"><span class="num">38-2</span>RAG·프롬프트·퀀트/OMS 실무 활용</h2>
@@ -256,7 +376,151 @@ def ask(question, k=3):
 </ul>
 </div>
 
-<h3 id="s38-2-2">프롬프트 엔지니어링</h3>
+<h3 id="s38-2-2">지식 그래프 vs 벡터 RAG — "외부 기억"의 두 접근</h3>
+
+<p>LLM에게 외부 지식을 주는 방법은 크게 두 갈래입니다. 둘 다 "모델 바깥의 기억"이지만 접근 방식이 완전히 다릅니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 760 320" width="760" role="img" aria-label="지식그래프와 벡터 RAG의 구조 비교">
+  <text x="380" y="22" text-anchor="middle" class="bold">두 가지 "외부 기억": 심볼릭 vs 분산 표현</text>
+
+  <!-- 좌측: 지식 그래프 -->
+  <rect class="box" x="20" y="40" width="340" height="260" rx="10"/>
+  <text x="190" y="62" text-anchor="middle" class="bold">지식 그래프 (Knowledge Graph)</text>
+  <text x="190" y="80" text-anchor="middle" class="small">엔티티 ─[관계]→ 엔티티</text>
+
+  <!-- 그래프 노드 -->
+  <circle cx="90"  cy="140" r="28" fill="#f0e2c5" stroke="#8a6b3b"/>
+  <text x="90" y="135" text-anchor="middle" class="small bold">삼성</text>
+  <text x="90" y="150" text-anchor="middle" class="small bold">전자</text>
+
+  <circle cx="230" cy="130" r="26" fill="#f0e2c5" stroke="#8a6b3b"/>
+  <text x="230" y="134" text-anchor="middle" class="small bold">HBM</text>
+
+  <circle cx="310" cy="200" r="26" fill="#f0e2c5" stroke="#8a6b3b"/>
+  <text x="310" y="204" text-anchor="middle" class="small bold">SK하닉</text>
+
+  <circle cx="130" cy="230" r="26" fill="#f0e2c5" stroke="#8a6b3b"/>
+  <text x="130" y="234" text-anchor="middle" class="small bold">엔비디아</text>
+
+  <!-- 관계 -->
+  <path d="M118 135 L 204 131" stroke="#8a6b3b" fill="none" marker-end="url(#arrA)"/>
+  <text x="155" y="125" class="small">생산</text>
+  <path d="M250 155 L 300 180" stroke="#8a6b3b" fill="none" marker-end="url(#arrA)"/>
+  <text x="265" y="178" class="small">경쟁</text>
+  <path d="M225 155 L 148 215" stroke="#8a6b3b" fill="none" marker-end="url(#arrA)"/>
+  <text x="200" y="200" class="small">공급</text>
+
+  <defs>
+    <marker id="arrA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8a6b3b"/>
+    </marker>
+  </defs>
+
+  <text x="190" y="275" text-anchor="middle" class="small">정확한 관계·다단계 추론</text>
+  <text x="190" y="291" text-anchor="middle" class="small acc">쿼리: Cypher·SPARQL</text>
+
+  <!-- 우측: 벡터 RAG -->
+  <rect class="box" x="400" y="40" width="340" height="260" rx="10"/>
+  <text x="570" y="62" text-anchor="middle" class="bold">벡터 RAG (Dense Retrieval)</text>
+  <text x="570" y="80" text-anchor="middle" class="small">문장 → 임베딩 벡터 → 유사도</text>
+
+  <!-- 벡터 산점도 -->
+  <circle cx="470" cy="130" r="6" fill="#8a6b3b"/>
+  <text x="470" y="118" class="small mono">doc1</text>
+  <circle cx="500" cy="150" r="6" fill="#8a6b3b"/>
+  <text x="500" y="138" class="small mono">doc2</text>
+  <circle cx="540" cy="135" r="6" fill="#8a6b3b"/>
+  <text x="540" y="123" class="small mono">doc3</text>
+  <circle cx="620" cy="180" r="6" fill="#8a6b3b"/>
+  <text x="620" y="168" class="small mono">doc4</text>
+  <circle cx="650" cy="140" r="6" fill="#8a6b3b"/>
+  <text x="650" y="128" class="small mono">doc5</text>
+  <circle cx="590" cy="210" r="6" fill="#8a6b3b"/>
+  <text x="590" y="200" class="small mono">doc6</text>
+
+  <!-- 쿼리 벡터 -->
+  <circle cx="520" cy="145" r="9" fill="none" stroke="#b84a4a" stroke-width="2"/>
+  <text x="520" y="110" text-anchor="middle" class="small bold">질문 벡터</text>
+  <path d="M520 145 L 500 150" stroke="#b84a4a" stroke-dasharray="3 3" fill="none"/>
+  <path d="M520 145 L 540 135" stroke="#b84a4a" stroke-dasharray="3 3" fill="none"/>
+  <path d="M520 145 L 470 130" stroke="#b84a4a" stroke-dasharray="3 3" fill="none"/>
+
+  <text x="570" y="265" text-anchor="middle" class="small">의미 유사도 top-k 검색</text>
+  <text x="570" y="281" text-anchor="middle" class="small acc">쿼리: 코사인 유사도</text>
+  <text x="570" y="297" text-anchor="middle" class="small">(모호한 질의에 강함)</text>
+</svg>
+<figcaption>그림 38-5 지식 그래프는 "관계가 명확한 구조"에, 벡터 RAG는 "의미가 비슷한 문서 검색"에 강하다. 서로 보완적이다.</figcaption>
+</figure>
+
+<div class="tbl"><table>
+<thead><tr><th>관점</th><th>지식 그래프</th><th>벡터 RAG</th></tr></thead>
+<tbody>
+<tr><td>저장 단위</td><td>엔티티·관계 (삼각형)</td><td>텍스트 청크 + 임베딩 벡터</td></tr>
+<tr><td>검색 방식</td><td>그래프 쿼리(Cypher, SPARQL)·탐색</td><td>코사인 유사도 top-k</td></tr>
+<tr><td>잘하는 것</td><td>다단계 추론, 정확한 사실, 관계 질의</td><td>자연어 질의, 유연한 유사 매칭</td></tr>
+<tr><td>약한 것</td><td>구축·유지가 비쌈, 스키마 설계 필요</td><td>관계 추론 X, 반복 사실 중복</td></tr>
+<tr><td>예시 질의</td><td>"HBM 공급망에서 삼성전자의 2단계 거래처는?"</td><td>"작년 삼성전자 메모리 호황 리포트 찾아줘"</td></tr>
+<tr><td>구축 비용</td><td>중~고 (엔티티·관계 추출 필요)</td><td>저~중 (임베딩만 돌리면 됨)</td></tr>
+<tr><td>대표 도구</td><td>Neo4j, Amazon Neptune, TigerGraph</td><td>FAISS, Milvus, Pinecone, pgvector</td></tr>
+<tr><td>LLM 환각 억제</td><td>★★★ (사실 그 자체를 주입)</td><td>★★ (문서 조각을 주입)</td></tr>
+</tbody></table></div>
+
+<p><b>왜 둘 다 필요한가.</b> 벡터 RAG는 "비슷한 문서"는 잘 찾지만 "A가 B의 자회사이고 B가 C에 투자했다" 같은 <b>다단계 관계 추론</b>이 약합니다. 지식 그래프는 그 반대입니다. 그래서 2024년부터 <b>GraphRAG</b>(Microsoft 등)·<b>하이브리드 RAG</b>가 뜨고 있습니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 760 220" width="760" role="img" aria-label="GraphRAG 하이브리드 파이프라인">
+  <text x="380" y="22" text-anchor="middle" class="bold">하이브리드 RAG (GraphRAG) — 그래프와 벡터의 결합</text>
+
+  <rect class="box" x="20" y="45" width="110" height="40" rx="6"/>
+  <text x="75" y="70" text-anchor="middle" class="small bold">사용자 질문</text>
+
+  <path class="arrow" d="M130 65 H 165"/>
+
+  <rect class="hl" x="165" y="45" width="130" height="40" rx="6"/>
+  <text x="230" y="63" text-anchor="middle" class="small bold">엔티티 추출</text>
+  <text x="230" y="78" text-anchor="middle" class="small">(LLM/NER)</text>
+
+  <path class="arrow" d="M295 65 H 325"/>
+
+  <!-- 두 갈래 -->
+  <rect class="hl2" x="325" y="20" width="170" height="40" rx="6"/>
+  <text x="410" y="38" text-anchor="middle" class="small bold">지식 그래프 조회</text>
+  <text x="410" y="53" text-anchor="middle" class="small">(관계·속성 사실)</text>
+
+  <rect class="hl2" x="325" y="90" width="170" height="40" rx="6"/>
+  <text x="410" y="108" text-anchor="middle" class="small bold">벡터 DB 검색</text>
+  <text x="410" y="123" text-anchor="middle" class="small">(문서·설명 청크)</text>
+
+  <path class="arrow" d="M495 40 C 530 40, 530 80, 540 80"/>
+  <path class="arrow" d="M495 110 C 530 110, 530 80, 540 80"/>
+
+  <rect class="hl" x="540" y="60" width="100" height="40" rx="6"/>
+  <text x="590" y="78" text-anchor="middle" class="small bold">컨텍스트 합성</text>
+  <text x="590" y="93" text-anchor="middle" class="small">(사실 + 설명)</text>
+
+  <path class="arrow" d="M640 80 H 670"/>
+
+  <rect class="box" x="670" y="60" width="80" height="40" rx="6"/>
+  <text x="710" y="78" text-anchor="middle" class="small bold">LLM</text>
+  <text x="710" y="93" text-anchor="middle" class="small">답변+출처</text>
+
+  <text x="380" y="180" text-anchor="middle" class="small">그래프 = "뼈대 사실", 벡터 = "설명 살". 둘을 함께 넣어 LLM이 사실 기반 서술을 하도록 유도.</text>
+  <text x="380" y="200" text-anchor="middle" class="small acc">금융 적용: 공급망·지분·계열사 그래프 + 리서치 리포트 벡터 → 다단계 질의에 강해짐.</text>
+</svg>
+<figcaption>그림 38-6 GraphRAG. 질문에서 엔티티를 뽑아 그래프로는 관계를, 벡터로는 설명을 가져와 함께 LLM에 넘긴다.</figcaption>
+</figure>
+
+<div class="box fin"><p class="box-title" data-tag="퀀트 실무">어느 쪽을 먼저 깔까</p>
+<ul>
+<li><b>단일 문서 Q&amp;A·요약·검색</b> — 벡터 RAG부터. 구축이 싸고 즉시 가치. (매뉴얼 봇, 리서치 검색)</li>
+<li><b>관계·공급망·규정 조문 참조</b> — 지식 그래프 가치가 큼. (금융 규제, 그룹 지분, HBM 공급망)</li>
+<li><b>복잡한 금융 분석 (A→B→C 영향)</b> — GraphRAG. 구축 비용 들지만 환각이 극적으로 줍니다.</li>
+<li><b>OMS 로그/장애 Q&amp;A</b> — 보통 벡터 RAG로 시작, 반복되는 "장애 유형 → 조치 → 유관 시스템"을 그래프로 승격시키는 패턴이 효율적.</li>
+</ul>
+</div>
+
+<h3 id="s38-2-3">실전 프롬프트 — "LLM이 못 기억한다는 전제"에서 설계하라</h3>
 
 <p>LLM을 잘 쓰는 것의 70%는 좋은 프롬프트입니다. 주요 패턴:</p>
 
