@@ -94,9 +94,9 @@ http://<PC의-IP>:8000/
 | 32 | 캡스톤: 미니 코어뱅킹 | 원장·거래·전문·일마감 배치 |
 | 33 | CS 면접 총정리 | 메모리·OS·네트워크·DB·자료구조 |
 
-### PART 3 · 머신러닝 & LLM 트랙 (ch34 ~ ch38)
+### PART 3 · 머신러닝 & LLM 트랙 (ch34 ~ ch41)
 
-**빅데이터분석기사 3·4과목 기반 + LLM/Transformer**. 리서치팀 모델을 운영팀이 **"믿어도 되는지 검토할 수 있게"** 하고, LLM을 OMS 로그·장애 분석에 직접 활용하는 데 초점.
+**빅데이터분석기사 3·4과목 + LLM/Transformer + 비전(CNN·YOLO) + 음성(Whisper·GPT-4o Realtime) + 멀티모달 통합 비교**. 리서치팀 모델을 운영팀이 **"믿어도 되는지 검토할 수 있게"** 하고, LLM/비전/음성 AI를 OMS 로그·장애·대시보드·녹취 분석에 직접 활용하는 데 초점.
 
 | # | 제목 | 퀀트/OMS 활용 포인트 |
 |---|------|---------------------|
@@ -104,7 +104,10 @@ http://<PC의-IP>:8000/
 | 35 | 지도학습 (회귀·분류·앙상블) | CAPM/팩터모델 = 선형회귀, **XGBoost·LightGBM**이 알파팩터 조합의 왕 |
 | 36 | 비지도학습·시계열·딥러닝 | PCA로 **숨겨진 시장 요인** 추출, GARCH로 변동성, LSTM의 한계 |
 | 37 | 모형 평가와 결과 해석 | 불균형(사기탐지) 지표 선택, **SHAP으로 "알파 소스" 분해**, 백테스트 지표 |
-| 38 | Transformer·LLM과 금융/OMS | Self-Attention, **LLM 학습 3단계(사전학습·SFT·RLHF)**, Context Window·학습 컷오프·세션 무상태, **지식 그래프 vs 벡터 RAG · GraphRAG**, PROMPT 7원칙과 기억 재주입 패턴, **LLM으로 로그 요약·장애 보고서 자동화** |
+| 38 | Transformer·LLM과 금융/OMS | Self-Attention, **LLM 학습 3단계(사전학습·SFT·RLHF)**, Context Window·학습 컷오프·세션 무상태, **지식 그래프 vs 벡터 RAG · GraphRAG**, PROMPT 7원칙과 기억 재주입 패턴, **LLM 에이전트와 하네스(Cursor/Claude Code 구조)·에이전트의 한계**, **LLM으로 로그 요약·장애 보고서 자동화** |
+| 39 | **이미지 AI 변천사: CNN·YOLO·ViT·멀티모달** | **CNN(LeNet→ResNet→EfficientNet) · YOLO v1~v11 · ViT · CLIP · Diffusion · SAM · 멀티모달 LLM(GPT-5V, Claude Vision)**, **eKYC OCR · 공시 PDF · 차트 패턴 · OMS 대시보드 스크린샷을 자연어로 요약** |
+| 40 | **음성 AI 변천사: ASR·TTS·실시간 음성 LLM** | HMM-GMM → **CTC/RNN-T/Attention** → Wav2Vec·HuBERT → **Whisper(large-v3-turbo)** → WaveNet/VITS/VALL-E → **GPT-4o Realtime·Gemini Live(네이티브 omni)**, **실적콜·콜녹취·회의록·성문인증·Deepfake Voice 방어** |
+| 41 | **멀티모달 모델과 빌리언별 성능 비교** | 멀티모달 아키텍처 4패턴(Late/Early/Cross-attn/MoE) · 모델 변천(CLIP→GPT-4o→Claude Opus 4) · **공개 벤치마크 기반 빌리언별 비교표(소형/중형/프런티어, MMLU·HumanEval·GSM8K·MMMU·Arena ELO·가격)** · **금융/OMS 모델 라우팅 가이드** |
 
 ### 부록
 
@@ -156,7 +159,10 @@ http://<PC의-IP>:8000/
 - **[ch35 지도학습](ch35.html)** — XGBoost/LightGBM이 왜 알파팩터 조합에 쓰이는가, 신용평가 로지스틱 회귀의 50년 전통.
 - **[ch36 비지도·시계열·딥러닝](ch36.html)** — PCA로 숨겨진 시장 요인 분해, GARCH, 금융에 LSTM 쓸 때의 함정.
 - **[ch37 모형 평가와 해석](ch37.html)** — 불균형(사기탐지) 지표, SHAP으로 "알파 소스" 분해, 백테스트 샤프 2.5를 믿지 않는 법.
-- **[ch38 Transformer·LLM과 금융/OMS](ch38.html)** — Self-Attention과 Transformer, **LLM 학습 3단계(사전학습·SFT·RLHF)**, LLM의 "기억 못 함" 3대 원인(학습 컷오프·컨텍스트 창·세션 무상태), **지식 그래프 vs 벡터 RAG와 GraphRAG**, 프롬프트 7원칙(PROMPT 7)과 기억 재주입 패턴, **OMS 로그 요약·장애 보고서 초안·매뉴얼 Q&A 봇** 등 지금 당장 쓸 수 있는 LLM 패턴.
+- **[ch38 Transformer·LLM과 금융/OMS](ch38.html)** — Self-Attention과 Transformer, **LLM 학습 3단계(사전학습·SFT·RLHF)**, LLM의 "기억 못 함" 3대 원인(학습 컷오프·컨텍스트 창·세션 무상태), **지식 그래프 vs 벡터 RAG와 GraphRAG**, 프롬프트 7원칙(PROMPT 7)과 기억 재주입 패턴, **LLM 에이전트와 하네스(Cursor/Claude Code의 ReAct 루프)·에이전트의 한계와 안전 하네스 체크리스트**, **OMS 로그 요약·장애 보고서 초안·매뉴얼 Q&A 봇·장애 1차 조사 에이전트** 등 지금 당장 쓸 수 있는 LLM 패턴.
+- **[ch39 이미지 AI 변천사: CNN·YOLO·ViT·멀티모달](ch39.html)** — CNN의 핵심 아이디어(locality·translation invariance·parameter sharing), 비전 이정표(LeNet→AlexNet→ResNet→EfficientNet), **YOLO v1~v11 10년 변천사**, Vision Transformer·CLIP·Diffusion, SAM·DINOv2·멀티모달 LLM(GPT-5V·Claude Vision), **eKYC OCR·공시 PDF·차트 패턴·OMS 대시보드 스크린샷을 자연어로 요약하는 실무 활용**, Deepfake·적대적 공격·YOLO 라이선스 등 금융권 체크리스트.
+- **[ch40 음성 AI 변천사: ASR·TTS·실시간 음성 LLM](ch40.html)** — 음성 특징(파형→스펙트로그램→MFCC), 전통 HMM-GMM과 그 한계, **End-to-End 삼대장(CTC·RNN-T·Attention)**, Wav2Vec·HuBERT·**Whisper(large-v3-turbo)**, TTS 변천(WaveNet→VITS→ElevenLabs), **파이프라인(ASR→LLM→TTS) vs 네이티브 omni(GPT-4o Realtime 232ms·Gemini Live)**, **실적콜 분석·콜녹취 분류·OMS 야간 음성 알림·성문인증·Deepfake Voice 방어**.
+- **[ch41 멀티모달 모델과 빌리언별 성능 비교](ch41.html)** — 멀티모달 아키텍처 4패턴(Late/Early fusion·Cross-attn·MoE), 2021~2025 모델 변천(CLIP→Flamingo→GPT-4V→Gemini→GPT-4o→Claude Opus 4), **공개 벤치마크(MMLU·HumanEval·GSM8K·MMMU·LMSYS Arena ELO·가격) 기반 소형(≤10B)·중형(10~70B)·프런티어 비교표**, MoE 총/활성 파라미터 설명, **하나증권 OMS 운영 관점 모델 라우팅 가이드(민감데이터·대량분류·고품질분석·장시간 에이전트)**.
 
 ---
 
@@ -179,7 +185,7 @@ C_study/
 ├── index.html          # 전체 목차, "이어서 보기"
 ├── ch01.html ~ ch19.html   # PART 1 · C 기초
 ├── ch20.html ~ ch33.html   # PART 2 · 금융 IT 베테랑 트랙
-├── ch34.html ~ ch38.html   # PART 3 · 머신러닝 & LLM 트랙
+├── ch34.html ~ ch41.html   # PART 3 · 머신러닝 & LLM 트랙 (ch39 비전, ch40 음성, ch41 멀티모달 비교)
 ├── appendix.html       # 부록 (아스키표, 선택정렬, 체크리스트)
 ├── assets/
 │   ├── style.css       # 전체 스타일 (반응형, 다크 모드)
@@ -199,7 +205,7 @@ C_study/
 - **금융 IT 지망·운영 입사자**는 PART 2 (ch20~33) 가 핵심.
 - **하나증권 퀀트실 OMS 운영**은 특히 **ch30 → ch24/27 → ch21/32 → ch25** 순으로 보면
     출근 첫날 로그를 보고 당황하지 않을 수 있는 기본기를 잡게 됩니다.
-- **빅데이터분석기사 자격증·ML 입문**은 PART 3 (ch34~38). ch34→ch35→ch37 순이면 자격증 3·4과목 상당 부분이 커버되고, ch38로 LLM까지 이어집니다.
+- **빅데이터분석기사 자격증·ML 입문**은 PART 3 (ch34~41). ch34→ch35→ch37 순이면 자격증 3·4과목 상당 부분이 커버되고, ch38(LLM)→ch39(비전)→ch40(음성)→ch41(멀티모달 모델 비교)로 최신 AI 트렌드를 한 바퀴 돕니다.
 - **리서치 모델 운영 검토·LLM 활용**을 하고 싶으면 PART 3에 ch22(시큐어 코딩)·ch30(장애 대응)을 조합하세요.
 
 > 공부하다 "왜?"가 생기면 각 챕터의 **파란 WHY 박스**를 먼저 확인하세요.

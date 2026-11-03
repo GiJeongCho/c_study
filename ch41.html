@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ch41 멀티모달 모델과 빌리언별 성능 비교 · C언어 금융 IT 마스터</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+KR:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-ch="ch41">
+<header class="topbar">
+  <button class="menu-btn" type="button" aria-expanded="false" aria-controls="sidebar">목차</button>
+  <a class="brand" href="index.html"><b>C</b>금융 IT 마스터</a>
+  <span class="where"></span>
+  <span class="progress"></span>
+</header>
+<div class="layout">
+<nav id="sidebar" class="sidebar" aria-label="과정 목차"></nav>
+<div class="page">
+<main class="content">
+
+<header class="ch-head">
+  <p class="eyebrow">PART 3 · 머신러닝 &amp; LLM 트랙 · CHAPTER</p>
+  <div class="bignum">41</div>
+  <h1>멀티모달 모델과 빌리언별 성능 비교</h1>
+  <p class="lede">텍스트·이미지·음성·비디오를 한 모델이 함께 다루는 "멀티모달" 시대가 2023~2025년 사이에 완전히 열렸습니다. CLIP의 공유 공간에서 시작해 Flamingo·GPT-4V·Gemini·GPT-4o·Claude 4·Llama 3 Vision까지 왔습니다. 그런데 "어떤 모델을 써야 하지?"는 여전히 어려운 질문입니다. 이 장은 멀티모달 아키텍처의 패턴을 정리하고, <b>공개된 벤치마크(MMLU·HumanEval·GSM8K·MMMU·LMSYS Arena ELO) 기반 빌리언별 성능 비교표</b>로 모델 선택을 돕습니다.</p>
+  <div class="goals"><p class="goals-title">이 장에서 배울 것</p><ul>
+    <li>멀티모달이란: 왜 CLIP이 시작점이고 왜 "네이티브 omni"가 다른가</li>
+    <li>멀티모달 아키텍처 패턴 4가지 — Late fusion · Early fusion · Cross-attention · MoE</li>
+    <li>주요 모델 변천: CLIP → Flamingo → GPT-4V → Gemini → GPT-4o → Claude Opus 4</li>
+    <li><b>빌리언별 성능 비교표</b> — MMLU · HumanEval · GSM8K · MMMU · Arena ELO · 가격</li>
+    <li>소형(≤10B) · 중형(10~70B) · 대형(≥100B) · 프런티어 각 구간의 최적 선택</li>
+    <li>MoE(Mixture of Experts)는 왜 "총 파라미터"와 "활성 파라미터"가 다른가</li>
+    <li>금융/OMS 멀티모달 활용과 모델 선택 가이드라인</li>
+  </ul></div>
+</header>
+
+<h2 id="s41-1"><span class="num">41-1</span>멀티모달이란: 아키텍처 패턴과 모델 변천</h2>
+
+<h3 id="s41-1-1">멀티모달 = "여러 입력 양식을 공유 공간에"</h3>
+
+<p>단일 모달 모델(텍스트 LLM, 이미지 CNN)은 자기 영역만 다룹니다. 멀티모달 모델은 서로 다른 입력(텍스트·이미지·음성·비디오)을 <b>같은 벡터 공간</b> 또는 <b>같은 토큰 시퀀스</b>로 녹여 함께 처리합니다. 2021년 CLIP이 "이미지와 텍스트를 같은 임베딩 공간에 심자"로 시작해, 2024년 GPT-4o는 "텍스트·이미지·음성을 같은 토큰 흐름으로"까지 왔습니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 760 300" width="760" role="img" aria-label="멀티모달 아키텍처 네 가지 패턴">
+  <text x="380" y="22" text-anchor="middle" class="bold">멀티모달 아키텍처 네 패턴</text>
+
+  <!-- Pattern 1: Late Fusion -->
+  <rect class="box" x="20" y="45" width="340" height="110" rx="10"/>
+  <text x="190" y="65" text-anchor="middle" class="bold">① Late Fusion (CLIP, 임베딩 결합)</text>
+  <rect class="hl" x="35" y="80" width="80" height="30" rx="4"/>
+  <text x="75" y="100" text-anchor="middle" class="small">텍스트 인코더</text>
+  <rect class="hl" x="35" y="118" width="80" height="30" rx="4"/>
+  <text x="75" y="138" text-anchor="middle" class="small">이미지 인코더</text>
+  <path class="arrow" d="M115 95 H 190"/>
+  <path class="arrow" d="M115 133 H 190"/>
+  <rect class="hl2" x="190" y="100" width="150" height="33" rx="4"/>
+  <text x="265" y="123" text-anchor="middle" class="small bold">공유 임베딩 공간</text>
+
+  <!-- Pattern 2: Early Fusion / Native tokens -->
+  <rect class="box" x="400" y="45" width="340" height="110" rx="10"/>
+  <text x="570" y="65" text-anchor="middle" class="bold">② Early Fusion (GPT-4o, 통합 토큰)</text>
+  <rect class="hl" x="415" y="80" width="70" height="30" rx="4"/>
+  <text x="450" y="100" text-anchor="middle" class="small">텍스트 토큰</text>
+  <rect class="hl" x="415" y="118" width="70" height="30" rx="4"/>
+  <text x="450" y="138" text-anchor="middle" class="small">이미지 패치</text>
+  <path class="arrow" d="M485 95 H 530"/>
+  <path class="arrow" d="M485 133 H 530"/>
+  <rect class="hl2" x="530" y="90" width="180" height="55" rx="6"/>
+  <text x="620" y="113" text-anchor="middle" class="small bold">단일 Transformer</text>
+  <text x="620" y="130" text-anchor="middle" class="small">(공유 토큰 공간)</text>
+
+  <!-- Pattern 3: Cross-attention / Flamingo -->
+  <rect class="box" x="20" y="170" width="340" height="110" rx="10"/>
+  <text x="190" y="190" text-anchor="middle" class="bold">③ Cross-Attention (Flamingo)</text>
+  <rect class="hl2" x="35" y="205" width="100" height="55" rx="4"/>
+  <text x="85" y="223" text-anchor="middle" class="small bold">frozen LLM</text>
+  <text x="85" y="240" text-anchor="middle" class="small">(텍스트 백본)</text>
+  <path class="arrow" d="M135 232 H 180"/>
+  <text x="155" y="222" text-anchor="middle" class="small">↕ Cross-attn</text>
+  <rect class="hl" x="180" y="205" width="150" height="55" rx="4"/>
+  <text x="255" y="223" text-anchor="middle" class="small bold">학습 가능 모듈</text>
+  <text x="255" y="240" text-anchor="middle" class="small">(이미지 특징 주입)</text>
+
+  <!-- Pattern 4: MoE -->
+  <rect class="box" x="400" y="170" width="340" height="110" rx="10"/>
+  <text x="570" y="190" text-anchor="middle" class="bold">④ MoE (Mixture of Experts)</text>
+  <rect class="hl" x="415" y="210" width="60" height="25" rx="3"/><text x="445" y="227" text-anchor="middle" class="small">E1</text>
+  <rect class="hl" x="415" y="243" width="60" height="25" rx="3"/><text x="445" y="260" text-anchor="middle" class="small">E2</text>
+  <rect class="hl" x="482" y="210" width="60" height="25" rx="3"/><text x="512" y="227" text-anchor="middle" class="small">E3</text>
+  <rect class="hl" x="482" y="243" width="60" height="25" rx="3"/><text x="512" y="260" text-anchor="middle" class="small bold">E4 ★</text>
+  <rect class="hl" x="549" y="210" width="60" height="25" rx="3"/><text x="579" y="227" text-anchor="middle" class="small bold">E5 ★</text>
+  <rect class="hl" x="549" y="243" width="60" height="25" rx="3"/><text x="579" y="260" text-anchor="middle" class="small">E6</text>
+  <text x="640" y="223" class="small bold">Router</text>
+  <text x="640" y="240" class="small">상위 k개</text>
+  <text x="640" y="256" class="small">전문가만 활성</text>
+  <path d="M615 220 L 640 220" stroke="#8a6b3b" fill="none" stroke-dasharray="2 2"/>
+  <path d="M615 253 L 640 253" stroke="#8a6b3b" fill="none" stroke-dasharray="2 2"/>
+
+  <text x="380" y="295" text-anchor="middle" class="small acc">최근 트렌드: ②(네이티브 토큰) + ④(MoE)의 조합 (GPT-4o, Gemini, DeepSeek V3)</text>
+</svg>
+<figcaption>그림 41-1 멀티모달 아키텍처 네 가지. Late fusion은 검색·분류에, Early fusion은 생성·대화에, Cross-attn은 LLM 확장에, MoE는 거대화에 유리.</figcaption>
+</figure>
+
+<h3 id="s41-1-2">주요 모델 변천 — 2021년부터 2025년까지</h3>
+
+<figure class="diagram">
+<svg viewBox="0 0 760 240" width="760" role="img" aria-label="멀티모달 모델 변천 타임라인">
+  <text x="380" y="22" text-anchor="middle" class="bold">멀티모달 LLM 타임라인 (2021~2025)</text>
+
+  <line x1="40" y1="130" x2="730" y2="130" stroke="#8a6b3b" stroke-width="2"/>
+
+  <g font-size="10" fill="#5a4a2a" font-family="IBM Plex Mono, monospace">
+    <text x="40"  y="150" text-anchor="middle">2021</text>
+    <text x="155" y="150" text-anchor="middle">2022</text>
+    <text x="275" y="150" text-anchor="middle">2023.03</text>
+    <text x="395" y="150" text-anchor="middle">2023.12</text>
+    <text x="500" y="150" text-anchor="middle">2024.05</text>
+    <text x="605" y="150" text-anchor="middle">2024.10</text>
+    <text x="710" y="150" text-anchor="middle">2025+</text>
+  </g>
+
+  <g>
+    <circle cx="40"  cy="130" r="5" fill="#8a6b3b"/>
+    <circle cx="155" cy="130" r="5" fill="#8a6b3b"/>
+    <circle cx="275" cy="130" r="7" fill="#b84a4a"/>
+    <circle cx="395" cy="130" r="7" fill="#b84a4a"/>
+    <circle cx="500" cy="130" r="8" fill="#b84a4a"/>
+    <circle cx="605" cy="130" r="7" fill="#b84a4a"/>
+    <circle cx="710" cy="130" r="5" fill="#8a6b3b"/>
+  </g>
+
+  <g class="small">
+    <text x="40"  y="65" text-anchor="middle" class="bold">CLIP · DALL·E</text>
+    <text x="40"  y="80" text-anchor="middle">공유 임베딩 시작</text>
+    <line x1="40" y1="90" x2="40" y2="125" stroke="#8a6b3b"/>
+
+    <text x="275" y="65" text-anchor="middle" class="bold">GPT-4V</text>
+    <text x="275" y="80" text-anchor="middle">OpenAI 비전 공개</text>
+    <line x1="275" y1="90" x2="275" y2="125" stroke="#8a6b3b"/>
+
+    <text x="500" y="65" text-anchor="middle" class="bold">GPT-4o</text>
+    <text x="500" y="80" text-anchor="middle">네이티브 omni (음성+)</text>
+    <line x1="500" y1="90" x2="500" y2="125" stroke="#8a6b3b"/>
+
+    <text x="710" y="65" text-anchor="middle" class="bold">Claude 4 · Gemini 2.5</text>
+    <text x="710" y="80" text-anchor="middle">초장문 추론 · 코드</text>
+    <line x1="710" y1="90" x2="710" y2="125" stroke="#8a6b3b"/>
+  </g>
+
+  <g class="small">
+    <line x1="155" y1="135" x2="155" y2="170" stroke="#8a6b3b"/>
+    <text x="155" y="185" text-anchor="middle" class="bold">Flamingo</text>
+    <text x="155" y="200" text-anchor="middle">Cross-attn 패턴</text>
+
+    <line x1="395" y1="135" x2="395" y2="170" stroke="#8a6b3b"/>
+    <text x="395" y="185" text-anchor="middle" class="bold">Gemini 1.0</text>
+    <text x="395" y="200" text-anchor="middle">네이티브 멀티모달</text>
+
+    <line x1="605" y1="135" x2="605" y2="170" stroke="#8a6b3b"/>
+    <text x="605" y="185" text-anchor="middle" class="bold">Llama 3.2 Vision</text>
+    <text x="605" y="200" text-anchor="middle">오픈웨이트 11B/90B</text>
+  </g>
+
+  <text x="380" y="226" text-anchor="middle" class="small acc">공통 흐름: Late fusion → Cross-attention → 네이티브 토큰(early fusion) + MoE</text>
+</svg>
+<figcaption>그림 41-2 2021~2025 멀티모달 모델 흐름. 2024년을 기점으로 "네이티브 omni"가 주류가 됨.</figcaption>
+</figure>
+
+<div class="tbl"><table>
+<thead><tr><th>모델</th><th>년도</th><th>지원 모달</th><th>특징</th></tr></thead>
+<tbody>
+<tr><td><b>CLIP</b> (OpenAI)</td><td>2021</td><td>텍스트·이미지</td><td>공유 임베딩, zero-shot 분류의 시작</td></tr>
+<tr><td><b>Flamingo</b> (DeepMind)</td><td>2022</td><td>텍스트·이미지</td><td>Cross-attention으로 LLM에 비전 주입, Few-shot vision</td></tr>
+<tr><td><b>GPT-4V</b> (OpenAI)</td><td>2023.09</td><td>텍스트·이미지</td><td>최초의 대중 멀티모달 LLM</td></tr>
+<tr><td><b>Gemini 1.0</b> (Google)</td><td>2023.12</td><td>텍스트·이미지·음성·비디오</td><td>네이티브 멀티모달의 첫 공개 선언</td></tr>
+<tr><td><b>Claude 3</b> Opus/Sonnet</td><td>2024.03</td><td>텍스트·이미지</td><td>차트·표·문서 해석 특히 강함</td></tr>
+<tr><td><b>GPT-4o</b> (OpenAI)</td><td>2024.05</td><td>텍스트·이미지·음성</td><td>단일 모델 omni, 음성 232ms</td></tr>
+<tr><td><b>Llama 3.2 Vision</b></td><td>2024.09</td><td>텍스트·이미지</td><td>오픈웨이트 11B/90B, 사내 배포 가능</td></tr>
+<tr><td><b>Qwen2-VL</b></td><td>2024.09</td><td>텍스트·이미지·비디오</td><td>중국어·동양권 특화, 오픈웨이트</td></tr>
+<tr><td><b>Claude 3.5/3.7 Sonnet</b></td><td>2024~2025</td><td>텍스트·이미지</td><td>차트·코드·에이전트 작업에 강함</td></tr>
+<tr><td><b>Gemini 2.0/2.5</b></td><td>2024~2025</td><td>텍스트·이미지·음성·비디오</td><td>Deep Research·Live·초장문</td></tr>
+<tr><td><b>Claude Opus 4</b></td><td>2025</td><td>텍스트·이미지</td><td>장시간 에이전트 작업·코딩에 특화</td></tr>
+</tbody></table></div>
+
+<h2 id="s41-2"><span class="num">41-2</span>빌리언별 모델 성능 비교표 — MMLU·HumanEval·GSM8K·MMMU·Arena ELO</h2>
+
+<p>모델 크기(파라미터 수, Billion)와 성능을 함께 보면 "이 작업엔 몇B 모델이 필요한가"가 명확해집니다. 아래 표는 <b>공개된 공식 리포트와 LMSYS Chatbot Arena</b> 수치(2024~2025)를 모아 정리한 것입니다. 벤치마크는 모델 버전·테스트 조건에 따라 달라지니 참고용으로 보세요.</p>
+
+<div class="box tip"><p class="box-title" data-tag="용어">벤치마크 한 줄 설명</p>
+<ul>
+<li><b>MMLU</b> (Massive Multitask Language Understanding): 57개 분야 객관식 지식·추론 (법률·의학·수학 등). 사람 평균 ~34%, 전문가 ~90%.</li>
+<li><b>HumanEval</b>: Python 함수 164개를 자연어 설명으로 작성 (pass@1). 코딩 능력.</li>
+<li><b>GSM8K</b>: 초등~중등 수준 수학 문제 8,500개. 다단계 추론.</li>
+<li><b>MMMU</b> (Massive Multi-discipline Multimodal Understanding): 이미지 + 텍스트 복합 추론 (차트·도표·수식 포함).</li>
+<li><b>LMSYS Arena ELO</b>: Chatbot Arena에서 사람 투표 기반 체스식 Elo. "실사용 느낌" 랭킹. 1200 평범, 1300+ 상위, 1400+ 최상위 (2025 기준).</li>
+<li><b>가격</b>: API 호출 시 1M 토큰당 입력·출력 USD. 로컬 오픈웨이트는 하드웨어 비용만.</li>
+</ul>
+</div>
+
+<h3 id="s41-2-1">소형 (≤10B) — 로컬·엣지·저비용 추론</h3>
+<p>노트북·사내 GPU 1장에서 실시간 돌릴 수 있는 구간. 요약·분류·간단 코딩에 충분.</p>
+
+<div class="tbl"><table>
+<thead><tr><th>모델</th><th>크기</th><th>MMLU</th><th>HumanEval</th><th>GSM8K</th><th>MMMU</th><th>Arena ELO</th><th>가격 I/O ($/1M)</th><th>라이선스</th></tr></thead>
+<tbody>
+<tr><td>Llama 3.2 1B</td><td>1B</td><td>49.3</td><td>-</td><td>44.4</td><td>-</td><td>-</td><td>로컬</td><td>Llama 커뮤니티</td></tr>
+<tr><td>Llama 3.2 3B</td><td>3B</td><td>63.4</td><td>-</td><td>77.7</td><td>-</td><td>~1103</td><td>로컬</td><td>Llama 커뮤니티</td></tr>
+<tr><td>Phi-3.5 Mini</td><td>3.8B</td><td>69.0</td><td>62.8</td><td>86.2</td><td>-</td><td>~1113</td><td>로컬</td><td>MIT</td></tr>
+<tr><td>Gemma 2 2B</td><td>2B</td><td>51.3</td><td>-</td><td>24.3</td><td>-</td><td>~1130</td><td>로컬</td><td>Gemma</td></tr>
+<tr><td>Qwen2.5 7B</td><td>7B</td><td>74.2</td><td>84.8</td><td>85.4</td><td>-</td><td>~1226</td><td>로컬 또는 $0.3/$0.3</td><td>Apache 2.0</td></tr>
+<tr><td>Mistral 7B</td><td>7B</td><td>60.1</td><td>29.0</td><td>52.1</td><td>-</td><td>~1072</td><td>로컬</td><td>Apache 2.0</td></tr>
+<tr><td>Llama 3.1 8B</td><td>8B</td><td>69.4</td><td>72.6</td><td>84.5</td><td>-</td><td>~1176</td><td>로컬 또는 $0.2/$0.2</td><td>Llama 커뮤니티</td></tr>
+<tr><td>Gemma 2 9B</td><td>9B</td><td>71.3</td><td>40.2</td><td>76.7</td><td>-</td><td>~1189</td><td>로컬</td><td>Gemma</td></tr>
+<tr><td><b>GPT-4o Mini</b></td><td>미공개 (~8B 추정)</td><td>82.0</td><td>87.2</td><td>93.8</td><td>59.4</td><td>~1273</td><td>$0.15 / $0.60</td><td>프로프라이어터리</td></tr>
+<tr><td><b>Claude 3.5 Haiku</b></td><td>미공개 (소형)</td><td>73.8</td><td>88.1</td><td>-</td><td>-</td><td>~1236</td><td>$0.80 / $4.00</td><td>프로프라이어터리</td></tr>
+</tbody></table></div>
+
+<h3 id="s41-2-2">중형 (10~70B) — 사내 서버·고성능 로컬</h3>
+<p>GPU 2~8장 환경. 복잡 추론·전문 분야 Q&amp;A·장문 요약에 실용적.</p>
+
+<div class="tbl"><table>
+<thead><tr><th>모델</th><th>크기 (총 / 활성)</th><th>MMLU</th><th>HumanEval</th><th>GSM8K</th><th>MMMU</th><th>Arena ELO</th><th>가격 I/O ($/1M)</th><th>라이선스</th></tr></thead>
+<tbody>
+<tr><td>Qwen2.5 14B</td><td>14B</td><td>79.7</td><td>83.5</td><td>90.2</td><td>-</td><td>~1210</td><td>로컬</td><td>Apache 2.0</td></tr>
+<tr><td>Qwen2.5 32B</td><td>32B</td><td>83.3</td><td>88.4</td><td>95.9</td><td>-</td><td>~1240</td><td>로컬</td><td>Apache 2.0</td></tr>
+<tr><td>Mixtral 8×7B</td><td>46.7B / 12.9B (MoE)</td><td>70.6</td><td>40.2</td><td>58.4</td><td>-</td><td>~1115</td><td>$0.5/$0.5</td><td>Apache 2.0</td></tr>
+<tr><td>Mistral Large 2</td><td>123B</td><td>84.0</td><td>92.0</td><td>93.0</td><td>-</td><td>~1251</td><td>$2 / $6</td><td>Mistral Research</td></tr>
+<tr><td><b>Llama 3.1 70B</b></td><td>70B</td><td>83.6</td><td>80.5</td><td>95.1</td><td>-</td><td>~1248</td><td>$0.4 / $0.4</td><td>Llama 커뮤니티</td></tr>
+<tr><td><b>Llama 3.3 70B</b></td><td>70B</td><td>86.0</td><td>88.4</td><td>95.1</td><td>-</td><td>~1268</td><td>$0.4 / $0.4</td><td>Llama 커뮤니티</td></tr>
+<tr><td><b>Qwen2.5 72B</b></td><td>72B</td><td>86.1</td><td>86.6</td><td>95.8</td><td>-</td><td>~1259</td><td>$0.4 / $0.4</td><td>Qwen (상용 가능)</td></tr>
+<tr><td>Command R+</td><td>104B</td><td>75.7</td><td>-</td><td>70.7</td><td>-</td><td>~1189</td><td>$3 / $15</td><td>Cohere</td></tr>
+<tr><td>Llama 3.2 Vision 11B</td><td>11B</td><td>73.0</td><td>-</td><td>-</td><td>50.7</td><td>-</td><td>로컬</td><td>Llama 커뮤니티</td></tr>
+<tr><td>Llama 3.2 Vision 90B</td><td>90B</td><td>86.0</td><td>-</td><td>-</td><td>60.3</td><td>-</td><td>로컬</td><td>Llama 커뮤니티</td></tr>
+</tbody></table></div>
+
+<h3 id="s41-2-3">대형·프런티어 (≥100B 추정) — 최고 성능</h3>
+<p>대부분 폐쇄형(파라미터 미공개). 복합 추론·에이전트·멀티모달 작업의 사실상 선두.</p>
+
+<div class="tbl"><table>
+<thead><tr><th>모델</th><th>크기 (총 / 활성)</th><th>MMLU</th><th>HumanEval</th><th>GSM8K</th><th>MMMU</th><th>Arena ELO</th><th>가격 I/O ($/1M)</th><th>특징</th></tr></thead>
+<tbody>
+<tr><td>GPT-4 (초기)</td><td>~1.76T (MoE 추정)</td><td>86.4</td><td>67.0</td><td>92.0</td><td>56.8</td><td>~1206</td><td>$30 / $60 (당시)</td><td>2023 공개, 멀티모달 혁명</td></tr>
+<tr><td>GPT-4 Turbo</td><td>미공개</td><td>86.5</td><td>81.7</td><td>-</td><td>-</td><td>~1257</td><td>$10 / $30</td><td>128K context</td></tr>
+<tr><td><b>GPT-4o</b></td><td>미공개 (omni)</td><td>88.7</td><td>90.2</td><td>-</td><td>69.1</td><td>~1286</td><td>$2.50 / $10</td><td>네이티브 음성·이미지</td></tr>
+<tr><td>GPT-4.5</td><td>미공개</td><td>85.1</td><td>88.0</td><td>-</td><td>74.4</td><td>~1398</td><td>$75 / $150</td><td>2025, 감성·대화 특화</td></tr>
+<tr><td><b>Claude 3 Opus</b></td><td>미공개</td><td>86.8</td><td>84.9</td><td>95.0</td><td>59.4</td><td>~1247</td><td>$15 / $75</td><td>장문·안전</td></tr>
+<tr><td><b>Claude 3.5 Sonnet</b></td><td>미공개</td><td>88.3</td><td>93.7</td><td>96.4</td><td>70.4</td><td>~1283</td><td>$3 / $15</td><td>차트·코드 강자</td></tr>
+<tr><td><b>Claude 3.7 Sonnet</b></td><td>미공개</td><td>-</td><td>92.0</td><td>-</td><td>75.0</td><td>~1310</td><td>$3 / $15</td><td>Extended Thinking 지원</td></tr>
+<tr><td><b>Claude Opus 4</b></td><td>미공개</td><td>-</td><td>72.5 (SWE-bench)</td><td>-</td><td>-</td><td>~1340</td><td>$15 / $75</td><td>장시간 에이전트·코딩 특화</td></tr>
+<tr><td>Gemini 1.5 Pro</td><td>미공개</td><td>81.9</td><td>84.1</td><td>91.7</td><td>62.2</td><td>~1261</td><td>$1.25 / $5</td><td>2M 토큰 context</td></tr>
+<tr><td><b>Gemini 2.0 Flash</b></td><td>미공개</td><td>87.0</td><td>-</td><td>-</td><td>71.7</td><td>~1356</td><td>$0.075 / $0.30</td><td>빠르고 저렴</td></tr>
+<tr><td><b>Gemini 2.5 Pro</b></td><td>미공개</td><td>86.4</td><td>-</td><td>-</td><td>81.7</td><td>~1442</td><td>$1.25 / $10</td><td>2025 멀티모달 선두</td></tr>
+<tr><td><b>DeepSeek V3</b></td><td>671B / 37B (MoE)</td><td>88.5</td><td>82.6</td><td>-</td><td>-</td><td>~1316</td><td>$0.27 / $1.10</td><td>오픈웨이트 프런티어, 가격 혁명</td></tr>
+<tr><td><b>DeepSeek R1</b></td><td>671B / 37B (MoE)</td><td>90.8</td><td>-</td><td>-</td><td>-</td><td>~1358</td><td>$0.55 / $2.19</td><td>오픈웨이트 추론모델, o1급</td></tr>
+<tr><td>Llama 3.1 405B</td><td>405B</td><td>88.6</td><td>89.0</td><td>96.8</td><td>-</td><td>~1267</td><td>$3 / $3</td><td>오픈웨이트 최대, 사내 배포</td></tr>
+<tr><td><b>o1-preview</b></td><td>미공개</td><td>90.8</td><td>92.4</td><td>-</td><td>78.2</td><td>~1335</td><td>$15 / $60</td><td>추론 전용, 코딩·수학</td></tr>
+<tr><td><b>o3-mini</b></td><td>미공개</td><td>-</td><td>95.0</td><td>-</td><td>-</td><td>~1305</td><td>$1.10 / $4.40</td><td>2025 추론 특화 소형</td></tr>
+</tbody></table></div>
+
+<div class="box warn"><p class="box-title" data-tag="주의">표를 읽을 때 주의할 점</p>
+<ul>
+<li><b>수치는 공식 리포트·LMSYS 기준 2024~2025 공개 데이터</b>. 모델이 업데이트되거나 평가 조건이 다르면 숫자가 달라집니다. 최종 선택은 반드시 사내 평가셋으로 재검증.</li>
+<li><b>"-"</b>는 해당 벤치마크 수치가 공식 공개되지 않은 경우. 다른 소스에선 수치가 있을 수 있음.</li>
+<li><b>프런티어 모델의 파라미터 수는 대부분 미공개</b>. GPT-4 1.76T 같은 숫자는 추정치.</li>
+<li><b>MoE 모델</b>은 "총 파라미터 / 활성 파라미터"가 다름. 저장은 전체 필요, 추론은 활성만. 비용 계산 유의.</li>
+<li><b>가격은 매우 자주 바뀜</b>. 최신 가격은 각 공급사 공식 페이지 확인.</li>
+<li><b>Arena ELO는 "실사용 선호"</b>이지 "지능"이 아님. 작업 특성에 따라 벤치마크 순위와 Arena 순위가 다름.</li>
+</ul>
+</div>
+
+<h3 id="s41-2-4">같은 "크기"에서 성능이 왜 다른가 — 네 가지 변수</h3>
+<ul>
+<li><b>학습 토큰 수</b>: 같은 7B여도 1조 토큰과 15조 토큰 학습 모델은 성능이 다르다. Chinchilla 법칙: 데이터와 파라미터는 1:20 비율이 효율적.</li>
+<li><b>데이터 품질·커리큘럼</b>: Phi-3는 소형(3.8B)이지만 "교과서 품질" 데이터로 Mistral 7B 수준.</li>
+<li><b>Post-training (SFT·RLHF·DPO)</b>: 같은 base model이라도 instruct 튜닝 품질에 따라 Arena ELO가 100+ 차이.</li>
+<li><b>MoE vs Dense</b>: 671B MoE(DeepSeek V3)는 활성 37B만 쓰여 70B dense 수준 비용으로 프런티어 성능.</li>
+</ul>
+
+<h2 id="s41-3"><span class="num">41-3</span>금융/OMS 멀티모달 활용과 모델 선택 가이드</h2>
+
+<h3 id="s41-3-1">작업별 모델 선택 가이드</h3>
+
+<div class="tbl"><table>
+<thead><tr><th>작업</th><th>필요 능력</th><th>추천 체급</th><th>구체 모델 (2025 기준)</th></tr></thead>
+<tbody>
+<tr><td>OMS 로그 분류·요약</td><td>텍스트, 짧은 추론</td><td>소형 (3~8B)</td><td>Llama 3.1 8B, Qwen2.5 7B, GPT-4o Mini</td></tr>
+<tr><td>장애 보고서 초안</td><td>텍스트, 템플릿 추종</td><td>중형 (14~70B)</td><td>Qwen2.5 32B, Llama 3.3 70B, Claude 3.5 Haiku</td></tr>
+<tr><td>리서치 리포트 요약</td><td>장문 + 수치 정확도</td><td>프런티어</td><td>Claude 3.5 Sonnet, Gemini 2.5 Pro</td></tr>
+<tr><td>대시보드 스크린샷 이상 설명</td><td>비전 추론</td><td>프런티어 멀티모달</td><td>Claude 3.5 Sonnet, GPT-4o, Gemini 2.5 Pro</td></tr>
+<tr><td>차트·도표 수치 추출</td><td>MMMU 능력</td><td>프런티어 멀티모달</td><td>Gemini 2.5 Pro, Claude 3.7 Sonnet, GPT-4o</td></tr>
+<tr><td>복잡 백테스트 로직 코딩</td><td>HumanEval·추론</td><td>추론 전용</td><td>o1, o3-mini, Claude Opus 4, DeepSeek R1</td></tr>
+<tr><td>민감데이터 오프라인 처리</td><td>사내 호스팅 필수</td><td>중~대형 오픈웨이트</td><td>Llama 3.3 70B, Qwen2.5 72B, DeepSeek V3</td></tr>
+<tr><td>실시간 음성 상담</td><td>저지연 omni</td><td>프런티어 Realtime</td><td>GPT-4o Realtime, Gemini Live</td></tr>
+<tr><td>대량 배치 분류</td><td>저단가 + 적정 품질</td><td>소형 또는 Flash</td><td>Gemini 2.0 Flash, GPT-4o Mini, Qwen2.5 7B 로컬</td></tr>
+<tr><td>Cursor·Claude Code 사용</td><td>장시간 에이전트</td><td>Claude 계열 유리</td><td>Claude Opus 4, Claude 3.7 Sonnet</td></tr>
+</tbody></table></div>
+
+<figure class="diagram">
+<svg viewBox="0 0 760 220" width="760" role="img" aria-label="비용-성능 지도: 소형부터 프런티어까지">
+  <text x="380" y="22" text-anchor="middle" class="bold">비용 vs 성능 지도 (대략)</text>
+
+  <!-- 축 -->
+  <line x1="80"  y1="180" x2="720" y2="180" stroke="#8a6b3b" stroke-width="2"/>
+  <line x1="80"  y1="180" x2="80"  y2="50"  stroke="#8a6b3b" stroke-width="2"/>
+  <text x="400" y="205" text-anchor="middle" class="small">가격 (입력 $/1M 토큰, 로그 스케일)</text>
+  <text x="30"  y="115" text-anchor="middle" class="small" transform="rotate(-90 30 115)">성능 (MMLU)</text>
+
+  <!-- 눈금 -->
+  <text x="150" y="195" text-anchor="middle" class="small mono">$0.1</text>
+  <text x="300" y="195" text-anchor="middle" class="small mono">$0.5</text>
+  <text x="450" y="195" text-anchor="middle" class="small mono">$3</text>
+  <text x="600" y="195" text-anchor="middle" class="small mono">$15</text>
+  <text x="700" y="195" text-anchor="middle" class="small mono">$75</text>
+  <text x="70"  y="180" text-anchor="end" class="small mono">50</text>
+  <text x="70"  y="130" text-anchor="end" class="small mono">70</text>
+  <text x="70"  y="80"  text-anchor="end" class="small mono">88</text>
+
+  <!-- 모델들 (대략 위치) -->
+  <circle cx="110" cy="155" r="5" fill="#8a6b3b"/><text x="130" y="155" class="small">Llama 3.2 3B</text>
+  <circle cx="130" cy="105" r="5" fill="#8a6b3b"/><text x="150" y="105" class="small">Qwen2.5 7B</text>
+  <circle cx="200" cy="92"  r="6" fill="#b84a4a"/><text x="220" y="90"  class="small">GPT-4o Mini</text>
+  <circle cx="200" cy="130" r="5" fill="#8a6b3b"/><text x="220" y="135" class="small">Gemini 2.0 Flash</text>
+  <circle cx="330" cy="78"  r="6" fill="#b84a4a"/><text x="350" y="78"  class="small">Llama 3.3 70B / Qwen2.5 72B</text>
+  <circle cx="330" cy="88"  r="6" fill="#8a6b3b"/><text x="350" y="100" class="small">DeepSeek V3</text>
+  <circle cx="500" cy="70"  r="7" fill="#b84a4a"/><text x="520" y="68"  class="small bold">Claude 3.5 Sonnet · GPT-4o</text>
+  <circle cx="500" cy="82"  r="6" fill="#8a6b3b"/><text x="520" y="98"  class="small">Gemini 2.5 Pro</text>
+  <circle cx="640" cy="63"  r="8" fill="#b84a4a"/><text x="625" y="55"  class="small bold">Claude Opus 4 · o1</text>
+
+  <text x="400" y="40" text-anchor="middle" class="small acc">파레토 전선: Qwen2.5·Llama 3.3·DeepSeek·Claude 3.5 Sonnet 라인이 "가성비" 선두</text>
+</svg>
+<figcaption>그림 41-3 비용-성능 산점도(개념). 오른쪽 위가 "비싸고 똑똑", 왼쪽 아래가 "저렴하고 평이". 파레토 전선 위 모델이 가성비 최적.</figcaption>
+</figure>
+
+<h3 id="s41-3-2">하나증권 OMS 운영 관점의 멀티모달 조합 예시</h3>
+
+<div class="box fin"><p class="box-title" data-tag="퀀트 실무">현장형 모델 포트폴리오</p>
+<ol>
+<li><b>로컬 사내 LLM (민감 데이터 전용)</b>: Llama 3.3 70B 또는 Qwen2.5 72B · GPU 서버 1~2대. 고객정보·내부전략이 들어가는 모든 LLM 작업은 여기로.</li>
+<li><b>저비용 대량 작업</b>: Gemini 2.0 Flash 또는 GPT-4o Mini. 로그 분류·단순 요약·초안 생성 등 수만 건 처리.</li>
+<li><b>고품질 분석</b>: Claude 3.5 Sonnet 또는 GPT-4o. 리서치 리포트 요약, 대시보드 이미지 해석, 복합 추론.</li>
+<li><b>장시간 코딩 에이전트</b>: Claude Opus 4 또는 Claude Code · 운영 스크립트·대시보드 수정 등 개발 작업.</li>
+<li><b>음성 분석</b>: 사내 Whisper large-v3-turbo + Llama 3.3 70B. 실적콜·콜녹취 전부 사내 처리.</li>
+<li><b>비전 (eKYC, OMS 스크린샷)</b>: Llama 3.2 Vision 90B 사내 또는 Claude 3.5 Sonnet (민감도 낮은 경우).</li>
+</ol>
+<p>원칙: "민감도에 따라 사내/외부", "작업 복잡도에 따라 소형/중형/프런티어", "응답속도 중요도에 따라 Flash/Mini 또는 Pro". 한 모델에 올인하지 말고 라우팅.</p>
+</div>
+
+<figure class="code"><figcaption>라우터 — 입력에 따라 적절한 모델로 분배</figcaption>
+<pre><code class="language-python">from enum import Enum
+
+class Model(Enum):
+    LOCAL_LLAMA_70B      = "llama-3.3-70b-instruct"      # 사내, 민감
+    LOCAL_WHISPER_TURBO  = "whisper-large-v3-turbo"      # 사내
+    FLASH                = "gemini-2.0-flash"            # 저비용 대량
+    SONNET               = "claude-3-5-sonnet"           # 고품질 분석
+    OPUS4                = "claude-opus-4"               # 장시간 에이전트
+    O1                   = "o1"                          # 복잡 추론·수학
+
+def route(task_type, has_sensitive_data, has_image, needs_reasoning):
+    if has_sensitive_data:
+        return Model.LOCAL_LLAMA_70B
+    if task_type == "batch_classification":
+        return Model.FLASH
+    if needs_reasoning:
+        return Model.O1
+    if has_image:
+        return Model.SONNET
+    if task_type == "coding_agent":
+        return Model.OPUS4
+    return Model.FLASH          # 디폴트는 저비용
+</code></pre></figure>
+
+<div class="box tip"><p class="box-title" data-tag="면접 포인트">"어떤 LLM 쓰세요?"에 대한 좋은 답</p>
+<p>면접관은 "Claude가 최고" 같은 답이 아니라 <b>"작업 유형과 민감도에 따라 라우팅합니다"</b>를 듣고 싶어 합니다. 예: "민감 데이터는 사내 Llama 3.3 70B, 대량 분류는 GPT-4o Mini나 Gemini Flash, 중요 분석은 Claude 3.5 Sonnet, 복잡 추론은 o1을 씁니다. 매월 벤치마크를 보고 라우팅 규칙을 업데이트합니다." 이게 운영자의 모델입니다.</p>
+</div>
+
+<div class="ex"><p class="ex-title">예제 41-1 — 모델 선택 결정 <span class="lv">난이도 ★★☆</span></p>
+<p>다음 각 요구에 가장 적절한 모델을 고르고 이유를 설명하세요(2025년 기준).</p>
+<ol>
+<li>매일 100만 건의 OMS 로그를 "정상/주의/긴급" 3단계로 분류</li>
+<li>리서치 애널리스트의 "삼성전자 메모리 사이클 분석" 보고서를 PDF 100장과 함께 요청</li>
+<li>DART 공시 PDF에서 테이블·차트의 수치를 정확히 뽑기</li>
+<li>민감한 고객 상담 음성 → 쟁점 요약 (사내 처리 필수)</li>
+<li>Cursor로 OMS 모니터링 대시보드 재작성 (수 시간 걸릴 작업)</li>
+</ol>
+<details><summary>정답과 해설 보기</summary>
+<ol>
+<li><b>Gemini 2.0 Flash 또는 GPT-4o Mini</b>. 대량·단순 분류니 저비용 모델. 민감 로그면 사내 Qwen2.5 7B.</li>
+<li><b>Claude 3.5/3.7 Sonnet 또는 Gemini 2.5 Pro</b>. 장문 + 수치 정확도. 사내 민감이면 Llama 3.3 70B.</li>
+<li><b>Gemini 2.5 Pro</b> (MMMU 81.7로 가장 높음) 또는 Claude 3.7 Sonnet. 차트·표의 정량 추출은 MMMU 점수를 보면 됨.</li>
+<li><b>사내 Whisper large-v3-turbo + 사내 Llama 3.3 70B</b>. 민감 데이터는 외부 API 금지. 100% 사내 처리.</li>
+<li><b>Claude Opus 4 또는 Claude 3.7 Sonnet via Cursor/Claude Code</b>. 장시간 에이전트 작업은 Claude 계열이 현재 가장 안정. Opus 4는 비싸지만 복잡 작업에 효율적.</li>
+</ol>
+<p>핵심: (1) 민감도 체크 먼저, (2) 작업 유형(분류·장문·추론·코딩)에 맞게, (3) 체급을 비용으로 거꾸로 조절. 벤치마크 숫자 자체보다 "작업↔벤치마크 매핑"이 중요.</p>
+</details></div>
+
+<h2 id="s41-key">핵심 정리</h2>
+<ul class="summary-list">
+<li>멀티모달은 서로 다른 입력을 공유 공간/토큰으로 녹여 함께 처리하는 모델. CLIP(2021)이 시작, GPT-4o(2024)로 네이티브 omni 시대 개막.</li>
+<li>아키텍처 4패턴: Late fusion(CLIP) · Early fusion(GPT-4o) · Cross-attention(Flamingo) · MoE(DeepSeek V3). 최근은 Early + MoE 조합이 대세.</li>
+<li>주요 벤치마크: MMLU(지식), HumanEval(코딩), GSM8K(수학), MMMU(멀티모달), LMSYS Arena ELO(실사용).</li>
+<li>소형(≤10B): 로컬·엣지. Phi-3.5 Mini, Qwen2.5 7B, Llama 3.1 8B, GPT-4o Mini.</li>
+<li>중형(10~70B): 사내 서버 실용. Qwen2.5 32B/72B, Llama 3.1/3.3 70B.</li>
+<li>프런티어: Claude 3.5/3.7 Sonnet · Claude Opus 4 · GPT-4o/4.5 · Gemini 2.5 Pro · DeepSeek R1 · o1/o3.</li>
+<li>MoE는 "총 파라미터"와 "활성 파라미터"가 다름 — DeepSeek V3는 671B/37B로 70B급 비용에 프런티어 성능.</li>
+<li>같은 크기에서 성능이 다른 이유: 학습 토큰 수(Chinchilla), 데이터 품질, Post-training, MoE 여부.</li>
+<li>금융/OMS 라우팅 원칙: 민감 데이터는 사내 오픈웨이트, 대량 저단가는 Flash/Mini, 중요 분석은 Sonnet·Pro, 복잡 추론은 o1/R1, 장시간 에이전트는 Claude Opus 4.</li>
+<li>벤치마크 숫자는 참고용. 최종 선택은 사내 평가셋으로 재검증. 매월 라우팅 규칙 업데이트.</li>
+</ul>
+
+<h2 id="s41-cs">면접 질문</h2>
+<div class="box iv"><p class="box-title" data-tag="면접">자주 나오는 질문</p>
+<details><summary>Q1. 멀티모달 모델이란 무엇이고 왜 중요한가요?</summary><p>텍스트·이미지·음성·비디오 등 서로 다른 입력 양식을 하나의 모델이 함께 다루는 것입니다. 중요한 이유는 (1) 실제 금융 업무가 이미 멀티모달 — 공시 PDF는 텍스트+차트+표, 실적콜은 음성+전사, 리서치 리포트는 텍스트+그림, (2) pipeline(ASR→LLM→TTS)과 비교해 지연·정확도·자연스러움에서 크게 유리, (3) RAG·에이전트가 멀티모달 입력을 다룰 수 있어 활용 범위가 폭발적으로 늘어남. 하나증권에서도 OMS 대시보드 스크린샷·공시 PDF·실적콜 녹음을 한 파이프라인으로 처리할 수 있게 됐습니다.</p></details>
+<details><summary>Q2. 모델 크기 "B"는 뭘 뜻하고 왜 중요한가요?</summary><p>Billion(10억) 파라미터입니다. 가중치 개수 자체도 중요하지만, 더 중요한 건 (1) <b>추론 비용</b>: 크면 GPU 메모리와 지연이 늘어남, (2) <b>학습·배포 비용</b>: 사내 호스팅 시 하드웨어 결정, (3) <b>성능 상한</b>: 보통 크면 똑똑하지만 "학습 토큰 수·데이터 품질"이 더 결정적이기도 함. Chinchilla 법칙에 따르면 파라미터 1B당 20B 토큰 학습이 효율적입니다.</p></details>
+<details><summary>Q3. MoE(Mixture of Experts)는 왜 중요한가요?</summary><p>총 파라미터가 커도 "활성 파라미터"만 쓰여 비용이 작습니다. DeepSeek V3는 총 671B지만 활성은 37B라, 추론 비용은 70B dense 수준에 프런티어 성능을 냅니다. 각 토큰마다 Router가 "어느 전문가(expert)를 쓸지" 결정해 상위 k개(보통 2개)만 활성화. 장점은 저비용·고성능, 단점은 (a) 저장 공간은 전체 필요, (b) 학습이 불안정, (c) 로드밸런싱이 어려움. GPT-4·Gemini도 MoE로 추정되고 있고, 2025년 현재 거대 모델의 사실상 표준입니다.</p></details>
+<details><summary>Q4. MMLU 90%면 사람 수준인가요?</summary><p>단답으로는 "거의 전문가 수준의 객관식 지식"입니다. 사람 평균이 ~34%, 전문가가 ~90%, 2025년 프런티어 모델은 90% 전후. 하지만 (1) MMLU는 객관식 지식 중심이지 추론·창의성·사실 확인이 약함, (2) 벤치마크 특화 학습(contamination) 가능성, (3) 실무 작업과 괴리 — 즉 "MMLU 2점 더 높다"가 "실무 더 유용"이 아님. 그래서 LMSYS Arena ELO 같은 "실사용 선호" 지표도 함께 봐야 합니다.</p></details>
+<details><summary>Q5. 하나증권 OMS에서는 어떤 모델을 어떻게 조합하시겠어요?</summary><p>작업 유형과 민감도로 라우팅합니다. (1) <b>민감 데이터 (고객정보·내부전략)</b>: 사내 Llama 3.3 70B 또는 Qwen2.5 72B. (2) <b>대량 로그 분류·단순 요약</b>: Gemini 2.0 Flash 또는 GPT-4o Mini. 저단가 대량. (3) <b>리서치·대시보드 분석</b>: Claude 3.5 Sonnet 또는 Gemini 2.5 Pro. 멀티모달 정확도. (4) <b>장시간 코딩 에이전트</b>: Claude Opus 4 via Cursor/Claude Code. (5) <b>음성</b>: 사내 Whisper large-v3-turbo + 사내 LLM. 핵심은 "한 모델에 올인 안 하고 라우팅", "매월 벤치마크 업데이트 보면서 라우팅 규칙 조정". 그리고 사내 평가셋으로 반드시 재검증합니다.</p></details>
+<details><summary>Q6. 오픈웨이트 모델(Llama, Qwen, DeepSeek)과 프로프라이어터리(GPT, Claude, Gemini)의 선택 기준은?</summary><p>(1) <b>민감 데이터</b> 다루면 오픈웨이트 + 사내 호스팅이 거의 필수. (2) <b>최고 성능이 필요</b>하면 2025년 현재 프런티어 프로프라이어터리(Claude 4·Gemini 2.5·GPT-4o 계열)가 여전히 선두 — 다만 DeepSeek V3/R1이 격차를 많이 좁힘. (3) <b>장기 비용</b>: 사용량이 많으면 오픈웨이트 자가호스팅이 유리. (4) <b>규제·감사</b>: 금융권은 데이터 흐름·모델 버전 통제가 필요해 오픈웨이트가 유리한 측면. (5) <b>속도·안정성</b>: 프로프라이어터리 API가 자가호스팅보다 더 안정적일 때가 많음. 실무에선 둘을 조합합니다.</p></details>
+</div>
+
+</main>
+</div></div>
+<script src="assets/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,484 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ch40 음성 AI 변천사: ASR·TTS·실시간 음성 LLM · C언어 금융 IT 마스터</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+KR:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-ch="ch40">
+<header class="topbar">
+  <button class="menu-btn" type="button" aria-expanded="false" aria-controls="sidebar">목차</button>
+  <a class="brand" href="index.html"><b>C</b>금융 IT 마스터</a>
+  <span class="where"></span>
+  <span class="progress"></span>
+</header>
+<div class="layout">
+<nav id="sidebar" class="sidebar" aria-label="과정 목차"></nav>
+<div class="page">
+<main class="content">
+
+<header class="ch-head">
+  <p class="eyebrow">PART 3 · 머신러닝 &amp; LLM 트랙 · CHAPTER</p>
+  <div class="bignum">40</div>
+  <h1>음성 AI 변천사 — ASR·TTS·실시간 음성 LLM</h1>
+  <p class="lede">1952년 Bell Labs가 "0~9 숫자"를 알아듣는 Audrey를 만든 뒤 70년, 음성 AI는 HMM-GMM의 통계 모델 시대 → DNN-HMM → End-to-End 딥러닝(CTC·RNN-T·Attention) → 자기지도학습(Wav2Vec·Whisper) → <b>네이티브 음성 LLM(GPT-4o Realtime, Gemini Live)</b>까지 왔습니다. 이 장은 그 변천사와 함께 콜녹취 분석·회의록·실적 발표 콜·성문인증 등 금융권에서 지금 당장 쓸 수 있는 음성 활용을 정리합니다.</p>
+  <div class="goals"><p class="goals-title">이 장에서 배울 것</p><ul>
+    <li>음성 신호를 모델이 어떻게 다루나 — 파형, 스펙트로그램, MFCC, 멜 필터뱅크</li>
+    <li>전통 ASR: HMM-GMM과 그 한계</li>
+    <li>End-to-End ASR: CTC(Deep Speech), RNN-T(Google), Attention(LAS)</li>
+    <li>자기지도학습 혁명: Wav2Vec 2.0, HuBERT</li>
+    <li><b>Whisper</b> (OpenAI 2022) — 다국어·robust ASR의 사실상 표준</li>
+    <li>TTS 변천사: WaveNet → Tacotron → VITS → NaturalSpeech → ElevenLabs</li>
+    <li>음성 LLM: pipeline(ASR→LLM→TTS) → <b>네이티브 omni 모델(GPT-4o, Gemini Live)</b></li>
+    <li>금융/OMS 활용: 콜센터 녹취, 실적 발표 콜, 회의록, 성문인증, Deepfake Voice 방어</li>
+  </ul></div>
+</header>
+
+<h2 id="s40-1"><span class="num">40-1</span>음성 신호와 전통 ASR·CTC·RNN-T</h2>
+
+<h3 id="s40-1-1">음성 신호 — 파형에서 멜 스펙트로그램으로</h3>
+
+<p>음성은 공기 압력의 시간 변화입니다. 마이크가 그걸 디지털로 바꾸면 보통 16,000Hz(음성용) 또는 44,100Hz(음악용) 샘플링 레이트로 1초에 수만 개의 숫자가 됩니다. 모델이 이걸 그대로 다루기엔 너무 길어서, 보통 25ms 윈도우를 10ms씩 밀면서 <b>스펙트로그램</b>으로 변환합니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 760 240" width="760" role="img" aria-label="음성 특징 추출: 파형 → 스펙트로그램 → MFCC">
+  <text x="380" y="22" text-anchor="middle" class="bold">음성 특징 추출 파이프라인</text>
+
+  <!-- 1. 파형 -->
+  <text x="90" y="55" text-anchor="middle" class="small bold">① 파형 (Waveform)</text>
+  <rect x="20" y="65" width="140" height="60" fill="#fff" stroke="#8a6b3b"/>
+  <path d="M20 95 Q 30 70, 40 95 T 60 95 T 80 95 T 100 95 Q 110 70, 120 95 T 140 95 T 160 95" stroke="#8a6b3b" fill="none" stroke-width="1.2"/>
+  <text x="90" y="140" text-anchor="middle" class="small">16,000 Hz 샘플링</text>
+  <text x="90" y="155" text-anchor="middle" class="small">1초 = 16,000 수</text>
+
+  <path class="arrow" d="M165 95 H 195"/>
+  <text x="180" y="85" text-anchor="middle" class="small">STFT</text>
+
+  <!-- 2. 스펙트로그램 -->
+  <text x="275" y="55" text-anchor="middle" class="small bold">② 스펙트로그램</text>
+  <rect x="205" y="65" width="140" height="60" fill="#fff" stroke="#8a6b3b"/>
+  <!-- Heatmap simulation -->
+  <g>
+    <rect x="210" y="68" width="12" height="12" fill="#f0e2c5"/>
+    <rect x="222" y="68" width="12" height="12" fill="#d4a373"/>
+    <rect x="234" y="68" width="12" height="12" fill="#8a6b3b"/>
+    <rect x="246" y="68" width="12" height="12" fill="#c6b291"/>
+    <rect x="258" y="68" width="12" height="12" fill="#8a6b3b"/>
+    <rect x="270" y="68" width="12" height="12" fill="#d4a373"/>
+    <rect x="282" y="68" width="12" height="12" fill="#8a6b3b"/>
+    <rect x="294" y="68" width="12" height="12" fill="#f0e2c5"/>
+    <rect x="306" y="68" width="12" height="12" fill="#c6b291"/>
+    <rect x="318" y="68" width="12" height="12" fill="#8a6b3b"/>
+    <rect x="210" y="80" width="12" height="12" fill="#d4a373"/>
+    <rect x="222" y="80" width="12" height="12" fill="#8a6b3b"/>
+    <rect x="234" y="80" width="12" height="12" fill="#c6b291"/>
+    <rect x="246" y="80" width="12" height="12" fill="#f0e2c5"/>
+    <rect x="258" y="80" width="12" height="12" fill="#d4a373"/>
+    <rect x="270" y="80" width="12" height="12" fill="#8a6b3b"/>
+    <rect x="282" y="80" width="12" height="12" fill="#f0e2c5"/>
+    <rect x="294" y="80" width="12" height="12" fill="#c6b291"/>
+    <rect x="306" y="80" width="12" height="12" fill="#8a6b3b"/>
+    <rect x="318" y="80" width="12" height="12" fill="#d4a373"/>
+    <rect x="210" y="92" width="12" height="12" fill="#8a6b3b"/>
+    <rect x="222" y="92" width="12" height="12" fill="#c6b291"/>
+    <rect x="234" y="92" width="12" height="12" fill="#d4a373"/>
+    <rect x="246" y="92" width="12" height="12" fill="#8a6b3b"/>
+    <rect x="258" y="92" width="12" height="12" fill="#f0e2c5"/>
+    <rect x="270" y="92" width="12" height="12" fill="#c6b291"/>
+    <rect x="282" y="92" width="12" height="12" fill="#8a6b3b"/>
+    <rect x="294" y="92" width="12" height="12" fill="#d4a373"/>
+    <rect x="306" y="92" width="12" height="12" fill="#f0e2c5"/>
+    <rect x="318" y="92" width="12" height="12" fill="#8a6b3b"/>
+  </g>
+  <text x="275" y="140" text-anchor="middle" class="small">x=시간, y=주파수</text>
+  <text x="275" y="155" text-anchor="middle" class="small">색=에너지</text>
+
+  <path class="arrow" d="M350 95 H 380"/>
+  <text x="365" y="85" text-anchor="middle" class="small">멜 필터</text>
+
+  <!-- 3. Mel Spectrogram -->
+  <text x="460" y="55" text-anchor="middle" class="small bold">③ 멜 스펙트로그램</text>
+  <rect x="390" y="65" width="140" height="60" fill="#fff" stroke="#8a6b3b"/>
+  <g>
+    <rect x="395" y="68" width="14" height="18" fill="#d4a373"/>
+    <rect x="409" y="68" width="14" height="18" fill="#8a6b3b"/>
+    <rect x="423" y="68" width="14" height="18" fill="#f0e2c5"/>
+    <rect x="437" y="68" width="14" height="18" fill="#c6b291"/>
+    <rect x="451" y="68" width="14" height="18" fill="#8a6b3b"/>
+    <rect x="465" y="68" width="14" height="18" fill="#d4a373"/>
+    <rect x="479" y="68" width="14" height="18" fill="#f0e2c5"/>
+    <rect x="493" y="68" width="14" height="18" fill="#8a6b3b"/>
+    <rect x="507" y="68" width="14" height="18" fill="#c6b291"/>
+    <rect x="521" y="68" width="14" height="18" fill="#8a6b3b"/>
+    <rect x="395" y="86" width="14" height="18" fill="#c6b291"/>
+    <rect x="409" y="86" width="14" height="18" fill="#f0e2c5"/>
+    <rect x="423" y="86" width="14" height="18" fill="#8a6b3b"/>
+    <rect x="437" y="86" width="14" height="18" fill="#d4a373"/>
+    <rect x="451" y="86" width="14" height="18" fill="#f0e2c5"/>
+    <rect x="465" y="86" width="14" height="18" fill="#8a6b3b"/>
+    <rect x="479" y="86" width="14" height="18" fill="#c6b291"/>
+    <rect x="493" y="86" width="14" height="18" fill="#d4a373"/>
+    <rect x="507" y="86" width="14" height="18" fill="#8a6b3b"/>
+    <rect x="521" y="86" width="14" height="18" fill="#f0e2c5"/>
+    <rect x="395" y="104" width="14" height="18" fill="#8a6b3b"/>
+    <rect x="409" y="104" width="14" height="18" fill="#d4a373"/>
+    <rect x="423" y="104" width="14" height="18" fill="#c6b291"/>
+    <rect x="437" y="104" width="14" height="18" fill="#f0e2c5"/>
+    <rect x="451" y="104" width="14" height="18" fill="#8a6b3b"/>
+    <rect x="465" y="104" width="14" height="18" fill="#d4a373"/>
+    <rect x="479" y="104" width="14" height="18" fill="#c6b291"/>
+    <rect x="493" y="104" width="14" height="18" fill="#8a6b3b"/>
+    <rect x="507" y="104" width="14" height="18" fill="#f0e2c5"/>
+    <rect x="521" y="104" width="14" height="18" fill="#d4a373"/>
+  </g>
+  <text x="460" y="140" text-anchor="middle" class="small">사람 귀 특성에 맞춤</text>
+  <text x="460" y="155" text-anchor="middle" class="small">(저주파에 더 민감)</text>
+
+  <path class="arrow" d="M535 95 H 565"/>
+  <text x="550" y="85" text-anchor="middle" class="small">DCT</text>
+
+  <!-- 4. MFCC -->
+  <text x="645" y="55" text-anchor="middle" class="small bold">④ MFCC</text>
+  <rect x="575" y="65" width="140" height="60" fill="#fff" stroke="#8a6b3b"/>
+  <g font-size="9" font-family="IBM Plex Mono, monospace" fill="#5a4a2a">
+    <text x="580" y="78">[0.3, -1.2, 0.5,</text>
+    <text x="580" y="92"> 0.8, -0.4, 1.1,</text>
+    <text x="580" y="106">-0.7, 0.6, -0.2,</text>
+    <text x="580" y="120"> 1.3, 0.1, ... ]</text>
+  </g>
+  <text x="645" y="140" text-anchor="middle" class="small">13~40차원 계수</text>
+  <text x="645" y="155" text-anchor="middle" class="small">전통 ASR의 입력</text>
+
+  <text x="380" y="190" text-anchor="middle" class="small acc">현대(Wav2Vec·Whisper)는 ①에서 바로 또는 ③까지만 쓰고, ④는 거의 안 씀</text>
+  <text x="380" y="210" text-anchor="middle" class="small">10ms씩 밀면서 → 1초 음성 = 100 프레임 × 특징벡터</text>
+</svg>
+<figcaption>그림 40-1 음성 특징 추출. 전통적 ASR은 MFCC까지 가공했지만, 2020년 이후 모델들은 멜 스펙트로그램 또는 raw 파형을 직접 쓴다.</figcaption>
+</figure>
+
+<h3 id="s40-1-2">전통 ASR — HMM-GMM 시대 (1980~2010)</h3>
+
+<p>딥러닝 이전의 20년간 ASR의 표준은 <b>HMM-GMM</b>이었습니다.</p>
+<ul>
+<li><b>HMM(Hidden Markov Model)</b>: 음소(phoneme)의 시간 변화를 상태 전이로 모델링. "ㅅㅏㅁㅅㅓㅇㅈㅓㄴㅈㅏ" 같은 음소 시퀀스가 숨은 상태.</li>
+<li><b>GMM(Gaussian Mixture Model)</b>: 각 상태에서 MFCC 벡터가 나올 확률을 가우시안 혼합으로 모델링.</li>
+<li><b>음향모델 + 발음사전 + 언어모델</b>의 세 축으로 작동. 셋을 WFST(Weighted Finite State Transducer)로 결합.</li>
+</ul>
+
+<p>장점은 수학적으로 깔끔하고 적은 데이터로도 동작한다는 것, 단점은 음소 단위 라벨링이 필수고 성능 상한이 명확했다는 것입니다. 2012년 Hinton의 DNN-HMM이 GMM을 DNN으로 바꾸면서 WER이 급락했지만, 여전히 HMM의 틀은 유지했습니다.</p>
+
+<h3 id="s40-1-3">End-to-End 혁명 — CTC와 RNN-T</h3>
+
+<p>2014년 Alex Graves의 <b>CTC(Connectionist Temporal Classification)</b>는 음성 인식의 틀을 완전히 바꿨습니다. "음성 프레임(100개)과 글자(10개)의 길이가 다르다"는 문제를 "빈 토큰(blank)을 넣어 정렬 자체도 학습"으로 풀었습니다. Baidu의 Deep Speech(2014), DeepSpeech 2(2015)가 이 접근으로 전통 시스템을 능가했습니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 760 260" width="760" role="img" aria-label="End-to-End ASR 세 가지 패러다임: CTC, RNN-T, Attention">
+  <text x="380" y="22" text-anchor="middle" class="bold">End-to-End ASR의 세 패러다임</text>
+
+  <!-- CTC -->
+  <rect class="box" x="20" y="45" width="230" height="200" rx="10"/>
+  <text x="135" y="68" text-anchor="middle" class="bold">① CTC (Deep Speech)</text>
+  <text x="135" y="88" text-anchor="middle" class="small">인코더만 사용</text>
+  <rect class="hl" x="40" y="110" width="190" height="30" rx="5"/>
+  <text x="135" y="130" text-anchor="middle" class="small bold">음성 → RNN/Transformer</text>
+  <text x="135" y="160" text-anchor="middle" class="small mono">s _ s a _ m _ s u _ ng</text>
+  <text x="135" y="178" text-anchor="middle" class="small">(blank "_"으로 정렬)</text>
+  <text x="135" y="205" text-anchor="middle" class="small">장: 간단·빠름</text>
+  <text x="135" y="222" text-anchor="middle" class="small">단: 출력 조건부 독립 가정</text>
+  <text x="135" y="239" text-anchor="middle" class="small acc">Deep Speech 2 (2015)</text>
+
+  <!-- RNN-T -->
+  <rect class="box" x="265" y="45" width="230" height="200" rx="10"/>
+  <text x="380" y="68" text-anchor="middle" class="bold">② RNN-T (Transducer)</text>
+  <text x="380" y="88" text-anchor="middle" class="small">인코더 + 예측기 + 결합기</text>
+  <rect class="hl" x="285" y="110" width="90" height="30" rx="5"/>
+  <text x="330" y="130" text-anchor="middle" class="small">인코더</text>
+  <rect class="hl" x="385" y="110" width="90" height="30" rx="5"/>
+  <text x="430" y="130" text-anchor="middle" class="small">예측기(LM)</text>
+  <rect class="hl2" x="315" y="150" width="130" height="30" rx="5"/>
+  <text x="380" y="170" text-anchor="middle" class="small bold">결합기 → 다음 토큰</text>
+  <text x="380" y="200" text-anchor="middle" class="small">장: 스트리밍 가능 ★</text>
+  <text x="380" y="217" text-anchor="middle" class="small">단: 학습 복잡·메모리↑</text>
+  <text x="380" y="239" text-anchor="middle" class="small acc">Google Assistant, Siri</text>
+
+  <!-- Attention -->
+  <rect class="box" x="510" y="45" width="230" height="200" rx="10"/>
+  <text x="625" y="68" text-anchor="middle" class="bold">③ Attention (LAS/Whisper)</text>
+  <text x="625" y="88" text-anchor="middle" class="small">인코더-디코더 + 어텐션</text>
+  <rect class="hl" x="530" y="110" width="90" height="30" rx="5"/>
+  <text x="575" y="130" text-anchor="middle" class="small">인코더</text>
+  <rect class="hl2" x="630" y="110" width="90" height="30" rx="5"/>
+  <text x="675" y="130" text-anchor="middle" class="small bold">디코더</text>
+  <path class="arrow" d="M620 125 H 630"/>
+  <text x="625" y="160" text-anchor="middle" class="small">↑ Cross-Attention</text>
+  <text x="625" y="200" text-anchor="middle" class="small">장: 성능 ★★★</text>
+  <text x="625" y="217" text-anchor="middle" class="small">단: 스트리밍 어려움·지연</text>
+  <text x="625" y="239" text-anchor="middle" class="small acc">LAS, Whisper (OpenAI)</text>
+</svg>
+<figcaption>그림 40-2 세 가지 E2E ASR 패러다임. 실시간 음성 비서는 RNN-T, 배치/다국어 전사는 Attention(Whisper)이 사실상 표준.</figcaption>
+</figure>
+
+<h2 id="s40-2"><span class="num">40-2</span>Wav2Vec·Whisper·TTS와 음성 LLM</h2>
+
+<h3 id="s40-2-1">Wav2Vec 2.0 — 자기지도학습이 음성에 오다</h3>
+
+<p>2020년 Meta의 Wav2Vec 2.0은 "라벨 없는 음성 수만 시간으로 사전학습 → 적은 라벨로 파인튜닝"을 가능케 했습니다. BERT가 텍스트에서 한 일을 음성에서 한 셈입니다. HuBERT, WavLM도 같은 흐름.</p>
+<ul>
+<li>마스킹: 음성의 일부 구간을 마스킹하고 그 구간의 "양자화된 코드"를 맞추도록 학습</li>
+<li>효과: 라벨 10시간만 있어도 1,000시간으로 학습한 전통 모델에 필적</li>
+<li>저자원 언어(한국어 지역 방언 등)에서 특히 가치</li>
+</ul>
+
+<h3 id="s40-2-2">Whisper — 다국어·robust ASR의 사실상 표준</h3>
+
+<p>2022년 OpenAI가 공개한 <b>Whisper</b>는 "웹에서 긁은 680,000시간 다국어 음성 + 전사 쌍"으로 지도학습한 Transformer encoder-decoder입니다. 공개 당시 "거의 모든 벤치마크에서 SOTA에 근접하면서 노이즈·억양에 강함"으로 충격을 줬습니다.</p>
+
+<div class="tbl"><table>
+<thead><tr><th>버전</th><th>크기</th><th>특징</th></tr></thead>
+<tbody>
+<tr><td>tiny / base</td><td>39M / 74M</td><td>CPU·엣지 실시간</td></tr>
+<tr><td>small / medium</td><td>244M / 769M</td><td>로컬 데스크톱 실용</td></tr>
+<tr><td>large-v3</td><td>1.55B</td><td>최고 정확도, GPU 권장</td></tr>
+<tr><td><b>Distil-Whisper</b></td><td>~400M</td><td>large 대비 6배 빠름, 영어 특화</td></tr>
+<tr><td><b>Whisper large-v3-turbo</b></td><td>809M</td><td>large-v3와 유사 정확도, 8배 빠름 (2024)</td></tr>
+</tbody></table></div>
+
+<figure class="code"><figcaption>Whisper 로컬 사용 — 10줄로 다국어 전사</figcaption>
+<pre><code class="language-python"># pip install faster-whisper
+from faster_whisper import WhisperModel
+
+model = WhisperModel("large-v3-turbo", device="cuda", compute_type="float16")
+
+segments, info = model.transcribe(
+    "earnings_call_q3.wav",
+    language="ko",             # 또는 자동 감지(None)
+    vad_filter=True,           # 침묵 구간 제거 (처리 속도↑)
+    word_timestamps=True,      # 단어별 타임스탬프
+)
+
+print(f"언어: {info.language}, 길이: {info.duration:.1f}s")
+for seg in segments:
+    print(f"[{seg.start:6.2f} → {seg.end:6.2f}] {seg.text}")
+</code></pre></figure>
+
+<div class="box tip"><p class="box-title" data-tag="실무 포인트">Whisper의 한계</p>
+<ul>
+<li><b>환각(hallucination)</b>: 침묵·배경음악 구간에서 없는 문장을 지어낼 때가 있다. VAD 전처리로 상당 부분 완화.</li>
+<li><b>화자 구분 안 됨</b>: Diarization은 Whisper 밖에서(WhisperX, pyannote 등)</li>
+<li><b>스트리밍 아님</b>: 기본은 배치. 실시간은 RNN-T 계열(Google USM, NVIDIA Parakeet)이 유리</li>
+<li><b>긴 문맥의 수치 오류</b>: 금액·날짜의 숫자가 간혹 틀림 → LLM 후처리로 교정</li>
+</ul>
+</div>
+
+<h3 id="s40-2-3">TTS 변천사 — WaveNet에서 ElevenLabs까지</h3>
+
+<p>TTS(Text-to-Speech)는 로봇 같은 소리에서 사람 구별 어려운 수준까지 10년 안에 왔습니다.</p>
+
+<div class="tbl"><table>
+<thead><tr><th>세대</th><th>모델</th><th>년도</th><th>핵심</th></tr></thead>
+<tbody>
+<tr><td>전통</td><td>Concatenative / HMM</td><td>~2015</td><td>녹음 조각 이어 붙이기 / 통계 파라미터</td></tr>
+<tr><td>딥러닝 1세대</td><td><b>WaveNet</b> (DeepMind)</td><td>2016</td><td>Dilated CNN으로 raw 파형 생성, 품질 혁명</td></tr>
+<tr><td>Seq2Seq TTS</td><td>Tacotron 2 + WaveNet/HiFi-GAN</td><td>2017~</td><td>텍스트 → 멜스펙 → 보코더로 파형</td></tr>
+<tr><td>병렬 TTS</td><td>FastSpeech 2</td><td>2020</td><td>Non-autoregressive, 100배 빠름</td></tr>
+<tr><td>End-to-End</td><td><b>VITS</b></td><td>2021</td><td>텍스트→파형 한 번에, 오픈소스 TTS 표준</td></tr>
+<tr><td>Diffusion</td><td>NaturalSpeech 2/3</td><td>2023</td><td>Diffusion 기반, 자연스러움 극대화</td></tr>
+<tr><td>Zero-shot 복제</td><td><b>VALL-E</b> (MS), <b>ElevenLabs</b></td><td>2023~</td><td>3초 샘플로 목소리 복제. ⚠️ 사기 리스크</td></tr>
+<tr><td>LLM-TTS</td><td>OpenAI TTS, GPT-4o Voice</td><td>2024~</td><td>감정·언어 자동 전환</td></tr>
+</tbody></table></div>
+
+<h3 id="s40-2-4">음성 LLM — Pipeline에서 네이티브 Omni로</h3>
+
+<p>2024년 전까지 "음성 대화 AI"는 세 단계 파이프라인이었습니다: <b>ASR → LLM → TTS</b>. 각 단계가 수백 ms 걸려 전체 지연이 1.5~3초, 자연스러운 대화가 어려웠습니다. 2024년 5월 OpenAI의 GPT-4o가 이걸 뒤집었습니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 760 260" width="760" role="img" aria-label="음성 대화 AI: 전통 파이프라인 vs 네이티브 omni 모델">
+  <text x="380" y="22" text-anchor="middle" class="bold">음성 대화 AI의 두 접근 — Pipeline vs Omni</text>
+
+  <!-- Pipeline -->
+  <text x="30" y="55" class="small bold">① 전통 파이프라인 (3단계 · 지연 1.5~3s)</text>
+  <rect class="hl" x="20" y="70" width="90" height="40" rx="5"/>
+  <text x="65" y="88" text-anchor="middle" class="small bold">음성 입력</text>
+  <text x="65" y="103" text-anchor="middle" class="small">사용자 발화</text>
+  <path class="arrow" d="M110 90 H 140"/>
+  <rect class="hl2" x="140" y="70" width="90" height="40" rx="5"/>
+  <text x="185" y="88" text-anchor="middle" class="small bold">ASR</text>
+  <text x="185" y="103" text-anchor="middle" class="small">(Whisper)</text>
+  <path class="arrow" d="M230 90 H 260"/>
+  <rect class="hl2" x="260" y="70" width="90" height="40" rx="5"/>
+  <text x="305" y="88" text-anchor="middle" class="small bold">LLM</text>
+  <text x="305" y="103" text-anchor="middle" class="small">(텍스트→텍스트)</text>
+  <path class="arrow" d="M350 90 H 380"/>
+  <rect class="hl2" x="380" y="70" width="90" height="40" rx="5"/>
+  <text x="425" y="88" text-anchor="middle" class="small bold">TTS</text>
+  <text x="425" y="103" text-anchor="middle" class="small">(ElevenLabs)</text>
+  <path class="arrow" d="M470 90 H 500"/>
+  <rect class="hl" x="500" y="70" width="90" height="40" rx="5"/>
+  <text x="545" y="88" text-anchor="middle" class="small bold">음성 출력</text>
+  <text x="545" y="103" text-anchor="middle" class="small">합성음</text>
+
+  <text x="305" y="135" text-anchor="middle" class="small">문제: 억양·웃음·끼어들기 소실, 지연 길어 자연 대화 불가</text>
+
+  <!-- Omni -->
+  <text x="30" y="170" class="small bold">② 네이티브 Omni (단일 모델 · 지연 ~232ms, 사람 평균 수준)</text>
+  <rect class="hl" x="20" y="185" width="90" height="40" rx="5"/>
+  <text x="65" y="203" text-anchor="middle" class="small bold">음성 입력</text>
+  <text x="65" y="218" text-anchor="middle" class="small">(토큰화)</text>
+  <path class="arrow" d="M110 205 H 300"/>
+  <rect class="hl2" x="300" y="185" width="200" height="40" rx="5"/>
+  <text x="400" y="203" text-anchor="middle" class="small bold">네이티브 멀티모달 LLM</text>
+  <text x="400" y="218" text-anchor="middle" class="small">(음성·텍스트·이미지 공유 토큰 공간)</text>
+  <path class="arrow" d="M500 205 H 650"/>
+  <rect class="hl" x="650" y="185" width="90" height="40" rx="5"/>
+  <text x="695" y="203" text-anchor="middle" class="small bold">음성 출력</text>
+  <text x="695" y="218" text-anchor="middle" class="small">(공유 디코더)</text>
+
+  <text x="380" y="250" text-anchor="middle" class="small acc">GPT-4o, Gemini Live, Moshi(Kyutai) — 끼어들기·웃음·감정까지 자연스럽게 처리</text>
+</svg>
+<figcaption>그림 40-3 음성 대화의 두 접근. Omni는 음성 자체를 LLM 토큰으로 다뤄 지연·억양·감정 손실 없이 처리한다.</figcaption>
+</figure>
+
+<p><b>주요 음성 LLM</b>:</p>
+<ul>
+<li><b>GPT-4o Realtime (2024)</b>: 232ms 평균 지연, 끼어들기 지원, 50+ 언어, 감정·웃음·속삭임까지 처리</li>
+<li><b>Gemini Live (2024)</b>: Google, 영상+음성 동시, 스크린 공유도 가능</li>
+<li><b>Claude Voice (2024)</b>: Anthropic, 모바일 앱 중심</li>
+<li><b>Moshi (Kyutai, 2024)</b>: 7B 오픈소스 음성 모델, 로컬에서 실시간 대화</li>
+<li><b>Qwen2-Audio</b>: 알리바바, 오픈웨이트</li>
+</ul>
+
+<h2 id="s40-3"><span class="num">40-3</span>금융/OMS 활용: 콜녹취·회의록·실적콜·성문인증</h2>
+
+<div class="box fin"><p class="box-title" data-tag="퀀트 실무">금융권 음성 AI 활용 지도</p>
+<div class="tbl"><table>
+<thead><tr><th>영역</th><th>태스크</th><th>쓰는 기술</th><th>가치</th></tr></thead>
+<tbody>
+<tr><td><b>실적 발표 콜 분석</b></td><td>Earnings call 전사·화자 분리·톤 분석</td><td>Whisper + pyannote + LLM</td><td>CFO 어투 변화 → 가이던스 신호 (알파)</td></tr>
+<tr><td><b>콜센터 녹취</b></td><td>민원·불만 분류, 상담사 평가, 금융사고 조기 감지</td><td>Whisper + LLM 감성/분류</td><td>CS 품질관리, 민원 자동 집계</td></tr>
+<tr><td><b>리서치 미팅 회의록</b></td><td>IR·탐방 회의 녹음 → 요약 → 투자 포인트 추출</td><td>Whisper + LLM RAG</td><td>리서치 생산성 2~5배</td></tr>
+<tr><td><b>트레이딩 플로어</b></td><td>음성 명령 녹음 분석 (규제 대응), 거래 분쟁 추적</td><td>Whisper + 키워드 검색</td><td>MiFID II·자본시장법 준수</td></tr>
+<tr><td><b>성문인증 (voiceprint)</b></td><td>텔레뱅킹·음성 로그인 본인 확인</td><td>ECAPA-TDNN, Resemblyzer</td><td>본인확인 수단 다변화</td></tr>
+<tr><td><b>Deepfake Voice 방어</b></td><td>합성 음성 탐지(ASVspoof)</td><td>AASIST, RawNet3</td><td>보이스피싱·사기 방지</td></tr>
+<tr><td><b>OMS 음성 알림</b></td><td>장애·이상거래 발생 시 담당자 음성 호출 + 요약</td><td>TTS + LLM 요약</td><td>야간 당직 효율화</td></tr>
+<tr><td><b>접근성</b></td><td>시각장애 운영자용 로그·대시보드 음성 리더</td><td>LLM + TTS</td><td>포용성·법적 요건</td></tr>
+</tbody></table></div>
+</div>
+
+<figure class="code"><figcaption>실적 발표 콜 분석 파이프라인 — Whisper + LLM</figcaption>
+<pre><code class="language-python">from faster_whisper import WhisperModel
+from pyannote.audio import Pipeline
+import anthropic
+
+whisper = WhisperModel("large-v3-turbo", device="cuda")
+diar    = Pipeline.from_pretrained("pyannote/speaker-diarization-3.1")
+
+def analyze_earnings_call(wav_path, company):
+    # 1) 전사 + 단어 타임스탬프
+    segments, _ = whisper.transcribe(wav_path, language="en", word_timestamps=True)
+    words = [(w.word, w.start, w.end) for s in segments for w in s.words]
+
+    # 2) 화자 분리
+    diarization = diar(wav_path)
+    # (각 단어에 화자 라벨 매핑 로직 생략)
+
+    # 3) CFO/CEO 발화만 추출
+    transcript = assign_speakers(words, diarization)
+    cfo_turns = [t for t in transcript if t.role == "CFO"]
+
+    # 4) LLM으로 톤·가이던스 분석
+    prompt = f"""아래는 {company} 분기 실적 콜의 CFO 발언이다.
+다음을 JSON으로 추출하라.
+- hedging_count: 불확실 어투("could", "may", "challenging") 횟수
+- guidance: upgrade | maintain | downgrade | unclear
+- key_concerns: 리스트 (3개 이내)
+- confidence: 0~1
+
+CFO 발언:
+{format_turns(cfo_turns)}
+"""
+    client = anthropic.Anthropic()
+    resp = client.messages.create(
+        model="claude-opus-4-7", max_tokens=600,
+        messages=[{"role": "user", "content": prompt}])
+    return resp.content[0].text
+</code></pre></figure>
+
+<figure class="code"><figcaption>OMS 야간 알림 TTS — 담당자에게 음성으로 요약 전달</figcaption>
+<pre><code class="language-python">from openai import OpenAI
+import twilio.rest
+
+ai = OpenAI()
+twilio_cli = twilio.rest.Client(SID, TOKEN)
+
+def wake_oncall(incident_summary, phone):
+    # LLM이 2문장 요약 생성 (너무 길면 전화 수신자가 피곤)
+    brief = ai.chat.completions.create(
+        model="gpt-5", messages=[
+            {"role":"system","content":"OMS 당직 알림 2문장. 핵심 수치·조치부터."},
+            {"role":"user","content":incident_summary}]
+    ).choices[0].message.content
+
+    # TTS로 음성 생성
+    audio = ai.audio.speech.create(model="tts-1-hd", voice="nova", input=brief)
+    audio.stream_to_file("alert.mp3")
+
+    # Twilio 전화 발신 (사내 PBX도 가능)
+    twilio_cli.calls.create(url="https://.../alert.mp3", to=phone, from_=OMS_NUM)
+    audit.log("voice_alert", phone, brief_hash=hash(brief))
+</code></pre></figure>
+
+<div class="box warn"><p class="box-title" data-tag="주의">금융권 음성 AI 체크리스트</p>
+<ul>
+<li><b>통화 녹취 법규</b>: 자본시장법·전자금융감독규정상 트레이딩 콜은 보관 의무가 있지만, 전사·분석은 별도 동의 범위 확인 필요. 개인정보보호법에 따라 민감정보 마스킹 필수.</li>
+<li><b>Deepfake Voice 사기 급증</b>: 2024년부터 "임원 음성 복제 송금 지시" 사기 사례. 음성만으로는 지시 실행 절대 금지, 2중 채널(IM·공식 시스템) 검증 의무.</li>
+<li><b>성문인증은 보조 수단</b>: 단독 인증 금지, 비밀번호·OTP와 조합(2FA).</li>
+<li><b>Whisper 환각</b>: 침묵·배경음악 구간에서 거짓 문장 생성 가능. 금융 수치가 포함된 전사는 반드시 사람 검토 또는 LLM 교차 검증.</li>
+<li><b>저작권·초상권</b>: 복제 음성 생성(VALL-E, ElevenLabs)은 본인 동의 없이 사용 금지.</li>
+<li><b>데이터 유출</b>: 녹취는 공개 API에 올리지 말고 사내 Whisper 서버 운영. 다수의 금융사가 사내 GPU 서버에 self-hosted Whisper를 선호.</li>
+</ul>
+</div>
+
+<div class="ex"><p class="ex-title">예제 40-1 — 콜녹취 분석 설계 <span class="lv">난이도 ★★☆</span></p>
+<p>지점 콜센터 하루 10,000건의 통화 녹음에서 "민원·불만 가능성이 높은 통화만 사람 검토용으로 선별"하는 파이프라인을 설계하세요. GPU 자원은 제한적입니다.</p>
+<details><summary>정답과 해설 보기</summary>
+<ol>
+<li><b>프리필터 (CPU)</b>: 녹음 길이 >1분, 특정 키워드(음성 활성 감지만으로는 부족), 또는 음성 중 "강한 톤 변화" 구간이 있는 통화만 다음 단계로. 10,000건 → 3,000건.</li>
+<li><b>Whisper tiny/base로 1차 전사</b>: CPU에서도 실시간보다 빠름. 전체 전사 아니라 처음·마지막 2분 샘플링.</li>
+<li><b>LLM 소형 모델로 1차 분류</b>: Llama 3.2 3B / Qwen2.5 7B 로컬 → "민원 가능성 0~1". 상위 500건으로 압축.</li>
+<li><b>Whisper large-v3-turbo + 화자 분리로 완전 전사</b>: 500건만. GPU 1장이면 몇 시간.</li>
+<li><b>프런티어 LLM으로 상세 분석</b>: Claude Opus 또는 GPT-5로 "쟁점·조치안·에스컬레이션 여부" 보고서. 사람 상담관리자가 최종 검토.</li>
+</ol>
+<p>핵심: "큰 모델을 전부에 돌리지 말고" 작은 모델로 10,000 → 500으로 거르고, 큰 모델은 그 500건에만. 비용 20배 절감 + 전체 지연 2시간 이내.</p>
+</details></div>
+
+<h2 id="s40-key">핵심 정리</h2>
+<ul class="summary-list">
+<li>음성은 보통 멜 스펙트로그램(100 fps × 80 bin)으로 바꿔 모델에 입력. MFCC는 전통 시대의 유산.</li>
+<li>HMM-GMM 시대(1980~2010) → DNN-HMM(2012) → End-to-End(CTC·RNN-T·Attention).</li>
+<li>CTC는 간단·빠름(Deep Speech), RNN-T는 스트리밍 가능(Siri·Google), Attention은 고품질 배치(Whisper).</li>
+<li>Wav2Vec 2.0·HuBERT가 "라벨 없는 수만 시간" 사전학습을 가능케 함. 저자원 언어의 구원자.</li>
+<li>Whisper(2022)는 다국어·robust ASR의 사실상 표준. large-v3-turbo로 속도까지 확보(2024).</li>
+<li>Whisper 한계: 침묵 환각, 화자 분리 안 됨, 스트리밍 X. VAD·pyannote·LLM 후처리로 보완.</li>
+<li>TTS: WaveNet(2016) → Tacotron 2 → FastSpeech → VITS → Diffusion TTS → ElevenLabs·GPT-4o Voice.</li>
+<li>음성 대화: 전통 pipeline(ASR→LLM→TTS, 지연 1.5~3s) → <b>네이티브 omni</b>(GPT-4o 232ms, Gemini Live).</li>
+<li>금융/OMS: 실적콜 분석, 콜센터 녹취, 리서치 회의록, 성문인증, OMS 야간 음성 알림.</li>
+<li>체크리스트: 녹취 법규·Deepfake Voice 방어·성문인증은 2FA 보조·Whisper 환각 교차검증·사내 self-hosted 선호.</li>
+</ul>
+
+<h2 id="s40-cs">면접 질문</h2>
+<div class="box iv"><p class="box-title" data-tag="면접">자주 나오는 질문</p>
+<details><summary>Q1. CTC·RNN-T·Attention의 차이를 설명해 주세요.</summary><p>셋 다 end-to-end ASR입니다. (1) <b>CTC</b>는 인코더만으로 프레임별 토큰 확률을 뽑고 blank 토큰으로 정렬을 학습. 간단·빠르지만 출력 간 조건부 독립 가정이 있어 언어모델 결합이 필요. Deep Speech 2가 대표. (2) <b>RNN-T</b>는 인코더 + 예측기(언어 모델) + 결합기 구조로 출력 간 의존성을 모델링하면서도 스트리밍이 가능. Siri·Google Assistant가 쓴다. (3) <b>Attention(인코더-디코더)</b>는 번역처럼 전체 음성을 보고 디코더가 토큰을 생성. 성능이 가장 좋지만 전체를 들어야 해 스트리밍이 어려움. Whisper가 대표.</p></details>
+<details><summary>Q2. Whisper는 왜 그렇게 로버스트한가요?</summary><p>세 가지 때문입니다. (1) <b>데이터 다양성</b>: 68만 시간의 다국어·다환경 데이터로 학습 → 노이즈·억양·전문용어에 강함. (2) <b>Multitask 학습</b>: 전사·번역·언어감지·타임스탬프를 한 모델이 토큰 포맷(prompt)으로 지시받아 수행 → 다용도. (3) <b>Transformer 인코더-디코더</b>: 어텐션으로 긴 문맥을 참고해 숫자·고유명사 복원. 한계는 침묵 구간 환각과 스트리밍 불가.</p></details>
+<details><summary>Q3. 전통 pipeline(ASR→LLM→TTS)과 GPT-4o 같은 네이티브 음성 LLM의 차이는?</summary><p>Pipeline은 세 모델이 분리되어 (1) 지연이 1.5~3초로 자연 대화 어려움, (2) 억양·웃음·강조·끼어들기가 ASR 단계에서 소실, (3) 각 단계 환각·오류가 누적됩니다. 네이티브 omni(GPT-4o, Gemini Live)는 음성 자체를 토큰화해 LLM이 음성 입출력을 직접 처리 → 232ms 지연, 억양·감정 유지, 끼어들기 자연스러움. 단점은 (a) 아직 외부 공개가 제한적, (b) 데이터·규제 측면 통제가 pipeline보다 어려움. 민감 분야에선 pipeline이 여전히 유리.</p></details>
+<details><summary>Q4. 금융권에서 Whisper 쓸 때 가장 조심할 점은?</summary><p>(1) <b>녹취 법적 처리</b>: 통화 녹취는 보관 의무가 있지만 전사·분석은 범위 확인·동의 필요. (2) <b>민감정보 마스킹</b>: 전사 결과에서 계좌번호·주민번호 자동 마스킹. (3) <b>침묵 환각</b>: Whisper가 침묵에서 "감사합니다" 같은 거짓 문장을 지어낼 수 있음 → VAD·word timestamps로 필터링. (4) <b>숫자 오류</b>: 금액·날짜의 자릿수 실수 → LLM 교차검증 또는 사람 검토. (5) <b>사내 self-hosted</b>: 민감 녹취를 공개 API에 보내지 말 것. (6) <b>Deepfake 방어</b>: 음성만으로 지시 실행 절대 금지, 2중 채널 검증 의무.</p></details>
+<details><summary>Q5. OMS 운영자가 음성 AI로 할 수 있는 가장 가치 있는 일은?</summary><p>세 가지입니다. (1) <b>야간 당직 음성 알림</b>: LLM이 요약한 장애 정보를 TTS로 담당자에게 전화 발신 → "뭐가 터졌고 무슨 조치가 필요한지" 2문장으로. 바로 깨어도 상황 파악. (2) <b>실적 발표 콜 자동 전사·요약</b>: 영문 콜 녹음 → Whisper → LLM 요약 → OMS 알림. 리서치팀과 공유. (3) <b>민원·분쟁 녹취 1차 분류</b>: 거래 분쟁 통화에서 쟁점·시각·금액을 자동 추출해 분쟁처리팀에 전달. 모두 "사람 결정 전 1차 가공". 자동 집행 금지는 LLM/비전과 동일.</p></details>
+</div>
+
+</main>
+</div></div>
+<script src="assets/app.js"></script>
+</body>
+</html>
