@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ch38 Transformer·LLM과 금융/OMS 활용 · C언어 금융 IT 마스터</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+KR:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-ch="ch38">
+<header class="topbar">
+  <button class="menu-btn" type="button" aria-expanded="false" aria-controls="sidebar">목차</button>
+  <a class="brand" href="index.html"><b>C</b>금융 IT 마스터</a>
+  <span class="where"></span>
+  <span class="progress"></span>
+</header>
+<div class="layout">
+<nav id="sidebar" class="sidebar" aria-label="과정 목차"></nav>
+<div class="page">
+<main class="content">
+
+<header class="ch-head">
+  <p class="eyebrow">PART 3 · 머신러닝 &amp; LLM 트랙 · CHAPTER</p>
+  <div class="bignum">38</div>
+  <h1>Transformer·LLM과 금융/OMS 활용</h1>
+  <p class="lede">2017년 "Attention Is All You Need" 논문 이후, 자연어 처리는 완전히 다른 세상이 되었습니다. GPT, Claude, Gemini 같은 LLM이 코딩·요약·대화를 사람 수준으로 처리하는 지금, 금융권도 LLM을 뉴스 감성 분석·공시 요약·고객 상담·심지어 OMS 로그 분석에까지 쓰기 시작했습니다. 이 장은 Attention과 Transformer의 핵심 아이디어, 사전학습-파인튜닝-RAG의 흐름, 프롬프트 엔지니어링, 그리고 하나증권 퀀트실·OMS 운영에서 지금 당장 쓸 수 있는 활용 패턴을 다룹니다.</p>
+  <div class="goals"><p class="goals-title">이 장에서 배울 것</p><ul>
+    <li>Self-Attention의 "Query·Key·Value" 직관</li>
+    <li>Transformer 블록의 구조와 왜 RNN을 대체했는가</li>
+    <li>GPT(디코더)와 BERT(인코더), 그리고 둘의 쓰임새 차이</li>
+    <li>사전학습(pre-training), 파인튜닝(fine-tuning), 인-컨텍스트 학습</li>
+    <li>프롬프트 엔지니어링과 Chain-of-Thought</li>
+    <li>RAG(검색증강생성)의 구조와 금융권 적용</li>
+    <li>LLM의 환각(hallucination)과 금융에서의 리스크</li>
+    <li>퀀트/OMS에서의 실무 활용: 뉴스 감성, 공시 요약, 로그 요약, 코드 리뷰</li>
+  </ul></div>
+</header>
+
+<h2 id="s38-1"><span class="num">38-1</span>어텐션·Transformer·LLM 기초</h2>
+
+<h3 id="s38-1-1">Self-Attention — "모든 단어가 모든 단어를 본다"</h3>
+
+<p>RNN은 시퀀스를 왼쪽부터 하나씩 처리하며 과거를 "기억"해 미래로 전달했습니다. 긴 문장에서는 멀리 떨어진 단어 사이 관계가 희석됐죠. Transformer의 Self-Attention은 "<b>모든 위치의 단어가 다른 모든 위치의 단어와 직접 비교</b>"하도록 바꿉니다.</p>
+
+<p>각 단어는 세 가지 벡터로 표현됩니다.</p>
+<ul>
+<li><b>Query (Q)</b>: "내가 무엇을 찾고 있는가"</li>
+<li><b>Key (K)</b>: "나는 어떤 정보를 담고 있는가"</li>
+<li><b>Value (V)</b>: "실제로 가져갈 정보"</li>
+</ul>
+
+<p style="text-align:center; font-family: var(--f-mono); font-size: .95em;">Attention(Q, K, V) = softmax(QKᵀ / √d) · V</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 240" width="700" role="img" aria-label="Self-Attention: 모든 토큰이 모든 토큰을 가중 참조">
+  <text x="350" y="22" text-anchor="middle" class="bold">Self-Attention — "이 토큰이 다른 토큰을 얼마나 참조하는가"</text>
+  <g transform="translate(60,50)">
+    <rect class="hl" x="0"   y="0" width="90" height="36" rx="4"/><text x="45"  y="23" text-anchor="middle" class="small bold">삼성전자</text>
+    <rect class="hl" x="100" y="0" width="80" height="36" rx="4"/><text x="140" y="23" text-anchor="middle" class="small bold">주가가</text>
+    <rect class="hl" x="190" y="0" width="80" height="36" rx="4"/><text x="230" y="23" text-anchor="middle" class="small bold">실적에</text>
+    <rect class="hl" x="280" y="0" width="100" height="36" rx="4"/><text x="330" y="23" text-anchor="middle" class="small bold">반응했다</text>
+  </g>
+  <path class="arrow" d="M105 110 Q 70 165, 105 160"/>
+  <text x="60" y="150" class="small">Q₁</text>
+  <path class="arrow" d="M105 110 C 150 150, 200 150, 200 115"/>
+  <path class="arrow" d="M105 110 C 180 180, 290 180, 290 115"/>
+  <path class="arrow" d="M105 110 C 220 220, 390 210, 390 115"/>
+  <text x="60" y="180" class="small">"삼성전자"의 Query가 다른 모든 토큰의 Key와 유사도 측정 → softmax → Value 가중합</text>
+  <g transform="translate(430,70)">
+    <rect class="hl2" x="0" y="0"  width="130" height="20" rx="2"/>
+    <text x="135" y="15" class="small mono">0.55 "삼성전자"</text>
+    <rect class="hl2" x="0" y="25" width="90"  height="20" rx="2"/>
+    <text x="135" y="40" class="small mono">0.20 "주가가"</text>
+    <rect class="hl2" x="0" y="50" width="60"  height="20" rx="2"/>
+    <text x="135" y="65" class="small mono">0.08 "실적에"</text>
+    <rect class="hl2" x="0" y="75" width="120" height="20" rx="2"/>
+    <text x="135" y="90" class="small mono">0.17 "반응했다"</text>
+    <text x="80" y="115" text-anchor="middle" class="small bold">어텐션 가중치</text>
+  </g>
+</svg>
+<figcaption>그림 38-1 Self-Attention. 각 토큰의 Query가 모든 Key와 내적 → softmax → Value 가중합.</figcaption>
+</figure>
+
+<p>이 구조의 장점:</p>
+<ul>
+<li><b>병렬 처리 가능</b>: RNN처럼 순차 처리 안 해도 됨 → GPU에서 압도적으로 빠름.</li>
+<li><b>장거리 의존성</b>: 100번째 토큰이 1번째 토큰을 직접 "볼" 수 있음.</li>
+<li><b>해석 가능</b>: 어텐션 가중치로 "이 단어가 어떤 단어를 주목했는지" 시각화.</li>
+</ul>
+
+<h3 id="s38-1-2">Transformer 블록</h3>
+
+<p>Transformer는 Self-Attention + FFN(Feed-Forward Network) + 잔차연결 + Layer Normalization의 블록을 여러 층 쌓습니다. GPT-3는 96층, GPT-4는 추정 100+층입니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 300" width="700" role="img" aria-label="Transformer 블록 구조">
+  <rect class="box" x="200" y="30" width="300" height="240" rx="10"/>
+  <text x="350" y="25" text-anchor="middle" class="bold">Transformer 블록 × N층</text>
+  <rect class="hl2" x="230" y="50" width="240" height="34" rx="5"/>
+  <text x="350" y="72" text-anchor="middle" class="small bold">Multi-Head Self-Attention</text>
+  <rect class="hl"  x="230" y="100" width="240" height="24" rx="5"/>
+  <text x="350" y="117" text-anchor="middle" class="small">Add &amp; LayerNorm</text>
+  <rect class="hl2" x="230" y="140" width="240" height="34" rx="5"/>
+  <text x="350" y="162" text-anchor="middle" class="small bold">Feed-Forward (MLP)</text>
+  <rect class="hl"  x="230" y="190" width="240" height="24" rx="5"/>
+  <text x="350" y="207" text-anchor="middle" class="small">Add &amp; LayerNorm</text>
+  <path class="arrow" d="M350 230 V 265"/>
+  <text x="350" y="285" text-anchor="middle" class="small">다음 층 또는 출력</text>
+  <text x="80" y="100" class="small">· Multi-Head: 여러 "관점"의</text>
+  <text x="80" y="118" class="small">  어텐션을 병렬 수행 후 결합</text>
+  <text x="80" y="155" class="small">· FFN: 토큰별 비선형 변환</text>
+  <text x="80" y="190" class="small">· 잔차연결: 깊은 층도 학습 가능</text>
+  <text x="80" y="225" class="small">· 위치 인코딩: 순서 정보 주입</text>
+</svg>
+<figcaption>그림 38-2 Transformer 블록 하나의 내부 구조. 핵심은 어텐션 + MLP + 잔차.</figcaption>
+</figure>
+
+<h3 id="s38-1-3">GPT와 BERT — 디코더형 vs 인코더형</h3>
+
+<div class="tbl"><table>
+<thead><tr><th>구분</th><th>GPT (OpenAI)</th><th>BERT (Google)</th></tr></thead>
+<tbody>
+<tr><td>구조</td><td>디코더 전용 (단방향)</td><td>인코더 전용 (양방향)</td></tr>
+<tr><td>학습 목표</td><td>다음 토큰 예측 (Causal LM)</td><td>마스킹된 토큰 복원 (Masked LM)</td></tr>
+<tr><td>잘하는 일</td><td>생성, 대화, 코딩, 요약</td><td>분류, 감성 분석, NER, 임베딩</td></tr>
+<tr><td>대표 모델</td><td>GPT-4, Claude, Llama, Mistral</td><td>BERT, RoBERTa, DeBERTa, KoBERT</td></tr>
+<tr><td>최신 트렌드</td><td>초거대 모델 + 지시 튜닝</td><td>임베딩 모델(sentence-BERT) 등으로 명맥</td></tr>
+</tbody></table></div>
+
+<div class="box tip"><p class="box-title" data-tag="잠깐">임베딩 모델도 BERT 계열이다</p>
+<p>LLM 시대에도 BERT 계열은 "텍스트를 벡터로 바꾸는" 임베딩 모델로 활발히 쓰입니다. RAG 시스템에서 사용자 질문과 문서를 벡터로 매칭할 때, OpenAI <code>text-embedding-3</code>이나 BGE·E5 같은 임베딩 모델이 전부 BERT 계열입니다. 생성은 GPT가, 검색·분류는 BERT가 — 둘은 경쟁이 아니라 분업입니다.</p>
+</div>
+
+<h3 id="s38-1-4">사전학습 → 파인튜닝 → 인-컨텍스트 학습</h3>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 220" width="700" role="img" aria-label="LLM 학습 3단계: 사전학습 - 파인튜닝 - 추론">
+  <rect class="hl" x="20" y="40" width="200" height="80" rx="8"/>
+  <text x="120" y="65" text-anchor="middle" class="bold">① 사전학습</text>
+  <text x="120" y="88" text-anchor="middle" class="small">인터넷 텍스트 수조 토큰</text>
+  <text x="120" y="105" text-anchor="middle" class="small">수개월·수십억 비용</text>
+  <path class="arrow" d="M220 80 H 260"/>
+  <rect class="hl2" x="260" y="40" width="190" height="80" rx="8"/>
+  <text x="355" y="65" text-anchor="middle" class="bold">② 파인튜닝</text>
+  <text x="355" y="88" text-anchor="middle" class="small">도메인 데이터 수천~수만</text>
+  <text x="355" y="105" text-anchor="middle" class="small">수시간·수십~수백만원</text>
+  <path class="arrow" d="M450 80 H 490"/>
+  <rect class="box" x="490" y="40" width="190" height="80" rx="8"/>
+  <text x="585" y="65" text-anchor="middle" class="bold">③ 추론 + ICL</text>
+  <text x="585" y="88" text-anchor="middle" class="small">프롬프트 몇 개 예시로</text>
+  <text x="585" y="105" text-anchor="middle" class="small">수초·거의 공짜</text>
+  <text x="350" y="160" text-anchor="middle" class="small">일반 사용자는 대부분 ③만. 금융권은 민감데이터 때문에 ②도 흔함.</text>
+  <text x="350" y="190" text-anchor="middle" class="small acc">LoRA·QLoRA로 파인튜닝 비용은 극적으로 낮아졌다 (수십만원대 가능)</text>
+</svg>
+<figcaption>그림 38-3 LLM 활용의 세 레이어. 대부분의 금융 활용은 ②·③에서 이뤄진다.</figcaption>
+</figure>
+
+<p><b>인-컨텍스트 학습(ICL, In-Context Learning)</b>: 파라미터를 업데이트하지 않고 프롬프트에 몇 개 예시만 넣어 즉석에서 "학습"시키는 방식. Few-shot prompting이라고도 합니다.</p>
+
+<h3 id="s38-1-5">LLM의 환각과 금융 리스크</h3>
+
+<div class="box warn"><p class="box-title" data-tag="주의">환각(hallucination)은 LLM의 디자인 결함이 아니라 특성이다</p>
+<p>LLM은 "다음 토큰 확률"을 최대화하도록 학습된 모델이지 "진실"을 담도록 학습되지 않습니다. 그래서 그럴듯한 거짓말을 자신 있게 합니다. 금융에서 치명적인 사례:</p>
+<ul>
+<li>존재하지 않는 종목 코드·종목명을 만들어냄</li>
+<li>실적·배당 숫자를 틀리게 요약</li>
+<li>법령·규정 조항을 그럴듯하게 지어냄</li>
+<li>과거 날짜의 뉴스를 사실인 양 생성</li>
+</ul>
+<p>그래서 금융권 LLM 배포에는 반드시 (1) 출처 명시, (2) 검증 레이어, (3) "모르면 모른다" 응답 유도, (4) 신뢰도 라벨링이 들어갑니다. 특히 투자자 대상 콘텐츠는 법적 문제까지 걸릴 수 있어 사람 검토(Human-in-the-loop)가 필수입니다.</p>
+</div>
+
+<h2 id="s38-2"><span class="num">38-2</span>RAG·프롬프트·퀀트/OMS 실무 활용</h2>
+
+<h3 id="s38-2-1">RAG (Retrieval-Augmented Generation)</h3>
+
+<p>LLM은 학습 시점 이후의 정보를 모르고, 환각 리스크가 있습니다. 두 문제의 해결책이 <b>RAG</b>입니다: 사용자 질문에 관련된 문서를 먼저 검색해, 그 문서를 프롬프트에 붙여서 LLM에 넘깁니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 260" width="700" role="img" aria-label="RAG 파이프라인: 질문 - 임베딩 - 검색 - 컨텍스트 - LLM">
+  <rect class="box" x="20" y="30" width="110" height="40" rx="6"/>
+  <text x="75" y="55" text-anchor="middle" class="small bold">사용자 질문</text>
+  <path class="arrow" d="M130 50 H 170"/>
+  <rect class="hl" x="170" y="30" width="130" height="40" rx="6"/>
+  <text x="235" y="48" text-anchor="middle" class="small bold">임베딩</text>
+  <text x="235" y="63" text-anchor="middle" class="small">(쿼리 벡터)</text>
+  <path class="arrow" d="M300 50 H 340"/>
+  <rect class="hl" x="340" y="30" width="140" height="40" rx="6"/>
+  <text x="410" y="48" text-anchor="middle" class="small bold">벡터 DB 검색</text>
+  <text x="410" y="63" text-anchor="middle" class="small">(코사인 유사도 top-k)</text>
+  <rect class="box" x="340" y="90" width="140" height="40" rx="6"/>
+  <text x="410" y="115" text-anchor="middle" class="small">관련 문서 k개</text>
+  <path class="arrow" d="M410 70 V 90"/>
+  <rect class="hl2" x="340" y="150" width="140" height="40" rx="6"/>
+  <text x="410" y="175" text-anchor="middle" class="small bold">프롬프트 조합</text>
+  <path class="arrow" d="M410 130 V 150"/>
+  <path class="arrow" d="M480 170 H 520"/>
+  <rect class="hl2" x="520" y="150" width="160" height="40" rx="6"/>
+  <text x="600" y="175" text-anchor="middle" class="small bold">LLM 생성</text>
+  <path class="arrow" d="M600 190 V 220"/>
+  <rect class="box" x="520" y="220" width="160" height="30" rx="6"/>
+  <text x="600" y="240" text-anchor="middle" class="small bold">답변 + 인용 출처</text>
+  <text x="100" y="150" class="small bold">사전 작업:</text>
+  <text x="100" y="170" class="small">· 문서 수집 (공시, 리서치)</text>
+  <text x="100" y="188" class="small">· 청크(chunk) 분할</text>
+  <text x="100" y="206" class="small">· 임베딩 → 벡터DB 저장</text>
+  <text x="100" y="224" class="small">  (FAISS, Milvus, Pinecone)</text>
+</svg>
+<figcaption>그림 38-4 RAG 파이프라인. 질문 → 임베딩 → 벡터검색 → 컨텍스트 주입 → LLM 생성.</figcaption>
+</figure>
+
+<figure class="code"><figcaption>간단한 RAG — LangChain 스타일 스케치</figcaption>
+<pre><code class="language-python">from openai import OpenAI
+from sklearn.metrics.pairwise import cosine_similarity
+import numpy as np
+
+client = OpenAI()
+
+def embed(text):
+    r = client.embeddings.create(model="text-embedding-3-small", input=text)
+    return np.array(r.data[0].embedding)
+
+# 1) 사전: 문서 청크를 임베딩해 벡터DB에 저장 (여기선 메모리)
+docs = ["삼성전자 2024년 2분기 매출 ...", "SK하이닉스 반도체 호황 ...", ...]
+doc_vecs = np.stack([embed(d) for d in docs])
+
+def ask(question, k=3):
+    q_vec = embed(question).reshape(1, -1)
+    sims = cosine_similarity(q_vec, doc_vecs)[0]
+    top_idx = sims.argsort()[::-1][:k]
+    context = "\n\n".join(docs[i] for i in top_idx)
+
+    prompt = f"""아래 참고 문서만 보고 질문에 답하라. 모르는 건 모른다고 답하라.
+
+[참고 문서]
+{context}
+
+[질문]
+{question}
+"""
+    resp = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}]
+    )
+    return resp.choices[0].message.content
+</code></pre></figure>
+
+<div class="box fin"><p class="box-title" data-tag="퀀트 실무">리서치·OMS에서 쓰는 RAG 사례</p>
+<ul>
+<li><b>리서치 보조</b>: 사내 리서치 리포트 수만 건을 임베딩 → 애널리스트가 "삼성전자 메모리 사이클" 질문하면 과거 보고서 요지 + 출처로 답변.</li>
+<li><b>공시 요약</b>: DART 공시가 올라오면 자동으로 핵심 요약 + 영향 추정 → OMS 알림.</li>
+<li><b>규정 Q&amp;A</b>: 자본시장법·내부통제 규정 수백 페이지에 RAG → 운영팀이 "이체 한도 규정" 질문하면 조문 번호와 함께 답변.</li>
+<li><b>OMS 매뉴얼 봇</b>: 수백 개 운영 매뉴얼·장애 보고서 → "9001 응답코드 왜 뜨지" 질문에 과거 사례 포함 답변.</li>
+</ul>
+</div>
+
+<h3 id="s38-2-2">프롬프트 엔지니어링</h3>
+
+<p>LLM을 잘 쓰는 것의 70%는 좋은 프롬프트입니다. 주요 패턴:</p>
+
+<ol class="steps">
+<li><b>역할 부여(Role)</b>: "너는 15년 경력의 퀀트 애널리스트야" → 답변 톤·깊이 조정.</li>
+<li><b>구체적 지시</b>: "요약해줘" ❌ → "5개 불릿, 각 50자 이내, 수치는 그대로 보존" ✓.</li>
+<li><b>Few-shot 예시</b>: 원하는 입출력 쌍 2~3개를 보여 주고 그 포맷으로 답하게.</li>
+<li><b>Chain-of-Thought</b>: "단계별로 생각한 뒤 답해라" — 복잡 추론·수학 문제 정답률 상승.</li>
+<li><b>출력 포맷 지정</b>: JSON·마크다운 표·CSV. 파이프라인에 넣기 쉬움.</li>
+<li><b>자기 검증</b>: "답을 쓴 뒤 틀린 점이 없는지 다시 검토해라".</li>
+<li><b>제약 명시</b>: "모르면 '모른다'로 답해라. 추측하지 마라".</li>
+</ol>
+
+<figure class="code"><figcaption>프롬프트 예시 — 뉴스 감성 분석 (JSON 출력)</figcaption>
+<pre><code class="language-python">prompt = """너는 한국 금융 뉴스 분석가다. 다음 뉴스를 보고 아래 JSON 스키마로만 답하라.
+설명 문장은 쓰지 마라. 모르면 confidence를 0.0으로 하라.
+
+스키마:
+{
+  "sentiment": "positive|neutral|negative",
+  "confidence": 0.0~1.0,
+  "ticker": "종목코드(없으면 null)",
+  "reasons": ["50자 이내 사유", ...]
+}
+
+뉴스:
+"삼성전자가 3분기 영업이익 10.4조원으로 시장 컨센서스(9.8조) 대비 6% 상회했다.
+HBM 수요 호조와 메모리 가격 상승이 주효했다."
+"""
+# → {"sentiment": "positive", "confidence": 0.9, "ticker": "005930",
+#    "reasons": ["영업이익 컨센 6% 상회", "HBM 수요·메모리 가격 호재"]}
+</code></pre></figure>
+
+<h3 id="s38-2-3">LLM in 퀀트 — 뉴스 감성과 알파</h3>
+
+<p>텍스트 데이터는 전통적 퀀트가 놓쳐 온 "비정형 알파" 소스입니다. LLM이 다음 영역에서 활용됩니다.</p>
+
+<div class="tbl"><table>
+<thead><tr><th>영역</th><th>LLM 역할</th><th>알파/운영 가치</th></tr></thead>
+<tbody>
+<tr><td>뉴스 감성</td><td>종목별 뉴스 긍/부정 라벨링</td><td>Short-term reversal·momentum 신호</td></tr>
+<tr><td>공시 분류</td><td>DART 공시 유형·중요도 분류</td><td>이벤트 드리븐 전략 트리거</td></tr>
+<tr><td>실적 발표 톤 분석</td><td>Earnings call transcript 긍부정 측정</td><td>CFO의 어투 변화로 가이던스 신호</td></tr>
+<tr><td>SNS·커뮤니티</td><td>개인투자자 심리 요약</td><td>테마주 모멘텀, 역추세</td></tr>
+<tr><td>리서치 리포트</td><td>목표가 변화·주요 논점 추출</td><td>Analyst revision 팩터</td></tr>
+<tr><td>특허·논문</td><td>기술 혁신 신호 추출</td><td>장기 성장 테마</td></tr>
+</tbody></table></div>
+
+<figure class="code"><figcaption>뉴스 감성 알파의 간단한 백테스트 틀</figcaption>
+<pre><code class="language-python"># 매일 각 종목 뉴스 감성 평균 → 다음 날 롱/숏
+sentiment_df = news_df.groupby(["date", "ticker"])["sentiment"].mean().unstack()
+
+# 상위 20% 롱, 하위 20% 숏 (매일 리밸런싱)
+upper = sentiment_df.quantile(0.8, axis=1)
+lower = sentiment_df.quantile(0.2, axis=1)
+long  = sentiment_df.ge(upper, axis=0).astype(int)
+short = sentiment_df.le(lower, axis=0).astype(int) * -1
+weights = (long + short).div((long + short).abs().sum(axis=1), axis=0)
+
+# 다음 날 수익률과 결합 (반드시 1일 shift로 데이터 누수 방지!)
+pnl = (weights.shift(1) * returns_df).sum(axis=1)
+sharpe = pnl.mean() / pnl.std() * (252 ** 0.5)
+print(f"Sharpe: {sharpe:.2f}")
+</code></pre></figure>
+
+<h3 id="s38-2-4">LLM in OMS 운영 — 로그·장애·매뉴얼</h3>
+
+<p>OMS 운영은 LLM이 가장 즉시 가치를 내는 영역 중 하나입니다. 로그가 많고, 패턴이 있고, 설명 가능한 답이 필요하기 때문입니다.</p>
+
+<div class="box fin"><p class="box-title" data-tag="퀀트 실무">OMS에서 지금 당장 쓸 수 있는 LLM 패턴</p>
+<ol>
+<li><b>로그 요약과 이상 패턴 설명</b>: 수십만 줄의 로그 중 ERROR·WARN만 뽑아 LLM에 넘기면 "오전 10:23~10:27 사이 거래소 응답 지연 패턴, 영향 종목 32개, 영향 사용자 ..." 같은 요약을 생성. 야간 당직자가 사람에게 깨기 전에 1차 분류.</li>
+<li><b>장애 보고서 초안</b>: 로그·시간대·영향 범위를 넣으면 (감지-전파-원인-복구-재발방지) 템플릿(30장)에 따라 초안 생성. 사람은 검토·수정만.</li>
+<li><b>매뉴얼 Q&amp;A 봇</b>: 운영 매뉴얼·과거 장애 보고서를 RAG로 묶어 "9001 응답코드 발생 시 조치 절차는?" 같은 질문에 답변 + 과거 유사 사례 링크.</li>
+<li><b>코드 리뷰 보조</b>: C 레거시 코드의 변경사항을 LLM에 넘겨 "메모리 누수 가능성, 경계값 체크 누락" 등 1차 지적. 사람 리뷰어의 시간 절약.</li>
+<li><b>리그레션 테스트 케이스 생성</b>: 전문 명세와 과거 테스트 케이스를 주면 유사 패턴의 새 케이스 자동 생성.</li>
+<li><b>전문 디코더</b>: 바이너리 전문을 보여주고 "이거 어떤 전문이고 어떤 필드 이상한지" 설명 요청. 24장의 전문처리 지식 + LLM 조합.</li>
+</ol>
+<p>중요: 운영 환경에서는 LLM 응답을 <b>항상 사람이 검토</b>해야 합니다. 자동 실행 금지. 참고용·초안용으로만 쓰고, 조치는 사람이 결정합니다.</p>
+</div>
+
+<figure class="code"><figcaption>OMS 로그 요약 프롬프트 예시</figcaption>
+<pre><code class="language-python">def summarize_oms_errors(log_lines):
+    """지난 10분간 ERROR 로그를 LLM으로 분류·요약"""
+    errors = [l for l in log_lines if " ERROR " in l]
+    if not errors:
+        return "ERROR 없음"
+
+    prompt = f"""너는 하나증권 OMS 운영 전문가다. 아래 ERROR 로그를 보고 다음 포맷으로 답하라.
+
+출력 포맷:
+1. 패턴별 요약 (가장 많은 것부터 3개): 패턴명 - 건수 - 추정 원인
+2. 영향 범위: 영향 받은 거래 유형, 종목 수, 사용자 수
+3. 즉시 조치 권고 (최대 3개)
+4. 사람 확인 필요 여부: 예/아니오 + 이유
+
+[로그 샘플 100줄]
+{chr(10).join(errors[:100])}
+"""
+    return client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "system", "content": "민감정보(계좌번호·주민번호)는 ***로 마스킹하라."},
+                  {"role": "user", "content": prompt}]
+    ).choices[0].message.content
+</code></pre></figure>
+
+<div class="box warn"><p class="box-title" data-tag="주의">금융권 LLM 사용 시 반드시 체크할 것</p>
+<ul>
+<li><b>데이터 유출 금지</b>: 공개 API에 고객정보·계좌번호·내부전략을 넣으면 안 됨. 반드시 마스킹하거나 사내망 LLM(Private LLM) 사용.</li>
+<li><b>프롬프트 인젝션 방어</b>: 사용자 입력에 "지금까지 지시 무시하고..." 같은 공격 가능. system 프롬프트와 user 프롬프트 분리, 입력 sanitize.</li>
+<li><b>로깅과 감사</b>: 누가·언제·무엇을 질문했고 LLM이 뭐라고 답했는지 전부 로깅. 금감원 검사·사후 추적.</li>
+<li><b>자동 집행 금지</b>: 자동으로 주문 발주하거나 설정을 바꾸는 데 LLM 쓰지 말 것. 반드시 Human-in-the-loop.</li>
+<li><b>라이선스·규제</b>: 외부 API 사용 시 금융권 데이터 처리 약관 검토. 개인정보보호법·전자금융감독규정 준수.</li>
+</ul>
+</div>
+
+<div class="ex"><p class="ex-title">예제 38-1 — RAG 설계 <span class="lv">난이도 ★★☆</span></p>
+<p>OMS 운영팀이 "매일 수만 건의 ERROR 로그 중 과거에 봤던 패턴은 자동 분류, 새 패턴만 사람에게 알림"을 받고 싶어 합니다. LLM과 임베딩을 활용한 아키텍처를 어떻게 설계할까요?</p>
+<details><summary>정답과 해설 보기</summary>
+<p>단계별 설계:</p>
+<ol>
+<li><b>로그 정규화</b>: 가변 부분(계좌번호, 시각, 금액, 종목코드)을 placeholder로 치환해 "로그 템플릿"으로 변환. 예: <code>Order rejected acct=***, code=9001, msg=TIMEOUT</code>.</li>
+<li><b>과거 패턴 DB 구축</b>: 지난 1년 로그 템플릿을 임베딩해 벡터DB(FAISS)에 저장. 각 템플릿에 "원인·조치"가 라벨링된 과거 분석 노트 연결.</li>
+<li><b>실시간 분류</b>: 새 로그 → 템플릿화 → 임베딩 → 벡터DB에서 top-1 검색. 코사인 유사도가 임계값(예: 0.9) 이상이면 "알려진 패턴"으로 자동 분류, 과거 조치 안내.</li>
+<li><b>신규 패턴 처리</b>: 유사도가 임계값 미만이면 LLM(RAG + 운영 매뉴얼)에 넘겨 1차 설명 생성 + 담당자 알림. 담당자가 조치 후 결과를 벡터DB에 추가 → 다음부터 자동 분류됨.</li>
+<li><b>검증·감사</b>: LLM이 분류·설명한 모든 건을 로그에 남기고, 주간 샘플링으로 사람이 품질 체크. 오분류율이 올라가면 임계값 조정.</li>
+</ol>
+<p>핵심 포인트: LLM만 쓰면 비용·지연·환각 리스크 큼. 임베딩 기반 "닮은 과거"로 1차 거르고, 신규 건에만 LLM 사용 → 비용 90% 이상 절감 가능하고 "학습하는 OMS 운영"이 됩니다.</p>
+</details></div>
+
+<h2 id="s38-key">핵심 정리</h2>
+<ul class="summary-list">
+<li>Self-Attention은 "모든 토큰이 모든 토큰을 가중 참조"하는 메커니즘. RNN의 순차 처리를 대체.</li>
+<li>Transformer = Multi-Head Attention + FFN + 잔차 + LayerNorm을 쌓은 구조.</li>
+<li>GPT는 생성형(디코더), BERT는 분류·임베딩형(인코더). 임베딩 모델은 RAG의 핵심.</li>
+<li>사전학습 → 파인튜닝 → ICL. 금융은 민감데이터 때문에 파인튜닝(LoRA)이 많아지는 중.</li>
+<li>환각은 디자인 특성. 반드시 출처·검증·사람 검토 레이어 필요.</li>
+<li>RAG는 환각과 지식 cut-off를 동시에 해결. 금융 실무의 1순위 패턴.</li>
+<li>프롬프트: 역할 + 구체 지시 + Few-shot + CoT + 포맷 지정 + 자기 검증.</li>
+<li>퀀트에서 뉴스감성·공시요약·실적콜 톤 분석 등 비정형 알파에 활용.</li>
+<li>OMS에서 로그 요약, 장애 보고서 초안, 매뉴얼 Q&amp;A, 코드 리뷰 보조에 즉시 가치.</li>
+<li>금융 LLM 체크리스트: 데이터 마스킹 · 프롬프트 인젝션 방어 · 감사 로깅 · 자동 집행 금지.</li>
+</ul>
+
+<h2 id="s38-cs">면접 질문</h2>
+<div class="box iv"><p class="box-title" data-tag="면접">자주 나오는 질문</p>
+<details><summary>Q1. Self-Attention을 쉽게 설명해 보세요.</summary><p>문장의 각 단어가 "다른 모든 단어를 얼마나 참조할지"를 가중치로 학습하는 방식입니다. 각 단어마다 Query(찾는 것)·Key(가진 정보)·Value(실제 정보) 벡터를 만들고, Query와 모든 Key의 내적으로 유사도를 구한 뒤 softmax로 가중치화해 Value의 가중합을 돌려줍니다. RNN처럼 순차 처리할 필요가 없어 병렬 가능하고, 장거리 의존성에 강합니다.</p></details>
+<details><summary>Q2. Transformer가 RNN·LSTM을 대체한 이유는?</summary><p>세 가지입니다. (1) <b>병렬성</b>: RNN은 t시점이 t-1에 의존해 순차적이지만 Transformer는 전체 시퀀스를 한 번에 처리 → GPU에서 압도적으로 빠름, (2) <b>장거리 의존성</b>: Self-Attention은 어떤 두 위치든 1 홉으로 연결, (3) <b>스케일링</b>: 모델 크기·데이터·계산량에 성능이 예측 가능하게 비례(Scaling Laws). 결과적으로 데이터·GPU 많으면 많을수록 좋아져서 GPT·Claude 같은 초거대 모델이 가능해졌습니다.</p></details>
+<details><summary>Q3. GPT와 BERT의 차이와 쓰임새는?</summary><p>GPT는 디코더 전용·단방향 어텐션으로 "다음 토큰 예측"을 학습 → 생성·대화·코딩에 강함. BERT는 인코더 전용·양방향 어텐션으로 "마스킹된 토큰 복원"을 학습 → 분류·NER·임베딩에 강함. 둘은 경쟁보다 분업: RAG 시스템에서 검색은 BERT 계열 임베딩, 생성은 GPT 계열이 쓰입니다.</p></details>
+<details><summary>Q4. RAG는 왜 필요하고 어떻게 구성하나요?</summary><p>필요한 이유: (1) LLM은 학습 시점 이후를 모름 → 최신 뉴스·공시 반영 못 함, (2) 환각 리스크 → 자신 있게 거짓말, (3) 사내 전용 데이터는 모름. RAG는 질문을 임베딩 → 벡터DB에서 관련 문서 top-k 검색 → 그 문서를 프롬프트에 붙여 LLM에 넘김. 파인튜닝 없이도 최신·사내 데이터에 "접지"할 수 있고 출처를 명시해 환각을 억제합니다. 구성 요소: 임베딩 모델, 벡터DB(FAISS/Milvus/Pinecone), 청크 분할 전략, 재순위(reranker), 프롬프트 템플릿.</p></details>
+<details><summary>Q5. 금융권에서 LLM 쓸 때 가장 주의할 점은?</summary><p>(1) 데이터 유출: 고객·내부 정보를 공개 API에 넣지 말 것. 반드시 마스킹 또는 사내 LLM. (2) 프롬프트 인젝션: 사용자 입력에 숨은 지시로 LLM 탈취 가능 → system·user 프롬프트 분리, 입력 sanitize. (3) 환각: 사실 확인 가능한 영역에만 사용, 반드시 출처 명시, 자신 없을 땐 모른다고 답하도록 지시. (4) 감사·규제: 모든 입출력 로깅, 금감원 검사 대응. (5) 자동 집행 금지: 주문·설정 변경 같은 실제 액션은 사람이 결정. LLM은 보조·초안·분류용으로만.</p></details>
+<details><summary>Q6. OMS 운영자가 LLM으로 할 수 있는 가장 가치 있는 일은?</summary><p>개인적 체감으로는 (1) <b>로그 요약·분류</b>: 수만 줄 로그 중 사람이 봐야 할 것만 추려 주고, 과거 유사 사례와 조치 매뉴얼까지 연결, (2) <b>장애 보고서 초안</b>: 로그와 타임라인만 넣으면 감지-전파-원인-복구-재발방지 템플릿 자동 작성, (3) <b>신규 운영자 교육</b>: 매뉴얼 Q&amp;A 봇으로 새 멤버의 러닝커브 단축. 모두 "사람 검토 전 1차 가공"이라는 공통점이 있고, 반드시 수동 결정 단계를 남겨 둬야 합니다.</p></details>
+</div>
+
+</main>
+</div></div>
+<script src="assets/app.js"></script>
+</body>
+</html>

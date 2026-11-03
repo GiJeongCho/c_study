@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ch37 모형 평가와 결과 해석 · C언어 금융 IT 마스터</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+KR:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-ch="ch37">
+<header class="topbar">
+  <button class="menu-btn" type="button" aria-expanded="false" aria-controls="sidebar">목차</button>
+  <a class="brand" href="index.html"><b>C</b>금융 IT 마스터</a>
+  <span class="where"></span>
+  <span class="progress"></span>
+</header>
+<div class="layout">
+<nav id="sidebar" class="sidebar" aria-label="과정 목차"></nav>
+<div class="page">
+<main class="content">
+
+<header class="ch-head">
+  <p class="eyebrow">PART 3 · 머신러닝 &amp; LLM 트랙 · CHAPTER</p>
+  <div class="bignum">37</div>
+  <h1>모형 평가와 결과 해석</h1>
+  <p class="lede">모델을 만든 뒤에는 반드시 묻습니다 — "이게 정말 좋은가?" 그리고 "왜 이렇게 예측하는가?" 이 장에서는 회귀·분류·불균형 분류 각각의 평가 지표, 과적합·과소적합 진단, 하이퍼파라미터 튜닝, 그리고 SHAP·Partial Dependence 같은 해석 가능 ML 기법을 다룹니다. 빅데이터분석기사 4과목의 핵심이자, 리서치팀이 만든 모델을 OMS 운영자가 "믿어도 되는지" 검토할 때 쓰는 기본 공구들입니다.</p>
+  <div class="goals"><p class="goals-title">이 장에서 배울 것</p><ul>
+    <li>회귀 지표: MSE·RMSE·MAE·R²·MAPE의 차이와 선택 기준</li>
+    <li>분류 지표: 정확도·정밀도·재현율·F1·ROC-AUC·PR-AUC</li>
+    <li>혼동행렬(Confusion Matrix) 읽기와 임계값(threshold) 조정</li>
+    <li>편향-분산 트레이드오프와 과적합 진단</li>
+    <li>하이퍼파라미터 튜닝: Grid Search, Random Search, Bayesian</li>
+    <li>SHAP과 Permutation Importance — 해석 가능 ML</li>
+    <li>백테스트 지표: 샤프 비율, MDD, Information Ratio</li>
+  </ul></div>
+</header>
+
+<h2 id="s37-1"><span class="num">37-1</span>평가지표·과적합·하이퍼파라미터 튜닝</h2>
+
+<h3 id="s37-1-1">회귀 평가 지표</h3>
+
+<div class="tbl"><table>
+<thead><tr><th>지표</th><th>수식</th><th>특징</th></tr></thead>
+<tbody>
+<tr><td><b>MSE</b> (Mean Squared Error)</td><td>⅟ₙ Σ(y - ŷ)²</td><td>큰 오차에 벌점 큼. 미분 쉬움(학습 손실함수).</td></tr>
+<tr><td><b>RMSE</b></td><td>√MSE</td><td>원래 단위와 같아 해석 쉬움.</td></tr>
+<tr><td><b>MAE</b> (Mean Absolute Error)</td><td>⅟ₙ Σ|y - ŷ|</td><td>이상치에 둔감. 중앙값 예측에 가까움.</td></tr>
+<tr><td><b>R²</b></td><td>1 - SSres/SStot</td><td>"분산 설명력". 1에 가까울수록 좋음. 음수 가능.</td></tr>
+<tr><td><b>MAPE</b></td><td>⅟ₙ Σ|(y-ŷ)/y| × 100%</td><td>퍼센트 오차. y=0 근처면 폭발.</td></tr>
+</tbody></table></div>
+
+<div class="box tip"><p class="box-title" data-tag="잠깐">금융 수익률 예측에서 R²가 음수인 게 정상이다</p>
+<p>R² = 1 - SSres/SStot는 "모델이 평균을 쓴 것보다 얼마나 좋은가"입니다. 수익률 예측에서 모델이 평균 수익률만 돌려주는 "0 예측기"보다 못하면 R²가 음수가 됩니다. 실제로 금융 수익률의 예측 가능한 R²는 보통 0.01~0.05에 불과하고, 그 작은 신호를 꾸준히 뽑아 포트폴리오화하는 것이 퀀트의 본질입니다. 리서치팀이 R² 0.03을 들고 와도 "낮네요" 하지 말고 "거래비용 넘길 수 있나요?"로 물어봐야 합니다.</p>
+</div>
+
+<h3 id="s37-1-2">분류 평가 지표와 혼동행렬</h3>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 230" width="700" role="img" aria-label="혼동행렬 2x2">
+  <text x="350" y="22" text-anchor="middle" class="bold">혼동행렬 (Confusion Matrix)</text>
+  <text x="350" y="55" text-anchor="middle" class="small">예측</text>
+  <text x="455" y="80" text-anchor="middle" class="small bold">양성</text>
+  <text x="565" y="80" text-anchor="middle" class="small bold">음성</text>
+  <text x="235" y="130" text-anchor="middle" class="small">실제</text>
+  <text x="315" y="125" text-anchor="middle" class="small bold">양성</text>
+  <text x="315" y="175" text-anchor="middle" class="small bold">음성</text>
+  <rect class="hl"  x="400" y="100" width="110" height="40" rx="4"/>
+  <text x="455" y="125" text-anchor="middle" class="small bold">TP</text>
+  <rect class="bad" x="510" y="100" width="110" height="40" rx="4"/>
+  <text x="565" y="125" text-anchor="middle" class="small bold">FN</text>
+  <rect class="bad" x="400" y="140" width="110" height="40" rx="4"/>
+  <text x="455" y="165" text-anchor="middle" class="small bold">FP</text>
+  <rect class="hl"  x="510" y="140" width="110" height="40" rx="4"/>
+  <text x="565" y="165" text-anchor="middle" class="small bold">TN</text>
+  <text x="60" y="110" class="small">· TP: 사기 거래를 사기라고 맞춤</text>
+  <text x="60" y="130" class="small">· FN: 사기를 놓침 ← 가장 치명</text>
+  <text x="60" y="150" class="small">· FP: 정상을 사기라 오탐</text>
+  <text x="60" y="170" class="small">· TN: 정상을 정상이라 맞춤</text>
+  <text x="350" y="215" text-anchor="middle" class="small mute">Precision = TP/(TP+FP),  Recall = TP/(TP+FN),  F1 = 2·P·R/(P+R)</text>
+</svg>
+<figcaption>그림 37-1 혼동행렬. 분류 지표는 전부 이 네 값에서 파생.</figcaption>
+</figure>
+
+<div class="tbl"><table>
+<thead><tr><th>지표</th><th>수식</th><th>해석</th><th>언제 중요</th></tr></thead>
+<tbody>
+<tr><td><b>Accuracy</b></td><td>(TP+TN) / 전체</td><td>전체 정확도</td><td>클래스 균형일 때만</td></tr>
+<tr><td><b>Precision</b> (정밀도)</td><td>TP / (TP+FP)</td><td>양성 예측 중 실제 양성 비율</td><td>FP가 비쌀 때 (스팸 분류)</td></tr>
+<tr><td><b>Recall</b> (재현율)</td><td>TP / (TP+FN)</td><td>실제 양성 중 잡은 비율</td><td>FN이 치명적일 때 (사기·암 진단)</td></tr>
+<tr><td><b>F1</b></td><td>2·P·R / (P+R)</td><td>P와 R의 조화평균</td><td>P/R 균형이 필요할 때</td></tr>
+<tr><td><b>ROC-AUC</b></td><td>FPR-TPR 곡선 아래 넓이</td><td>임계값과 무관한 분리력</td><td>클래스 비교적 균형</td></tr>
+<tr><td><b>PR-AUC</b></td><td>P-R 곡선 아래 넓이</td><td>불균형에 강함</td><td>양성 희귀 (사기 1%)</td></tr>
+</tbody></table></div>
+
+<div class="box warn"><p class="box-title" data-tag="주의">AUC만 보면 안 되는 이유 — 불균형에서는 PR-AUC</p>
+<p>ROC-AUC는 "양성·음성 각각에서 랜덤 뽑기 하면 양성이 더 높은 점수 받을 확률"입니다. 양성이 1%뿐인 불균형에서는 FPR 분모(음성 전체)가 너무 커서 FP가 많아도 FPR이 거의 안 올라가 ROC-AUC가 비현실적으로 좋게 보입니다. 이상거래 탐지·사기 분류에서는 반드시 <b>PR-AUC(또는 Average Precision)</b>를 함께 보세요.</p>
+</div>
+
+<h3 id="s37-1-3">임계값(threshold) 조정 — 비즈니스가 선택</h3>
+
+<p>이진 분류기의 기본 임계값은 0.5지만, 비즈니스 비용에 따라 바꿔야 합니다.</p>
+<ul>
+<li>신용카드 사기 탐지: FN(놓침) 비용이 매우 크므로 임계값 낮춤 → Recall↑, FP↑</li>
+<li>마케팅 타깃: 쿠폰 발송 비용 vs 전환 수익 비교 → ROC 곡선에서 Youden's J 최대점 찾기</li>
+<li>신용 승인: FP(부도난 사람 승인) 비용 vs FN(멀쩡한 사람 거절 손실) 비교</li>
+</ul>
+
+<figure class="code"><figcaption>임계값 변경 — scikit-learn</figcaption>
+<pre><code class="language-python">from sklearn.metrics import precision_recall_curve, f1_score
+
+y_proba = model.predict_proba(X_test)[:, 1]
+precisions, recalls, thresholds = precision_recall_curve(y_test, y_proba)
+f1s = 2 * precisions * recalls / (precisions + recalls + 1e-12)
+best_t = thresholds[f1s[:-1].argmax()]
+print(f"F1 최대 임계값: {best_t:.3f}")
+
+y_pred = (y_proba &gt;= best_t).astype(int)
+</code></pre></figure>
+
+<h3 id="s37-1-4">편향-분산 트레이드오프와 과적합 진단</h3>
+
+<p>모델 오차는 세 가지로 분해됩니다.</p>
+<p style="text-align:center; font-family: var(--f-mono);">총 오차 = 편향² + 분산 + 노이즈(irreducible)</p>
+
+<ul>
+<li><b>편향(bias)</b>이 크다 = 모델이 너무 단순해 데이터를 못 설명 (과소적합)</li>
+<li><b>분산(variance)</b>이 크다 = 모델이 학습 데이터에 과하게 맞춰짐 (과적합)</li>
+</ul>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 230" width="700" role="img" aria-label="학습-검증 곡선으로 과적합 진단">
+  <line class="line" x1="60" y1="200" x2="640" y2="200"/>
+  <line class="line" x1="60" y1="30" x2="60" y2="200"/>
+  <text x="60" y="24" text-anchor="middle" class="small">오차</text>
+  <text x="650" y="200" class="small">모델 복잡도</text>
+  <path class="accent-line" d="M80 90 Q 200 160, 350 150 Q 500 140, 620 100"/>
+  <text x="640" y="100" class="small acc">검증 오차</text>
+  <path class="accent-line" d="M80 190 Q 300 100, 620 50" stroke-dasharray="4 3"/>
+  <text x="640" y="50" class="small acc">학습 오차</text>
+  <circle cx="340" cy="150" r="7" class="hl"/>
+  <text x="340" y="175" text-anchor="middle" class="small bold">최적 복잡도</text>
+  <text x="150" y="220" text-anchor="middle" class="small warn-t">과소적합 (편향 큼)</text>
+  <text x="550" y="220" text-anchor="middle" class="small warn-t">과적합 (분산 큼)</text>
+</svg>
+<figcaption>그림 37-2 학습-검증 오차 곡선. 두 곡선이 벌어지면 과적합.</figcaption>
+</figure>
+
+<div class="box fix"><p class="box-title" data-tag="해결">과적합이 의심되면</p>
+<ul>
+<li>데이터를 더 모은다 (가장 근본)</li>
+<li>피처 수 줄이기 (Lasso, 피처 선택)</li>
+<li>모델 복잡도 낮추기 (max_depth↓, num_leaves↓)</li>
+<li>정규화 강화 (λ↑, dropout↑, weight_decay↑)</li>
+<li>조기 종료 (early stopping)</li>
+<li>앙상블 (랜덤포레스트, 배깅)</li>
+<li>데이터 증강 (이미지/텍스트에서)</li>
+</ul>
+</div>
+
+<h3 id="s37-1-5">하이퍼파라미터 튜닝</h3>
+
+<p>모델에는 학습으로 결정되는 파라미터(가중치)와 사람이 정하는 <b>하이퍼파라미터</b>(트리 깊이, 학습률 등)가 있습니다. 좋은 하이퍼파라미터 찾기는 보통 세 가지 방법.</p>
+
+<div class="tbl"><table>
+<thead><tr><th>방법</th><th>원리</th><th>장단</th></tr></thead>
+<tbody>
+<tr><td><b>Grid Search</b></td><td>모든 조합 전부 시도</td><td>작은 공간에만 가능, 지수적 폭발</td></tr>
+<tr><td><b>Random Search</b></td><td>랜덤 샘플링</td><td>Grid보다 거의 항상 효율적 (Bergstra 2012)</td></tr>
+<tr><td><b>Bayesian Optimization</b></td><td>지금까지 결과로 다음 시도 지점 예측</td><td>적은 평가로 최적점, Optuna·Hyperopt</td></tr>
+</tbody></table></div>
+
+<figure class="code"><figcaption>Optuna로 LightGBM 튜닝</figcaption>
+<pre><code class="language-python">import optuna
+from lightgbm import LGBMClassifier
+from sklearn.model_selection import cross_val_score
+
+def objective(trial):
+    params = {
+        "num_leaves": trial.suggest_int("num_leaves", 15, 255),
+        "max_depth": trial.suggest_int("max_depth", 3, 12),
+        "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.3, log=True),
+        "min_child_samples": trial.suggest_int("min_child_samples", 5, 100),
+        "reg_lambda": trial.suggest_float("reg_lambda", 1e-3, 10.0, log=True),
+    }
+    model = LGBMClassifier(**params, n_estimators=500, random_state=42)
+    scores = cross_val_score(model, X_train, y_train, cv=5, scoring="roc_auc")
+    return scores.mean()
+
+study = optuna.create_study(direction="maximize")
+study.optimize(objective, n_trials=100, timeout=600)
+print("Best:", study.best_value, study.best_params)
+</code></pre></figure>
+
+<h2 id="s37-2"><span class="num">37-2</span>해석 가능 ML(SHAP)과 시각화</h2>
+
+<h3 id="s37-2-1">왜 "해석 가능성"이 필요한가</h3>
+
+<p>금융에서는 성능만 좋다고 모델을 쓸 수 없습니다. 바젤 규제, 금감원 심사, 고객 설명 의무, 리스크 위원회 검토 — 전부 "왜 이 결정을 내렸는가"를 설명할 수 있어야 합니다.</p>
+<ul>
+<li><b>신용 거절 사유 통지</b>: "AI가 거절했음"으로는 끝낼 수 없음. 어떤 변수가 영향 미쳤는지 명시 필요.</li>
+<li><b>리스크 모델 검증(MRM)</b>: 모델 결과를 리스크팀·내부감사가 재현·검토할 수 있어야.</li>
+<li><b>퀀트 알파 해석</b>: PM이 "이 모델이 왜 이 종목을 사라는지" 설명 안 되면 집행 거절.</li>
+</ul>
+
+<h3 id="s37-2-2">SHAP (SHapley Additive exPlanations)</h3>
+
+<p>SHAP은 게임이론의 Shapley value를 ML에 적용한 기법입니다. 각 피처가 "최종 예측에 얼마나 기여했는지"를 공정하게 분배합니다.</p>
+
+<p>직관: "피처 A가 있을 때와 없을 때 예측이 얼마나 달라지는가"를 모든 피처 조합에 대해 평균 낸 것.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 220" width="700" role="img" aria-label="SHAP waterfall 플롯">
+  <text x="20" y="22" class="small bold">SHAP waterfall — 한 고객의 디폴트 확률 예측 분해</text>
+  <line class="line" x1="60" y1="40" x2="60" y2="200"/>
+  <line class="line" x1="60" y1="200" x2="640" y2="200"/>
+  <rect class="box" x="60" y="55" width="180" height="22" rx="3"/>
+  <text x="150" y="70" text-anchor="middle" class="small">기준값 (평균 예측): 0.08</text>
+  <rect class="bad" x="240" y="85" width="130" height="22" rx="3"/>
+  <text x="305" y="100" text-anchor="middle" class="small">연소득 낮음 +0.12</text>
+  <rect class="bad" x="370" y="115" width="90" height="22" rx="3"/>
+  <text x="415" y="130" text-anchor="middle" class="small">연체이력 +0.08</text>
+  <rect class="hl" x="460" y="145" width="60" height="22" rx="3"/>
+  <text x="490" y="160" text-anchor="middle" class="small">근속길이 -0.03</text>
+  <rect class="box" x="520" y="175" width="120" height="22" rx="3"/>
+  <text x="580" y="190" text-anchor="middle" class="small bold">최종: 0.25</text>
+  <text x="350" y="220" text-anchor="middle" class="small mute">각 피처가 평균 예측에서 최종 예측까지 "얼마씩 밀어 올렸는지" 분해</text>
+</svg>
+<figcaption>그림 37-3 SHAP waterfall. 개별 샘플 예측의 피처별 기여도 시각화.</figcaption>
+</figure>
+
+<figure class="code"><figcaption>SHAP — XGBoost 모델 해석</figcaption>
+<pre><code class="language-python">import shap
+
+explainer = shap.TreeExplainer(xgb_model)
+shap_values = explainer.shap_values(X_test)
+
+# 전역 중요도: 평균 |SHAP|
+shap.summary_plot(shap_values, X_test, plot_type="bar")
+
+# 피처별 영향: 값과 방향 함께 보기
+shap.summary_plot(shap_values, X_test)   # dot plot
+
+# 한 샘플 설명
+shap.force_plot(explainer.expected_value, shap_values[0], X_test.iloc[0])
+</code></pre></figure>
+
+<div class="box fin"><p class="box-title" data-tag="퀀트 실무">"알파 소스" 분해에 SHAP</p>
+<p>XGBoost 기반 종목 선택 모델에 SHAP을 적용하면 "이 종목을 매수 추천한 이유 = 밸류 팩터 +15%, 모멘텀 -3%, 퀄리티 +8%"처럼 분해할 수 있습니다. 포트폴리오 전체 수준에서 피처별 SHAP 합을 누적하면 "이번 달 알파의 60%는 밸류, 25%는 모멘텀, 15%는 퀄리티에서 나왔다"는 알파 소스 리포트가 됩니다. 이는 PM과 리스크팀 모두가 요구하는 설명력입니다.</p>
+</div>
+
+<h3 id="s37-2-3">Permutation Importance와 Partial Dependence</h3>
+
+<p><b>Permutation Importance</b>: 테스트셋에서 한 피처의 값을 랜덤하게 섞은 뒤 성능 하락을 측정. 하락이 클수록 중요. 모델 종류와 무관하게 쓸 수 있고 다중공선성에 대한 왜곡이 트리 내장 중요도보다 적습니다.</p>
+
+<p><b>Partial Dependence Plot (PDP)</b>: 한 피처 값을 바꿔 가면서 평균 예측이 어떻게 변하는지 그래프. 피처와 타깃의 관계가 선형인지, 임계값이 있는지, 비선형인지 보여 줍니다.</p>
+
+<figure class="code"><figcaption>Permutation Importance와 PDP</figcaption>
+<pre><code class="language-python">from sklearn.inspection import permutation_importance, partial_dependence
+import matplotlib.pyplot as plt
+
+# 1) Permutation Importance
+result = permutation_importance(model, X_test, y_test, n_repeats=10, random_state=42)
+sorted_idx = result.importances_mean.argsort()[::-1][:10]
+plt.barh(X_test.columns[sorted_idx], result.importances_mean[sorted_idx])
+
+# 2) Partial Dependence — PER가 디폴트 확률에 미치는 영향
+from sklearn.inspection import PartialDependenceDisplay
+PartialDependenceDisplay.from_estimator(model, X_test, features=["per", "debt_ratio"])
+</code></pre></figure>
+
+<h3 id="s37-2-4">시각화 — 결과를 "말이 되게" 보여 주기</h3>
+
+<p>분석 결과를 비즈니스에 전달할 때 어떤 그래프를 쓰느냐로 설득력이 달라집니다.</p>
+
+<div class="tbl"><table>
+<thead><tr><th>목적</th><th>그래프</th></tr></thead>
+<tbody>
+<tr><td>분포 비교</td><td>히스토그램, 밀도 그래프(KDE), 바이올린 플롯</td></tr>
+<tr><td>두 변수 관계</td><td>산점도, 산점도 + 회귀선(regplot)</td></tr>
+<tr><td>이상치·사분위</td><td>박스플롯</td></tr>
+<tr><td>변수 간 상관</td><td>상관행렬 히트맵</td></tr>
+<tr><td>시간 추이</td><td>선그래프, 영역그래프, 누적수익률 플롯</td></tr>
+<tr><td>피처 중요도</td><td>수평 막대그래프, SHAP summary</td></tr>
+<tr><td>분류 성능</td><td>혼동행렬 히트맵, ROC·PR 곡선, Calibration plot</td></tr>
+</tbody></table></div>
+
+<h3 id="s37-2-5">백테스트 지표 — 퀀트 전용</h3>
+
+<p>퀀트 모델의 "모형 평가"는 수익률 지표만으론 부족합니다. 리스크 조정 수익률과 꼬리 리스크를 함께 봐야 합니다.</p>
+
+<div class="tbl"><table>
+<thead><tr><th>지표</th><th>수식</th><th>의미</th></tr></thead>
+<tbody>
+<tr><td><b>샤프 비율(Sharpe)</b></td><td>(평균수익 - 무위험) / 표준편차</td><td>리스크 1단위당 초과수익. 연율화하면 보통 ×√252.</td></tr>
+<tr><td><b>소르티노 비율</b></td><td>(평균수익 - 목표) / 하방 편차</td><td>샤프의 변동성 대신 하방만 — 상승 변동은 벌점 안 줌</td></tr>
+<tr><td><b>MDD</b> (Max Drawdown)</td><td>min((누적수익 - 피크) / 피크)</td><td>최대 손실폭. 체감 리스크의 핵심.</td></tr>
+<tr><td><b>Calmar</b></td><td>연수익 / |MDD|</td><td>샤프의 MDD 버전</td></tr>
+<tr><td><b>Information Ratio</b></td><td>(초과수익 평균) / Tracking Error</td><td>벤치마크 대비 알파의 안정성</td></tr>
+<tr><td><b>Hit Ratio</b></td><td>수익 거래 수 / 전체 거래 수</td><td>높을수록 심리적 안정, 반드시 좋은 전략은 아님</td></tr>
+</tbody></table></div>
+
+<div class="box warn"><p class="box-title" data-tag="주의">샤프 2.0 백테스트를 무조건 믿지 마라</p>
+<p>백테스트 샤프 비율이 2.0 이상이면 거의 확실히 다음 중 하나입니다. (1) 데이터 누수(34장), (2) 거래비용·시장충격·슬리피지 미반영, (3) 과적합(테스트 기간을 보면서 튜닝), (4) 전략의 과도한 레버리지로 분산 왜곡. 실거래 샤프는 백테스트의 50~70%로 떨어지는 것이 보통입니다. 백테스트 결과를 평가할 때는 "최악의 1년", "최악의 1개월", "MDD 복구 기간", "거래비용 가정"을 함께 봐야 합니다.</p>
+</div>
+
+<div class="ex"><p class="ex-title">예제 37-1 — 지표 선택 <span class="lv">난이도 ★★☆</span></p>
+<p>은행이 신용카드 이상거래 탐지 모델을 평가 중입니다. 전체 거래 1000만 건 중 사기 거래는 1000건(0.01%). 모델 A는 Accuracy 99.95%, Precision 70%, Recall 15%. 모델 B는 Accuracy 99.80%, Precision 25%, Recall 85%. 어느 모델을 선택해야 할까요?</p>
+<details><summary>정답과 해설 보기</summary>
+<p>Accuracy는 전부 "정상"으로 찍어도 99.99%가 나오는 극단적 불균형이라 무의미합니다. 사기 탐지의 핵심은 "실제 사기를 얼마나 잡느냐 = Recall"이지만, Precision이 너무 낮으면 정상 거래의 FP 폭증으로 운영 비용(수동 확인 콜센터)이 터집니다. 비즈니스 비용 분석이 필요합니다: 모델 B는 사기 850건을 잡지만 정상 2550건을 오탐(85%/25%*1000 = 3400 양성 예측 중 2550이 오탐). 모델 A는 사기 150건만 잡고 FP 64건으로 깔끔. 사기 손실 평균이 100만원, 수동 확인 비용이 1만원이면 B가 유리(850×100만 - 2550×1만 = 8.24억 vs A의 150×100만 - 64×1만 = 1.49억). 사기 손실이 작고 콜센터 부담이 크면 A가 유리할 수 있습니다. <b>따라서 지표만 보지 말고 비즈니스 비용 함수(cost matrix)를 먼저 정의</b>하는 것이 올바른 순서입니다. 추가로 PR-AUC를 비교하면 임계값 선택과 무관한 분리력을 볼 수 있습니다.</p>
+</details></div>
+
+<h2 id="s37-key">핵심 정리</h2>
+<ul class="summary-list">
+<li>회귀는 MSE/RMSE/MAE/R². 금융 수익률 예측에서 R²가 음수인 건 흔한 일.</li>
+<li>분류는 혼동행렬이 뿌리. 불균형 데이터에서는 Accuracy 금지, PR-AUC·F1 사용.</li>
+<li>임계값은 비즈니스 비용에 맞춰 조정. 기본 0.5는 참고일 뿐.</li>
+<li>편향-분산 트레이드오프: 과적합이면 분산 감소, 과소적합이면 편향 감소.</li>
+<li>튜닝은 Random Search 또는 Bayesian(Optuna)이 Grid보다 거의 항상 효율.</li>
+<li>해석은 SHAP + Permutation Importance + PDP의 3종 세트.</li>
+<li>퀀트 백테스트는 수익률만 보면 함정. 샤프·MDD·거래비용·누수까지 함께.</li>
+</ul>
+
+<h2 id="s37-cs">면접 질문</h2>
+<div class="box iv"><p class="box-title" data-tag="면접">자주 나오는 질문</p>
+<details><summary>Q1. ROC-AUC와 PR-AUC의 차이, 언제 어느 걸 쓰나요?</summary><p>ROC-AUC는 FPR-TPR 곡선 넓이로 "양·음성에서 랜덤 뽑기 시 양성이 더 높은 점수 받을 확률"입니다. 클래스가 어느 정도 균형일 때 안정적. PR-AUC는 Precision-Recall 곡선 넓이로 양성 희귀한 상황에서 더 민감합니다. 사기(1%), 암 진단(0.1%) 같은 극단 불균형에서는 ROC-AUC가 비현실적으로 좋아 보이므로 반드시 PR-AUC를 함께 봅니다.</p></details>
+<details><summary>Q2. 과적합을 어떻게 진단하고 어떻게 해결하나요?</summary><p>진단: (1) 학습 성능 &gt;&gt; 검증 성능, (2) 학습 샘플 늘려도 검증 성능 안 오름, (3) 모델 복잡도 올리면 검증 하락. 해결 순서: 더 많은 데이터 → 피처 수 줄이기(Lasso) → 모델 단순화(max_depth↓) → 정규화 강화(λ↑, dropout↑) → early stopping → 앙상블(bagging). 금융은 데이터 수집이 어려우니 정규화와 조기종료가 특히 중요합니다.</p></details>
+<details><summary>Q3. 하이퍼파라미터 튜닝에서 Grid Search 대신 Random Search를 쓰는 이유?</summary><p>Grid는 중요한 파라미터와 안 중요한 파라미터에 같은 "조밀도"를 할당해 낭비가 큽니다. Random은 같은 예산으로 중요한 파라미터 축에서 더 다양한 값을 샘플링해 결과가 거의 항상 더 좋습니다. Bergstra&amp;Bengio(2012)가 이걸 수학적·경험적으로 보였습니다. 더 나아가 Bayesian Optimization(Optuna)은 이전 결과를 활용해 유망한 영역을 집중 탐색, 같은 예산으로 더 좋은 해를 찾습니다.</p></details>
+<details><summary>Q4. SHAP과 트리 내장 feature_importances_의 차이?</summary><p>트리 내장 중요도는 "학습 중 분기 기여도 합"으로 (1) 다중공선성에 임의 배분, (2) 카디널리티 높은 변수 과대평가, (3) 학습셋 기준. SHAP은 게임이론 Shapley value를 쓰므로 공정 분배가 수학적으로 보장되고, 테스트셋이나 임의 데이터에 적용 가능하며, 샘플 하나하나에 대한 설명(local explanation)도 가능합니다. 단, 계산 비용이 크고 TreeSHAP(트리 전용 고속 알고리즘)이 아니면 모델 크기에 따라 수십 분 이상 걸릴 수 있습니다.</p></details>
+<details><summary>Q5. 백테스트 샤프 비율 2.5가 나왔습니다. 믿어도 될까요?</summary><p>거의 항상 과대 추정입니다. 체크리스트: (1) point-in-time 데이터인가? (34장), (2) 생존 편향 없나?, (3) 거래비용·슬리피지·시장충격 반영했나?, (4) 리밸런싱 빈도가 유동성 범위 안인가?, (5) 테스트 기간을 보고 튜닝한 적 없나?, (6) 전략 레버리지는?, (7) 하방 꼬리 손실(MDD)은 감내 가능한가? 이 모든 걸 통과한 샤프 2.5면 유니콘입니다. 보통은 1.0 미만으로 떨어지는 것이 현실입니다.</p></details>
+</div>
+
+</main>
+</div></div>
+<script src="assets/app.js"></script>
+</body>
+</html>

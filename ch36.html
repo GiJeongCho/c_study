@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ch36 비지도학습·시계열·딥러닝 입문 · C언어 금융 IT 마스터</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+KR:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-ch="ch36">
+<header class="topbar">
+  <button class="menu-btn" type="button" aria-expanded="false" aria-controls="sidebar">목차</button>
+  <a class="brand" href="index.html"><b>C</b>금융 IT 마스터</a>
+  <span class="where"></span>
+  <span class="progress"></span>
+</header>
+<div class="layout">
+<nav id="sidebar" class="sidebar" aria-label="과정 목차"></nav>
+<div class="page">
+<main class="content">
+
+<header class="ch-head">
+  <p class="eyebrow">PART 3 · 머신러닝 &amp; LLM 트랙 · CHAPTER</p>
+  <div class="bignum">36</div>
+  <h1>비지도학습·시계열·딥러닝 입문</h1>
+  <p class="lede">정답(라벨)이 없는 데이터에서 구조를 찾아내는 비지도학습, 시간 순서가 핵심인 금융 데이터의 시계열 분석, 그리고 비정형 데이터에 강한 딥러닝의 기초를 다룹니다. 종목 군집, 포트폴리오 리스크 요인 추출, 거래량 이상탐지, 수익률 예측 — 하나증권 퀀트실에서 가장 많이 쓰이는 세 가지 축을 한 챕터에 모았습니다.</p>
+  <div class="goals"><p class="goals-title">이 장에서 배울 것</p><ul>
+    <li>K-means와 계층적 군집의 원리와 "최적 K 찾기"</li>
+    <li>PCA(주성분 분석)의 수학적 의미와 포트폴리오 리스크 분해 응용</li>
+    <li>연관규칙(장바구니 분석)과 OMS 거래 패턴 분석</li>
+    <li>이상탐지(Isolation Forest, One-Class SVM) — 거래 이상 감지</li>
+    <li>시계열의 정상성(stationarity)과 ARIMA, GARCH</li>
+    <li>DNN·CNN·RNN·LSTM의 구조와 역전파</li>
+    <li>금융 시계열에 딥러닝을 쓸 때의 함정과 한계</li>
+  </ul></div>
+</header>
+
+<h2 id="s36-1"><span class="num">36-1</span>군집·차원축소·연관규칙</h2>
+
+<h3 id="s36-1-1">K-means 군집 — 가장 많이 쓰이는 비지도 학습</h3>
+
+<p>K-means는 데이터를 K개의 그룹(클러스터)으로 나누는 알고리즘입니다. 각 그룹은 "중심(centroid)"으로 표현되고, 모든 점은 가장 가까운 중심의 그룹에 소속됩니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 220" width="700" role="img" aria-label="K-means의 반복 과정">
+  <text x="100" y="20" text-anchor="middle" class="small bold">① 중심 초기화(랜덤)</text>
+  <text x="350" y="20" text-anchor="middle" class="small bold">② 각 점을 가까운 중심에 배정</text>
+  <text x="600" y="20" text-anchor="middle" class="small bold">③ 중심을 평균으로 갱신</text>
+  <g transform="translate(30,40)">
+    <circle cx="30" cy="40" r="4" class="box"/>
+    <circle cx="50" cy="30" r="4" class="box"/>
+    <circle cx="70" cy="50" r="4" class="box"/>
+    <circle cx="110" cy="110" r="4" class="box"/>
+    <circle cx="130" cy="130" r="4" class="box"/>
+    <circle cx="140" cy="100" r="4" class="box"/>
+    <circle cx="90" cy="80" r="7" class="hl2"/>
+    <circle cx="60" cy="150" r="7" class="hl"/>
+  </g>
+  <g transform="translate(280,40)">
+    <circle cx="30" cy="40" r="4" class="hl2"/>
+    <circle cx="50" cy="30" r="4" class="hl2"/>
+    <circle cx="70" cy="50" r="4" class="hl2"/>
+    <circle cx="110" cy="110" r="4" class="hl"/>
+    <circle cx="130" cy="130" r="4" class="hl"/>
+    <circle cx="140" cy="100" r="4" class="hl"/>
+    <circle cx="90" cy="80" r="7" class="hl2" stroke="black" stroke-width="2"/>
+    <circle cx="60" cy="150" r="7" class="hl" stroke="black" stroke-width="2"/>
+  </g>
+  <g transform="translate(530,40)">
+    <circle cx="30" cy="40" r="4" class="hl2"/>
+    <circle cx="50" cy="30" r="4" class="hl2"/>
+    <circle cx="70" cy="50" r="4" class="hl2"/>
+    <circle cx="110" cy="110" r="4" class="hl"/>
+    <circle cx="130" cy="130" r="4" class="hl"/>
+    <circle cx="140" cy="100" r="4" class="hl"/>
+    <circle cx="50" cy="40" r="7" class="hl2" stroke="black" stroke-width="2"/>
+    <circle cx="127" cy="113" r="7" class="hl" stroke="black" stroke-width="2"/>
+  </g>
+  <text x="350" y="210" text-anchor="middle" class="small">② ↔ ③ 반복 → 중심이 더 안 움직이면 수렴</text>
+</svg>
+<figcaption>그림 36-1 K-means. 중심-배정-갱신을 반복해 inertia(점-중심 거리² 합) 최소화.</figcaption>
+</figure>
+
+<p><b>K 선택 — 엘보 방법</b>: K를 늘려가며 inertia를 그려 보면 처음엔 급격히 줄다가 어느 지점부터 완만해집니다. 그 꺾이는 지점(elbow)이 적절한 K입니다. 더 수학적으로는 <b>실루엣 점수(silhouette score)</b>를 쓰기도 합니다.</p>
+
+<figure class="code"><figcaption>K-means + 엘보 — scikit-learn</figcaption>
+<pre><code class="language-python">from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
+import matplotlib.pyplot as plt
+
+X_s = StandardScaler().fit_transform(X)   # 거리 기반이라 반드시 스케일링
+inertias = []
+for k in range(1, 11):
+    km = KMeans(n_clusters=k, n_init=10, random_state=42).fit(X_s)
+    inertias.append(km.inertia_)
+
+plt.plot(range(1, 11), inertias, "o-")
+plt.xlabel("K"); plt.ylabel("Inertia")
+plt.title("Elbow method")
+</code></pre></figure>
+
+<div class="box fin"><p class="box-title" data-tag="퀀트 실무">종목 군집으로 "스타일" 발견</p>
+<p>코스피 상위 300종목을 재무비율(PER, PBR, ROE, 매출성장률, 부채비율)로 K-means에 넣으면 "성장주 vs 가치주 vs 배당주" 같은 자연스러운 군집이 나옵니다. 섹터로 분류하는 전통적인 방법과 비교해 "같은 섹터 안에서도 성격이 다른 종목"을 찾을 수 있어, 페어 트레이딩이나 리스크 분산에 활용됩니다. 다만 K-means는 평균 중심 가정이라 금융 데이터에 흔한 두터운 꼬리에서 중심이 끌려가므로, RobustScaler나 Gaussian Mixture Model(GMM) 사용을 고려해야 합니다.</p>
+</div>
+
+<h3 id="s36-1-2">계층적 군집 (Hierarchical Clustering)</h3>
+
+<p>K-means는 K를 미리 정해야 하지만, 계층적 군집은 "모든 점이 각자 하나의 군집"에서 시작해 가장 가까운 두 군집을 병합해 나갑니다(agglomerative). 결과를 <b>덴드로그램(dendrogram)</b>으로 시각화해서 원하는 수준에서 자르면 됩니다.</p>
+
+<p>군집 간 거리 측정 방법:</p>
+<ul>
+<li><b>Ward</b>: 병합 시 분산 증가가 최소. 가장 많이 씀.</li>
+<li><b>Complete</b>: 두 군집 간 최대 거리.</li>
+<li><b>Average</b>: 두 군집 간 평균 거리.</li>
+<li><b>Single</b>: 최소 거리. 체인 효과(길쭉한 군집)에 취약.</li>
+</ul>
+
+<h3 id="s36-1-3">PCA — 차원축소와 포트폴리오 리스크 분해</h3>
+
+<p>PCA(Principal Component Analysis, 주성분 분석)는 피처 간 상관을 이용해 "데이터의 분산을 가장 많이 설명하는 방향"을 찾아 그 방향에 데이터를 투영합니다. 피처 수를 줄이면서 정보 손실을 최소화하는 가장 널리 쓰이는 방법입니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 240" width="700" role="img" aria-label="PCA: 데이터의 주성분 방향 찾기">
+  <line class="line" x1="60" y1="200" x2="640" y2="200"/>
+  <line class="line" x1="60" y1="30" x2="60" y2="200"/>
+  <text x="60" y="24" text-anchor="middle" class="small">x₂</text>
+  <text x="650" y="200" class="small">x₁</text>
+  <g>
+    <circle cx="150" cy="170" r="4" class="box"/>
+    <circle cx="190" cy="160" r="4" class="box"/>
+    <circle cx="230" cy="140" r="4" class="box"/>
+    <circle cx="280" cy="130" r="4" class="box"/>
+    <circle cx="320" cy="115" r="4" class="box"/>
+    <circle cx="380" cy="100" r="4" class="box"/>
+    <circle cx="420" cy="85" r="4" class="box"/>
+    <circle cx="460" cy="80" r="4" class="box"/>
+    <circle cx="500" cy="60" r="4" class="box"/>
+    <circle cx="540" cy="55" r="4" class="box"/>
+    <circle cx="210" cy="180" r="4" class="box"/>
+    <circle cx="350" cy="140" r="4" class="box"/>
+    <circle cx="480" cy="100" r="4" class="box"/>
+  </g>
+  <line class="accent-line" x1="100" y1="200" x2="600" y2="40" stroke-width="2.5"/>
+  <text x="400" y="55" class="small acc bold">PC1 (분산 85% 설명)</text>
+  <line class="accent-line" x1="300" y1="60" x2="400" y2="170" stroke-width="2" stroke-dasharray="4 3"/>
+  <text x="420" y="190" class="small acc">PC2 (분산 15%)</text>
+  <text x="350" y="225" text-anchor="middle" class="small">두 변수가 상관 높으면 PC1 하나로 거의 다 설명 가능 → 차원 2→1 축소</text>
+</svg>
+<figcaption>그림 36-2 PCA의 첫 주성분은 데이터 분산이 최대인 방향(공분산행렬의 최대 고유벡터).</figcaption>
+</figure>
+
+<p><b>수학적 핵심</b>: 공분산 행렬의 고유벡터가 주성분이고, 고유값이 그 방향의 분산입니다.</p>
+
+<figure class="code"><figcaption>PCA — scikit-learn</figcaption>
+<pre><code class="language-python">from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
+import numpy as np
+
+X_s = StandardScaler().fit_transform(X)
+pca = PCA(n_components=0.95)       # 분산 95% 설명하는 만큼 자동 선택
+X_pca = pca.fit_transform(X_s)
+
+print(f"원래 {X.shape[1]}차원 → {X_pca.shape[1]}차원")
+print("각 주성분 설명력:", np.round(pca.explained_variance_ratio_, 3))
+</code></pre></figure>
+
+<div class="box fin"><p class="box-title" data-tag="퀀트 실무">PCA로 "숨겨진 팩터" 찾기 — APT와 리스크 모델</p>
+<p>Arbitrage Pricing Theory(APT)는 수익률이 몇 개의 "공통 팩터"에 노출되어 결정된다고 봅니다. 수백 종목의 일간 수익률 행렬에 PCA를 돌리면 보통 PC1은 "시장(KOSPI와 거의 같은 움직임)"으로 전체 분산의 40-50%를 설명하고, PC2는 "스타일(대형주 vs 소형주)", PC3는 "섹터(IT vs 금융)" 같은 패턴이 나옵니다. 이 숨겨진 팩터로 포트폴리오의 "진짜 리스크 노출"을 분해할 수 있고, Risk Parity 같은 전략의 기반이 됩니다. BARRA, MSCI 등의 리스크 모델이 유사한 발상입니다.</p>
+</div>
+
+<h3 id="s36-1-4">연관규칙과 이상탐지</h3>
+
+<p><b>연관규칙(Association Rule)</b>은 "A를 사면 B도 산다" 같은 패턴을 찾습니다. 대표 알고리즘 Apriori. 측정 지표:</p>
+<ul>
+<li><b>지지도(Support)</b>: P(A∩B). 전체 거래 중 A와 B가 같이 등장한 비율.</li>
+<li><b>신뢰도(Confidence)</b>: P(B|A). A를 산 사람 중 B도 산 비율.</li>
+<li><b>향상도(Lift)</b>: P(B|A) / P(B). 1보다 크면 양의 연관, 작으면 음의 연관.</li>
+</ul>
+
+<p>OMS 운영에서는 "특정 종목을 매수한 고객이 다른 어떤 종목을 많이 매수하는가"로 교차마케팅·호가 알림에 활용합니다.</p>
+
+<p><b>이상탐지(Anomaly Detection)</b>는 비지도학습으로 "다른 것들과 많이 다른" 샘플을 찾습니다.</p>
+<ul>
+<li><b>Isolation Forest</b>: 랜덤하게 데이터를 분할하다가, 소수의 분할로 분리되는 샘플을 이상으로 판정. OMS 이상거래 탐지에 유용.</li>
+<li><b>One-Class SVM</b>: 정상 데이터의 경계를 학습해 그 바깥을 이상으로 판정.</li>
+<li><b>LOF (Local Outlier Factor)</b>: 주변 밀도 대비 이상 정도 측정.</li>
+</ul>
+
+<figure class="code"><figcaption>Isolation Forest — 거래 이상 탐지</figcaption>
+<pre><code class="language-python">from sklearn.ensemble import IsolationForest
+
+iso = IsolationForest(contamination=0.01, random_state=42)   # 이상 1% 가정
+iso.fit(X_normal)                                             # 정상 거래로 학습
+
+y_pred = iso.predict(X_new)      # -1: 이상, 1: 정상
+anomaly_score = iso.score_samples(X_new)  # 낮을수록 이상
+</code></pre></figure>
+
+<h2 id="s36-2"><span class="num">36-2</span>시계열 ARIMA·GARCH와 DNN/CNN/RNN</h2>
+
+<h3 id="s36-2-1">시계열의 특수성과 정상성</h3>
+
+<p>시계열은 시간 순서가 있는 데이터입니다. 가장 중요한 개념은 <b>정상성(stationarity)</b>: 통계적 성질(평균, 분산)이 시간에 따라 변하지 않는 성질.</p>
+
+<ul>
+<li><b>약정상성(약한 정상성)</b>: 평균과 분산이 상수, 공분산이 시차에만 의존.</li>
+<li>대부분의 전통 시계열 모델(ARIMA)은 정상성을 가정합니다.</li>
+<li><b>가격은 정상이 아니다</b>(계속 추세로 변함) → <b>수익률(log return)은 대체로 정상</b>.</li>
+</ul>
+
+<p>정상성 검정은 ADF(Augmented Dickey-Fuller) 검정, KPSS 검정을 많이 씁니다.</p>
+
+<figure class="code"><figcaption>ADF 검정으로 정상성 확인</figcaption>
+<pre><code class="language-python">from statsmodels.tsa.stattools import adfuller
+import numpy as np
+
+# 가격 → 로그 수익률
+log_ret = np.log(price).diff().dropna()
+
+stat, pvalue, *_ = adfuller(log_ret)
+print(f"ADF stat={stat:.3f}, p={pvalue:.4f}")
+# p &lt; 0.05 이면 정상(단위근 없음) 가정 가능
+</code></pre></figure>
+
+<h3 id="s36-2-2">ARIMA(p, d, q)</h3>
+
+<p>ARIMA는 세 요소의 조합입니다.</p>
+<ul>
+<li><b>AR(p)</b>: 자기회귀. 현재값 = 과거 p개 값의 선형 결합 + 잡음.</li>
+<li><b>I(d)</b>: 차분(differencing). 비정상 시계열을 d번 차분해서 정상으로.</li>
+<li><b>MA(q)</b>: 이동평균. 현재값 = 과거 q개 잔차의 선형 결합.</li>
+</ul>
+
+<p>ACF(자기상관함수)와 PACF(편자기상관함수)를 보고 p, q를 추정합니다. ARIMA(1,1,1) 정도가 금융에서 흔히 쓰이는 기본입니다.</p>
+
+<h3 id="s36-2-3">GARCH — 변동성 모델링</h3>
+
+<p>금융 수익률의 특징 두 가지:</p>
+<ol>
+<li><b>변동성 군집(volatility clustering)</b>: 큰 변동 뒤에 큰 변동, 작은 변동 뒤에 작은 변동.</li>
+<li><b>두터운 꼬리(fat tail)</b>: 정규분포보다 극단값이 훨씬 자주 나타남.</li>
+</ol>
+
+<p>GARCH(Generalized AutoRegressive Conditional Heteroskedasticity)는 분산을 시간에 따라 변하는 양으로 모델링합니다. VaR·옵션 가격·리스크 관리에 필수.</p>
+
+<p style="text-align:center; font-family: var(--f-mono); font-size: .95em;">σ²ₜ = ω + α·ε²ₜ₋₁ + β·σ²ₜ₋₁</p>
+
+<p>직관: 어제 큰 충격(ε²)이 있었거나 어제 변동성(σ²)이 컸으면 오늘도 변동성이 크다.</p>
+
+<figure class="code"><figcaption>GARCH(1,1) — arch 라이브러리</figcaption>
+<pre><code class="language-python">from arch import arch_model
+
+model = arch_model(log_ret * 100, vol="GARCH", p=1, q=1)
+res = model.fit(disp="off")
+print(res.summary())
+
+# 하루 뒤 변동성 예측
+forecast = res.forecast(horizon=1)
+sigma_tomorrow = forecast.variance.iloc[-1, 0] ** 0.5
+</code></pre></figure>
+
+<div class="box fin"><p class="box-title" data-tag="퀀트 실무">GARCH는 리스크 관리의 50년 표준</p>
+<p>포트폴리오 VaR(Value at Risk) 계산, 옵션 가격의 내재변동성 보정, 리스크 패리티 전략의 비중 조정 등에서 GARCH 계열이 광범위하게 쓰입니다. 변동성 자체가 상품인 VIX·KOSPI200 변동성지수의 통계적 모델 뒷단도 결국 GARCH 패밀리입니다. OMS에서도 "일중 변동성이 급격히 올라간 종목"에 대한 리스크 알림을 띄울 때 EWMA나 GARCH 기반 지표를 흔히 봅니다.</p>
+</div>
+
+<h3 id="s36-2-4">DNN — 신경망의 기본 구조</h3>
+
+<p>심층 신경망(DNN, Deep Neural Network)은 선형 변환과 비선형 활성화 함수를 여러 층 쌓은 함수입니다.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 230" width="700" role="img" aria-label="DNN 구조: 입력-은닉-출력">
+  <text x="100" y="20" text-anchor="middle" class="small bold">입력층</text>
+  <text x="300" y="20" text-anchor="middle" class="small bold">은닉층 1</text>
+  <text x="500" y="20" text-anchor="middle" class="small bold">은닉층 2</text>
+  <text x="640" y="20" text-anchor="middle" class="small bold">출력층</text>
+  <g>
+    <circle cx="100" cy="60" r="14" class="hl"/>
+    <circle cx="100" cy="110" r="14" class="hl"/>
+    <circle cx="100" cy="160" r="14" class="hl"/>
+    <circle cx="100" cy="200" r="14" class="hl"/>
+    <circle cx="300" cy="50" r="14" class="hl2"/>
+    <circle cx="300" cy="100" r="14" class="hl2"/>
+    <circle cx="300" cy="150" r="14" class="hl2"/>
+    <circle cx="300" cy="200" r="14" class="hl2"/>
+    <circle cx="500" cy="80" r="14" class="hl2"/>
+    <circle cx="500" cy="130" r="14" class="hl2"/>
+    <circle cx="500" cy="180" r="14" class="hl2"/>
+    <circle cx="640" cy="130" r="14" class="box"/>
+  </g>
+  <g stroke="#aaa" stroke-width=".5" opacity=".5">
+    <line x1="114" y1="60" x2="286" y2="50"/><line x1="114" y1="60" x2="286" y2="100"/>
+    <line x1="114" y1="110" x2="286" y2="50"/><line x1="114" y1="110" x2="286" y2="150"/>
+    <line x1="114" y1="160" x2="286" y2="100"/><line x1="114" y1="160" x2="286" y2="200"/>
+    <line x1="114" y1="200" x2="286" y2="150"/><line x1="114" y1="200" x2="286" y2="200"/>
+    <line x1="314" y1="50" x2="486" y2="80"/><line x1="314" y1="100" x2="486" y2="130"/>
+    <line x1="314" y1="150" x2="486" y2="130"/><line x1="314" y1="200" x2="486" y2="180"/>
+    <line x1="514" y1="80" x2="626" y2="130"/><line x1="514" y1="130" x2="626" y2="130"/>
+    <line x1="514" y1="180" x2="626" y2="130"/>
+  </g>
+</svg>
+<figcaption>그림 36-3 다층 신경망의 뉴런과 가중치 연결. 각 간선은 가중치 wᵢⱼ, 각 노드는 활성화함수 적용.</figcaption>
+</figure>
+
+<p>각 노드는 <code>z = Σwᵢxᵢ + b</code>를 계산하고 활성화 함수 σ를 적용: <code>a = σ(z)</code>. 활성화 함수 종류:</p>
+
+<ul>
+<li><b>ReLU</b>: max(0, x). 가장 많이 씀. 계산 빠름, 기울기 소실 완화.</li>
+<li><b>Sigmoid</b>: 1/(1+e⁻ˣ). 출력층 이진 분류에 사용.</li>
+<li><b>Softmax</b>: 다중 분류 출력층. 모든 출력의 합이 1.</li>
+<li><b>Tanh</b>: 중심 0, [-1, 1] 범위.</li>
+</ul>
+
+<p><b>역전파(Backpropagation)</b>: 손실함수의 기울기를 출력에서 입력 방향으로 연쇄법칙으로 계산해 모든 가중치를 업데이트. 모든 딥러닝의 뼈대입니다.</p>
+
+<h3 id="s36-2-5">CNN과 RNN/LSTM</h3>
+
+<p><b>CNN (Convolutional Neural Network)</b>: 이미지 같은 공간 데이터에 특화. 작은 필터(커널)를 데이터에 슬라이딩시켜 특징을 추출. "같은 패턴은 위치에 상관없이 인식"하는 translation invariance가 핵심.</p>
+
+<p><b>RNN (Recurrent Neural Network)</b>: 시간 순서가 있는 데이터에 특화. 이전 시점의 은닉 상태를 다음 시점으로 전달해 "기억"을 유지. 단, 긴 시퀀스에서 <b>기울기 소실</b>로 먼 과거를 못 외우는 문제.</p>
+
+<p><b>LSTM (Long Short-Term Memory)</b>: 입력·망각·출력 게이트로 "어떤 정보를 유지하고 어떤 걸 지울지"를 학습. RNN의 장거리 의존성 문제를 해결. 자연어와 금융 시계열에 2010년대 중반까지 지배적이었음.</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 220" width="700" role="img" aria-label="LSTM 셀의 게이트 구조">
+  <rect class="box" x="150" y="40" width="420" height="140" rx="8"/>
+  <text x="360" y="30" text-anchor="middle" class="small bold">LSTM 셀</text>
+  <circle cx="220" cy="80" r="22" class="hl"/>
+  <text x="220" y="85" text-anchor="middle" class="small bold">σ</text>
+  <text x="220" y="130" text-anchor="middle" class="small">망각<br/>게이트</text>
+  <text x="220" y="130" text-anchor="middle" class="small">망각 게이트</text>
+  <circle cx="340" cy="80" r="22" class="hl2"/>
+  <text x="340" y="85" text-anchor="middle" class="small bold">σ</text>
+  <text x="340" y="150" text-anchor="middle" class="small">입력 게이트</text>
+  <circle cx="460" cy="80" r="22" class="hl2"/>
+  <text x="460" y="85" text-anchor="middle" class="small bold">σ</text>
+  <text x="460" y="150" text-anchor="middle" class="small">출력 게이트</text>
+  <path class="arrow" d="M50 100 H 150"/>
+  <path class="arrow" d="M570 100 H 650"/>
+  <text x="40" y="94" text-anchor="end" class="small">xₜ</text>
+  <text x="660" y="94" class="small">hₜ</text>
+  <path class="arrow-m" d="M360 170 H 360 V 200"/>
+  <text x="365" y="214" class="small">cₜ, hₜ → 다음 시점</text>
+  <text x="40" y="80" text-anchor="end" class="small">hₜ₋₁</text>
+  <path class="arrow" d="M50 80 H 150"/>
+</svg>
+<figcaption>그림 36-4 LSTM 셀의 세 게이트. 긴 시계열에서 중요한 정보를 "기억"하도록 학습.</figcaption>
+</figure>
+
+<figure class="code"><figcaption>LSTM으로 수익률 예측 — PyTorch 스케치</figcaption>
+<pre><code class="language-python">import torch
+import torch.nn as nn
+
+class ReturnLSTM(nn.Module):
+    def __init__(self, input_dim=10, hidden=64, num_layers=2):
+        super().__init__()
+        self.lstm = nn.LSTM(input_dim, hidden, num_layers,
+                            batch_first=True, dropout=0.2)
+        self.fc = nn.Linear(hidden, 1)
+
+    def forward(self, x):           # x: (batch, seq_len, input_dim)
+        out, _ = self.lstm(x)
+        return self.fc(out[:, -1])  # 마지막 시점의 은닉상태로 다음 수익률 예측
+
+model = ReturnLSTM()
+# 학습 루프는 생략 — Adam 옵티마이저와 MSELoss 사용
+</code></pre></figure>
+
+<h3 id="s36-2-6">딥러닝을 금융에 쓸 때의 함정</h3>
+
+<div class="box warn"><p class="box-title" data-tag="주의">딥러닝 ≠ 만능 — 금융 데이터의 세 가지 벽</p>
+<ul>
+<li><b>신호 대비 노이즈가 극단적으로 낮다</b>: 수익률의 예측 가능한 부분은 매우 작고(R² &lt; 0.05), 대부분이 랜덤. 수백만 파라미터 모델은 노이즈를 외워 버린다.</li>
+<li><b>샘플이 적다</b>: 일봉 20년 = 5천 영업일. ImageNet의 100만 장과 비교하면 티끌. 분봉으로 늘려도 자기상관 때문에 "독립 샘플" 수는 훨씬 적다.</li>
+<li><b>분포가 바뀐다(non-stationarity)</b>: 2010년의 패턴이 2024년에 유효하지 않다. 딥러닝은 분포 가정이 암묵적이라 레짐 변화에 취약.</li>
+</ul>
+<p>실무 결론: 금융 시계열에 딥러닝을 쓰더라도 트리 앙상블(XGBoost/LightGBM)과 반드시 비교하라. 2010년대 중후반 많은 "LSTM으로 주가예측" 논문들이 거의 재현되지 않은 이유다.</p>
+</div>
+
+<div class="ex"><p class="ex-title">예제 36-1 — PCA로 "시장 요인" 추출 <span class="lv">난이도 ★★☆</span></p>
+<p>KOSPI 200개 종목의 지난 1년 일간 수익률 (일수 250 × 종목 200) 행렬에 PCA를 돌렸더니 첫 번째 주성분이 전체 분산의 46%를 설명했습니다. 이 PC1을 어떻게 해석할 수 있을까요?</p>
+<details><summary>정답과 해설 보기</summary>
+<p>PC1은 거의 확실히 <b>시장 요인(KOSPI 지수의 움직임)</b>입니다. 거의 모든 종목이 시장과 양의 상관(β &gt; 0)을 갖기 때문에, 수익률 행렬의 가장 큰 분산 방향은 "모두 함께 오르내리는 방향"입니다. 실제로 PC1을 KOSPI 수익률과 그려 보면 거의 평행합니다. PC2는 보통 "대형주 vs 소형주" 또는 "성장 vs 가치"로 해석되고, PC3는 섹터 요인입니다. 이 분해는 포트폴리오가 시장 외의 어떤 리스크에 노출되어 있는지를 보는 데 유용합니다 — 베타중립 포트폴리오를 설계하려면 PC1 노출을 0에 가깝게 만들면 됩니다.</p>
+</details></div>
+
+<h2 id="s36-key">핵심 정리</h2>
+<ul class="summary-list">
+<li>K-means는 거리 기반이라 반드시 스케일링. K 선택은 엘보나 실루엣.</li>
+<li>PCA는 공분산 행렬의 고유분해. 금융에서는 "숨겨진 리스크 요인" 추출.</li>
+<li>이상탐지에는 Isolation Forest가 OMS 이상거래 1차 선별에 유용.</li>
+<li>시계열은 정상성 가정 중요. 가격은 비정상, 로그 수익률은 대체로 정상.</li>
+<li>ARIMA는 평균, GARCH는 변동성. 리스크 관리의 50년 기본.</li>
+<li>DNN·CNN·RNN·LSTM은 비정형 데이터에 강하지만 금융 수치 데이터에서는 종종 XGBoost에 진다.</li>
+<li>딥러닝을 금융에 쓸 때 신호/노이즈·샘플 수·레짐 변화 세 벽을 늘 기억.</li>
+</ul>
+
+<h2 id="s36-cs">면접 질문</h2>
+<div class="box iv"><p class="box-title" data-tag="면접">자주 나오는 질문</p>
+<details><summary>Q1. K-means의 K를 어떻게 선택하나요?</summary><p>엘보 방법(inertia-K 그래프의 꺾이는 지점), 실루엣 점수 최대, Gap statistic, 또는 비즈니스 요구(세분화 수) 중 하나를 씁니다. 가장 흔한 조합은 엘보 + 실루엣입니다. 또한 K-means++로 초기화해 여러 번(<code>n_init=10</code> 이상) 돌리고 inertia가 가장 낮은 결과를 쓰는 것이 랜덤 초기화 민감성을 줄여 줍니다.</p></details>
+<details><summary>Q2. PCA는 왜 분산 큰 방향을 선호하나요?</summary><p>분산이 크다 = 데이터가 그 방향으로 많이 퍼져 있다 = 그 방향 좌표가 데이터를 구분하는 정보가 많다, 로 해석합니다. 수학적으로 투영 후 분산 최대화 문제의 해가 공분산 행렬의 최대 고유벡터입니다. 단, "분산 큰 방향 = 중요한 방향"은 피처 스케일이 비슷해야 성립하므로 반드시 스케일링 후 수행합니다.</p></details>
+<details><summary>Q3. ARIMA가 왜 금융 시계열에서 생각보다 안 통하나요?</summary><p>ARIMA는 (1) 선형 가정, (2) 분산이 시간 불변 가정, (3) 잔차가 iid 정규 가정에 기반합니다. 금융 수익률은 (1) 비선형성 있음(레버리지 효과), (2) 변동성 군집 — GARCH가 필요한 이유, (3) 두터운 꼬리로 정규 아님. 그래서 평균 예측에는 미약하고 "지난 수익률 + 상수"가 벤치마크 노이즈를 거의 못 이깁니다. 반면 변동성 모델링(GARCH 계열)은 꽤 유용합니다.</p></details>
+<details><summary>Q4. RNN의 기울기 소실 문제가 뭐고 LSTM이 어떻게 해결하나요?</summary><p>RNN은 역전파가 시간을 거꾸로 거슬러 가면서 가중치 곱이 누적됩니다. 가중치가 1 미만이면 반복 곱해져 기울기가 0에 가까워져(소실), 1 초과면 발산합니다. LSTM은 셀 상태(cell state)에 "더하기" 경로를 두고(gate가 1에 가까우면 그냥 통과) 역전파에서도 기울기가 거의 유지되게 만듭니다. 그래서 수백 스텝 전의 정보도 학습할 수 있습니다. Transformer는 이 문제를 "순차 구조 없애기 + Self-Attention"으로 더 근본적으로 해결(38장).</p></details>
+<details><summary>Q5. 금융 시계열에 딥러닝이 잘 안 통하는 이유?</summary><p>세 가지입니다. (1) 신호 대비 노이즈가 매우 작아 과적합이 쉽다. (2) 샘플 수가 작다(일봉 20년 ≈ 5천 영업일). 자기상관 때문에 유효 샘플은 더 적음. (3) 비정상성 — 데이터 생성 분포가 시간에 따라 바뀐다. 2010년 패턴이 2024년에 안 통함. 그래서 XGBoost 같은 트리 앙상블이 자주 더 좋고, 딥러닝을 쓸 때도 lag·이동평균 같은 수제 피처가 raw 가격보다 효과적입니다.</p></details>
+</div>
+
+</main>
+</div></div>
+<script src="assets/app.js"></script>
+</body>
+</html>
